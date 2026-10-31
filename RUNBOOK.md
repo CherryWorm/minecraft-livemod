@@ -56,6 +56,16 @@ There's one password for the website and the game, kept in `runtime/secrets/pass
 
 Mojang's login check still runs first, so people need a real Minecraft account as well.
 
+## The opening
+
+Until the first release reaches players, the world is small and safe: a border `OPENING_BORDER` blocks wide around spawn, marked by a tall glowing wall, with Peaceful difficulty, so there are no hostile mobs and no hunger, and players can't break blocks. The first release ends it once and for all: the wall and border go, players can break things, the difficulty in `server.properties` comes back, and it becomes morning. The game runs this itself, so it holds from the first boot, even with no agent running. To end it by hand, run `./scripts/mc.sh conduit open`.
+
+The wall exists only on players' screens, so no blocks are placed in the world.
+
+## Talking to the agent
+
+Players talk to the agent privately with `/dm <message>`. Everything else in chat is public. The first thing a new player hears is the agent's first question and how to answer it. Their interview is saved after every message, so it carries on if they leave or the agent restarts, and coming back repeats where things had got to, along with how to answer. After the interview, `/dm` stays a private line for suggestions and feedback.
+
 **What the agent can reach:** the game servers have no route to the internet at all, even though agent-written code runs in them. Clients reach their resource packs through the site's container. builders and their shell commands only reach Anthropic, through the `egress` proxy. Research goes through a separate `web` proxy, which can reach any public HTTPS site and refuses this machine and private networks. Only the research role holds its password, and that role has no shell, no files and nothing private in its prompt. The others get its answer as text. A misleading page can still mislead a builder through that text, so every release still goes through all the gates and the review.
 
 ## Before friends install anything
@@ -86,6 +96,7 @@ Once anyone runs a client module, everyone needs the companion. Turn that on wit
 | See what it's looked up | `ls runtime/agent-workspace/research`, and `docker logs livingmod-web-1 \| grep CONNECT` for every site |
 | Turn its research off, or back on | `touch runtime/control/no_research`, or `rm` the same file |
 | Make it decide now, without waiting for everyone | `touch runtime/control/decide_now` |
+| End the opening by hand | `./scripts/mc.sh conduit open` |
 | Stop the agent, from the host | `touch runtime/control/agent_disabled` |
 | Stop the agent, in game (owner only) | `/agentstop`, then `/agentstart` |
 | Stop and restart the agent's process | `./scripts/agent-down.sh`, `./scripts/agent-up.sh` |

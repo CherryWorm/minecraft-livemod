@@ -58,6 +58,8 @@ services:
       LEVEL_SEED: ${LEVEL_SEED:-}
       PACK_PUBLIC_URL: ${PACK_PUBLIC_URL}
       OWNER_UUID: ${OWNER_UUID:-}
+      # How wide the world is until the first release reaches players. 0 means no opening at all. See gm.conduit.Opening.
+      OPENING_BORDER: ${OPENING_BORDER:-0}
     secrets:
       - forwarding
       - rcon

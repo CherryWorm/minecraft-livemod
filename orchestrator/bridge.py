@@ -64,17 +64,12 @@ class Bridge:
             raise RuntimeError(reply.get("error", "operation failed"))
         return reply.get("result")
 
-    async def whisper(self, player, text):
-        return await self.call("whisper", player=player, text=text)
+    async def whisper(self, player, text, reply_click=False):
+        """With reply_click, clicking the line starts a /dm in the player's chat box."""
+        return await self.call("whisper", player=player, text=text, **({"reply_click": True} if reply_click else {}))
 
     async def broadcast(self, text):
         return await self.call("broadcast", text=text)
 
-    async def capture(self, player, on):
-        return await self.call("capture", player=player, on=on)
-
     async def players(self):
         return await self.call("players")
-
-    async def border(self, size):
-        return await self.call("border", size=size)

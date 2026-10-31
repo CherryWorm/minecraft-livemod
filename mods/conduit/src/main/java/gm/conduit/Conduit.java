@@ -30,6 +30,7 @@ public final class Conduit implements ModInitializer {
 		PolymerResourcePackUtils.markAsRequired();
 		Provenance.init();
 		PasswordGate.register();
+		Opening.register();
 		NeutralSlots.register();
 		ItemDefaults.register();
 		SlotMobs.register();

@@ -5,11 +5,15 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import gm.conduit.KillSwitch;
+import gm.conduit.Opening;
 import gm.conduit.knowledge.Knowledge;
 import gm.conduit.mobs.Minds;
+import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.level.border.WorldBorder;
 
 import java.util.Set;
 
@@ -26,6 +30,7 @@ final class Operations {
 	private static JsonElement status() {
 		JsonObject status = new JsonObject();
 		status.addProperty("agent_disabled", KillSwitch.on());
+		status.addProperty("opening", Opening.size());
 		return status;
 	}
 
@@ -35,11 +40,10 @@ final class Operations {
 		}
 		return switch (op) {
 			case "status" -> status();
-			case "whisper" -> whisper(server, text(request, "player"), text(request, "text"));
+			case "whisper" -> whisper(server, text(request, "player"), text(request, "text"), request.has("reply_click"));
 			case "broadcast" -> broadcast(server, text(request, "text"));
-			case "capture" -> capture(text(request, "player"), request.get("on").getAsBoolean());
 			case "players" -> players(server);
-			case "border" -> border(server, request.get("size").getAsDouble());
+			case "open_world" -> new JsonPrimitive(Opening.open(server));
 			case "progress" -> Knowledge.instance().progress();
 			case "mob_act" -> Minds.act(request);
 			default -> throw new IllegalArgumentException("Unknown operation " + op);
@@ -50,23 +54,24 @@ final class Operations {
 		return request.get(field).getAsString();
 	}
 
-	private static JsonElement whisper(MinecraftServer server, String name, String text) {
+	private static JsonElement whisper(MinecraftServer server, String name, String text, boolean replyClick) {
 		ServerPlayer player = server.getPlayerList().getPlayerByName(name);
 		if (player == null) {
 			throw new IllegalArgumentException(name + " isn't online");
 		}
-		player.sendSystemMessage(Bridge.literal(text));
+		MutableComponent message = Bridge.literal(text);
+		if (replyClick) {
+			// Always exactly this, so nothing a model writes can put another command in a player's chat box.
+			message.withStyle(style -> style.withClickEvent(new ClickEvent.SuggestCommand("/dm "))
+					.withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to start your reply"))));
+		}
+		player.sendSystemMessage(message);
 		return new JsonPrimitive(true);
 	}
 
 	private static JsonElement broadcast(MinecraftServer server, String text) {
 		server.getPlayerList().broadcastSystemMessage(Bridge.literal(text), false);
 		return new JsonPrimitive(true);
-	}
-
-	private static JsonElement capture(String name, boolean on) {
-		Bridge.setCaptured(name, on);
-		return new JsonPrimitive(on);
 	}
 
 	private static JsonElement players(MinecraftServer server) {
@@ -83,14 +88,5 @@ final class Operations {
 			list.add(entry);
 		}
 		return list;
-	}
-
-	private static JsonElement border(MinecraftServer server, double size) {
-		WorldBorder border = server.overworld().getWorldBorder();
-		// Around spawn, not the world's origin: players left outside a border take damage until they die.
-		var spawn = server.overworld().getRespawnData().pos();
-		border.setCenter(spawn.getX(), spawn.getZ());
-		border.setSize(size);
-		return new JsonPrimitive(size);
 	}
 }

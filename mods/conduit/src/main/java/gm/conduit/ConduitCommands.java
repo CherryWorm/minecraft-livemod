@@ -31,6 +31,11 @@ final class ConduitCommands {
 					context.getSource().sendSuccess(() -> Component.literal("Players not safe: " + unsafe), false);
 					return (int) unsafe;
 				}))
+				.then(Commands.literal("open").executes(context -> {
+					boolean opened = Opening.open(context.getSource().getServer());
+					context.getSource().sendSuccess(() -> Component.literal(opened ? "The world is open." : "The world wasn't in its opening."), false);
+					return opened ? 1 : 0;
+				}))
 				.then(Commands.literal("pose").then(Commands.argument("mobs", EntityArgument.entities())
 						.then(Commands.argument("animation", StringArgumentType.word())
 						.then(Commands.argument("fraction", FloatArgumentType.floatArg(0, 1)).executes(context -> {

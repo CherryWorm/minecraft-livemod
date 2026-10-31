@@ -92,29 +92,50 @@ def guard(text, briefs):
 
 
 class Interview:
-    """One private conversation with one player. Each turn resumes the same session."""
+    """One private conversation with one player. It's all kept as plain data, so it carries on when either of them
+    comes back. A model's own session wouldn't, because those are lost whenever the agent's container is replaced."""
 
-    def __init__(self, governor: Governor, player):
+    LAST_TURN = 6
+    FIRST_QUESTION = "Hi! I'm the AI that's going to build this world, and I'd like to hear what you'd enjoy. What makes a mod fun for you?"
+
+    def __init__(self, governor: Governor, player, saved=None):
         self.governor = governor
         self.player = player
-        self.session = None
+        self.transcript = list((saved or {}).get("transcript", []))
         self.finished = False
         self.brief = None
-        self.turns = 0
+
+    def saved(self):
+        return {"transcript": self.transcript}
+
+    def last_question(self):
+        said = [entry["text"] for entry in self.transcript if entry["from"] == "you"]
+        return said[-1] if said else self.FIRST_QUESTION
+
+    async def begin(self):
+        """The first thing they hear. There's always something, because without it they'd have no idea what's going on."""
+        reply = await self._ask("The player has just arrived for the first time. Say hello, say who you are and what this talk is for, then ask your first question.")
+        if not reply:
+            reply = self.FIRST_QUESTION
+            self.transcript.append({"from": "you", "text": reply})
+        return reply
 
     async def turn(self, player_text):
-        self.turns += 1
-        prompt = llm.untrusted("player_message", player_text)
-        if self.turns >= 6:
-            prompt += "\n\nThis is the last exchange. Finish now."
-        result = await llm.ask(self.governor, "interviewer", prompt, schema=INTERVIEW_SCHEMA, resume=self.session, max_turns=3)
-        self.session = result.session_id or self.session
+        self.transcript.append({"from": "player", "text": player_text})
+        turns = sum(entry["from"] == "player" for entry in self.transcript)
+        return await self._ask("This is the last exchange. Finish now." if turns >= self.LAST_TURN else "Carry on the conversation.")
+
+    async def _ask(self, instruction):
+        lines = [llm.untrusted("player_message" if entry["from"] == "player" else "you_said", entry["text"]) for entry in self.transcript]
+        result = await llm.ask(self.governor, "interviewer", "\n".join([*lines, instruction]), schema=INTERVIEW_SCHEMA, max_turns=3)
         data = result.structured if isinstance(result.structured, dict) else None
         if result.is_error or data is None:
             return None
         if data.get("finished"):
             self.finished = True
             self.brief = data.get("brief") or {"wants": "", "theme_ideas": "", "mods_enjoyed": [], "dislikes": "", "notes": ""}
+        if data.get("reply"):
+            self.transcript.append({"from": "you", "text": data["reply"]})
         return data.get("reply")
 
 

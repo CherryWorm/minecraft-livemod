@@ -25,9 +25,10 @@ from ping import varint
 
 # From the server's own --reports packets.json. A new Minecraft version needs these regenerated.
 PLAY_SYSTEM_CHAT, PLAY_PLAYER_CHAT, PLAY_COMBAT_KILL = 124, 66, 69
-TO_PLAY_CHAT, TO_PLAY_CLIENT_COMMAND = 9, 12
+TO_PLAY_CHAT, TO_PLAY_COMMAND, TO_PLAY_CLIENT_COMMAND = 9, 7, 12
 RESPAWN = 0
 CHARACTER_MARK = "§d"
+PRIVATE_MARK = "[Agent]"
 ANSWER_DELAY_SECONDS = 3
 
 
@@ -91,6 +92,10 @@ class Bot:
         self.conn.send(TO_PLAY_CHAT, payload)
         self.log("said", text=text)
 
+    def dm(self, text):
+        self.conn.send(TO_PLAY_COMMAND, client.string(f"dm {text}"))
+        self.log("said", text=text)
+
     def on_system_chat(self, data):
         text = flatten(read_nbt(data))
         self.log("heard", text=text)
@@ -99,16 +104,16 @@ class Bot:
                 self.character_spoke = True
                 now = time.monotonic()
                 for index, line in enumerate(self.public):
-                    self.due.append((now + 30 * (index + 1), line))
-        elif text and "multiplayer." not in text and "death." not in text and self.answers:
-            self.due.append((time.monotonic() + ANSWER_DELAY_SECONDS, self.answers.pop(0)))
+                    self.due.append((now + 30 * (index + 1), line, self.say))
+        elif PRIVATE_MARK in text and self.answers:
+            self.due.append((time.monotonic() + ANSWER_DELAY_SECONDS, self.answers.pop(0), self.dm))
 
     def play(self, until):
         conn = self.conn
         while time.monotonic() < until:
             for entry in [entry for entry in self.due if entry[0] <= time.monotonic()]:
                 self.due.remove(entry)
-                self.say(entry[1])
+                entry[2](entry[1])
             conn.sock.settimeout(1)
             try:
                 packet_id, data = conn.receive()

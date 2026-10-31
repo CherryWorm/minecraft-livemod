@@ -53,6 +53,7 @@ PACK_TOKEN=$token
 PACK_PUBLIC_URL=https://$public/pack/$token/
 TOOLS_CPUS=8
 AGENT_RESTART=unless-stopped
+OPENING_BORDER=128
 EOF
   else
     cat >>.env <<EOF

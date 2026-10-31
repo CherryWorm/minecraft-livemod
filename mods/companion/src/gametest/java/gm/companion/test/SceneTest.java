@@ -3,13 +3,18 @@ package gm.companion.test;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
+import net.minecraft.world.entity.Display;
+import net.minecraft.world.entity.Entity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
@@ -51,6 +56,14 @@ public final class SceneTest implements FabricClientGameTest {
 			if ("done".equals(request)) {
 				break;
 			}
+			if ("entities".equals(request)) {
+				String seen = context.computeOnClient(SceneTest::entitiesSeen);
+				LOGGER.info("[SCENE] entities {}", seen);
+			}
+			if (request.startsWith("mine ")) {
+				context.getInput().holdKeyFor(options -> options.keyAttack, Integer.parseInt(request.substring(5)));
+				LOGGER.info("[SCENE] mined");
+			}
 			if (request.startsWith("shot ")) {
 				String name = request.substring(5);
 				// The agent is judging the content, so nothing should cover it, unless a HUD is what's being judged.
@@ -70,5 +83,18 @@ public final class SceneTest implements FabricClientGameTest {
 
 		context.runOnClient(client -> client.disconnect(new TitleScreen(), false));
 		context.waitFor(client -> client.level == null && client.gui.screen() instanceof TitleScreen, TICKS_PER_MINUTE);
+	}
+
+	/** What the client has really been told about, because an entity that doesn't show could have failed at any step. */
+	private static String entitiesSeen(Minecraft client) {
+		Map<String, Integer> counts = new TreeMap<>();
+		String display = "no block displays";
+		for (Entity entity : client.level.entitiesForRendering()) {
+			counts.merge(entity.getType().toShortString(), 1, Integer::sum);
+			if (entity instanceof Display.BlockDisplay block) {
+				display = block.position() + " " + block.getBlockState() + " rendered as " + (block.renderState() == null ? "nothing yet" : block.renderState().transformation());
+			}
+		}
+		return counts + " " + display;
 	}
 }

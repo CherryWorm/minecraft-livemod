@@ -17,8 +17,11 @@ FEATURES = workshop.REPO / "mods/genesis/features"
 STATE = pathlib.Path("/workspace/state")
 OPENING = STATE / "opening.json"
 DECIDE_AFTER_SECONDS = 20 * 60
-OPENING_BORDER = 256
-OPEN_BORDER = 59_999_968
+AGENT_LABEL = "§b[Agent]§r "
+HOW_TO_ANSWER = ("§7Please answer me with a private message: type §f/dm§7, a space, then your message, like §f/dm I love exploring§7. "
+                 "Only I can see those. You can also click this line to start one.")
+OPENING_NOTE = ("§7Until the first new things arrive, the world is small and safe: you can go {radius} blocks from spawn, as far as the glowing wall, "
+                "with no monsters and no hunger, and nothing can be broken yet.")
 CHAT_BATCH_SECONDS = 20
 WEEKLY_INTENTS_PER_PLAYER = 20
 WATCH_SECONDS = 5 * 60
@@ -67,7 +70,7 @@ class Agent:
         self.research = research.Research(self.governor, self.private_words)
         self.minds = minds.Minds(self.governor, self.bridge, self.private_words)
         self.workshop = workshop.Workshop(self.governor, self.on_released, self.research, lambda: self.reached)
-        self.interviews = {}
+        self.told_about_dm = set()
         self.chat_buffer = []
         self.queue = []
         self.building = set()
@@ -79,11 +82,13 @@ class Agent:
         self.choosing_direction = False
         self.direction_problems = []
         self.state = {"direction_chosen": False, "briefs": {}, "first_finished_at": 0, "released": [], "border_open": False,
-                      "intents": {}, "intent_count": 0, "tuner_saw": 0, "handled_intents": []}
+                      "intents": {}, "intent_count": 0, "tuner_saw": 0, "handled_intents": [], "interviews": {}}
         if OPENING.exists():
             self.state.update(json.loads(OPENING.read_text(encoding="utf-8")))
+        self.interviews = {player: voice.Interview(self.governor, player, saved) for player, saved in self.state["interviews"].items()}
 
     def save(self):
+        self.state["interviews"] = {player: interview.saved() for player, interview in self.interviews.items()}
         OPENING.parent.mkdir(parents=True, exist_ok=True)
         OPENING.write_text(json.dumps(self.state, indent=1), encoding="utf-8")
 
@@ -101,25 +106,49 @@ class Agent:
 
     # Interviews -----------------------------------------------------------------------------------
 
+    async def tell(self, player, text, reply_click=False):
+        """They may have left while a slow reply was on its way. Anything said in an interview is saved for when they're back."""
+        try:
+            await self.bridge.whisper(player, text, reply_click)
+        except RuntimeError as error:
+            print(f"couldn't tell {player} something: {error}", flush=True)
+
+    async def explain(self, player):
+        await self.tell(player, HOW_TO_ANSWER, reply_click=True)
+        opening = (await self.bridge.call("status")).get("opening")
+        if opening:
+            await self.tell(player, OPENING_NOTE.format(radius=opening // 2))
+
     async def start_interview(self, player):
         interview = voice.Interview(self.governor, player)
         self.interviews[player] = interview
-        await self.bridge.capture(player, True)
-        reply = await interview.turn("(The player has just arrived for the first time. Say hello and ask your first question.)")
-        if reply:
-            await self.bridge.whisper(player, reply)
+        reply = await interview.begin()
+        self.save()
+        await self.tell(player, AGENT_LABEL + reply, reply_click=True)
+        await self.explain(player)
 
-    async def on_private_chat(self, player, text):
+    async def resume_interview(self, player):
+        """Costs nothing and needs no model, because all it does is remind them where things stand."""
+        await self.tell(player, "§7Welcome back. We're still in the middle of our private talk, and this is where we'd got to:")
+        await self.tell(player, AGENT_LABEL + self.interviews[player].last_question(), reply_click=True)
+        await self.explain(player)
+
+    async def on_dm(self, player, text):
         interview = self.interviews.get(player)
-        if interview is None:
-            await self.bridge.capture(player, False)
-            return
+        if interview is not None:
+            await self.interview_turn(player, interview, text)
+        elif player in self.state["briefs"]:
+            await self.apply_triage(await voice.triage(self.governor, [{"player": player, "text": text}]), only_to=player)
+        else:
+            await self.start_interview(player)
+
+    async def interview_turn(self, player, interview, text):
         reply = await interview.turn(text)
-        # The player is waiting in private, so even a failed call needs an answer.
-        await self.bridge.whisper(player, reply or "§7Sorry, I didn't catch that. Could you say it again?")
+        self.save()
+        # They're waiting for an answer, so even a failed call needs one.
+        await self.tell(player, AGENT_LABEL + (reply or "§7Sorry, I didn't catch that. Could you say it again?"), reply_click=True)
         if interview.finished:
-            await self.bridge.capture(player, False)
-            await self.bridge.whisper(player, "§7That's the end of the private talk. Your chat is public again.")
+            await self.tell(player, "§7That's all I needed, thanks. If you ever want to tell me anything else privately, §f/dm§7 still works.")
             self.state["briefs"][player] = interview.brief
             self.state["first_finished_at"] = self.state["first_finished_at"] or time.time()
             del self.interviews[player]
@@ -194,23 +223,26 @@ class Agent:
         self.governor.player_seen()
         if self.governor.why_not_speak():
             # The character has gone quiet for now, so don't leave someone talking to nobody in private.
-            if kind == "chat" and event.get("private"):
-                await self.bridge.capture(player, False)
-                await self.bridge.whisper(player, "§7The private talk is on hold, and that message wasn't sent. Your chat is public again.")
+            if kind == "dm":
+                await self.tell(player, "§7I can't answer right now, so I haven't read that. Please try again later.")
             return
         if kind == "join":
-            if player not in self.state["briefs"] and player not in self.interviews:
+            self.told_about_dm.discard(player)
+            if player in self.interviews:
+                await self.resume_interview(player)
+            elif player not in self.state["briefs"]:
                 await self.start_interview(player)
-            elif player in self.interviews:
-                await self.bridge.capture(player, True)
+        elif kind == "dm":
+            await self.on_dm(player, event.get("text", ""))
         elif kind == "chat":
             text = event.get("text", "")
             if text.strip().lower() in ("!mute", "!unmute"):
                 await self.set_muted(player, text.strip().lower() == "!mute")
-            elif event.get("private"):
-                await self.on_private_chat(player, text)
             else:
                 self.chat_buffer.append({"player": player, "text": text})
+                if player in self.interviews and player not in self.told_about_dm:
+                    self.told_about_dm.add(player)
+                    await self.tell(player, "§7That went to everyone. To answer me privately, use §f/dm§7 instead.", reply_click=True)
         await self.speak_if_worthwhile(event, player)
 
     async def speak_if_worthwhile(self, event, player):
@@ -260,7 +292,7 @@ class Agent:
             except Exception as error:  # noqa: BLE001
                 print(f"triage failed: {error}", flush=True)
 
-    async def apply_triage(self, result):
+    async def apply_triage(self, result, only_to=None):
         week = time.strftime("%Y-%W", time.gmtime())
         counts = self.state["intents"].setdefault(week, {})
         accepted = []
@@ -279,8 +311,11 @@ class Agent:
             self.save()
             self.tune_wanted.set()
             self.wake_director.set()
-        reply = voice.guard(result.get("reply"), self.briefs())
-        if reply:
+        # Nobody's met the character until the direction exists, so before then there's no one to answer.
+        reply = voice.guard(result.get("reply"), self.briefs()) if self.state["direction_chosen"] else None
+        if only_to:
+            await self.tell(only_to, voice.styled(reply) if reply else "§7Thanks, I've got that.")
+        elif reply:
             await self.bridge.broadcast(voice.styled(reply))
 
     # Tuning -----------------------------------------------------------------------------------------
@@ -323,9 +358,20 @@ class Agent:
             STATE.mkdir(parents=True, exist_ok=True)
             with (STATE / "host_requests.jsonl").open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps({"at": time.time(), "feature": feature_id, "requests": manifest["host_requests"]}) + "\n")
-        if not self.state["border_open"]:
-            await self.bridge.border(OPEN_BORDER)
-            self.state["border_open"] = True
+        self.save()
+        await self.open_world()
+
+    async def open_world(self):
+        """The first thing to reach players starts the game proper. A release can restart the server, so this may
+        have to wait for it, and the opening loop keeps trying."""
+        if self.state["border_open"] or not self.state.get("release_count"):
+            return
+        try:
+            await self.bridge.call("open_world")
+        except (RuntimeError, ConnectionError, TimeoutError) as error:
+            print(f"couldn't open the world yet: {error}", flush=True)
+            return
+        self.state["border_open"] = True
         self.save()
 
     async def next_features(self):
@@ -415,10 +461,11 @@ class Agent:
                 pass
 
     async def opening_loop(self):
-        """Holds the small border during the opening, and notices when the interview timer has run out."""
+        """Notices when the interview timer has run out, and that the opening is due to end."""
         while True:
             if not self.state["direction_chosen"]:
                 await self.maybe_choose_direction()
+            await self.open_world()
             await asyncio.sleep(15)
 
     async def status_loop(self):
@@ -450,8 +497,6 @@ class Agent:
         workshop.setup_repo()
         await self.bridge.connect()
         readers = asyncio.create_task(self.bridge.run())
-        if not self.state["border_open"]:
-            await self.bridge.border(OPENING_BORDER)
         # Anyone already online joined while the agent wasn't listening, so they'd never be asked.
         for player in await self.bridge.call("players"):
             name = player["name"] if isinstance(player, dict) else player
