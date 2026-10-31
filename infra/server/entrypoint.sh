@@ -28,6 +28,10 @@ sed -e "s|@WHITE_LIST@|${WHITE_LIST:-true}|g" \
 sed -e "s|@PACK_PUBLIC_URL@|${PACK_PUBLIC_URL}|g" \
     /opt/mc/auto-host.json >config/polymer/auto-host.json
 
+# Whose in-game command can stop the agent. Empty means only the server console can.
+mkdir -p config/conduit
+printf '%s\n' "${OWNER_UUID:-}" >config/conduit/owner.txt
+
 export FABRIC_PROXY_SECRET_FILE=/run/secrets/forwarding
 export FABRIC_PROXY_HACK_ONLINE_MODE=true
 

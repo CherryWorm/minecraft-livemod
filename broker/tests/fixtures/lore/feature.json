@@ -1,0 +1,95 @@
+{
+  "id": "lore",
+  "phase": 1,
+  "summary": "Test fixture that uses every content type: knowledge, gated and guessable recipes, a plant, a mob and a biome.",
+  "blocks": {
+    "rune_crucible": {"family": "machine", "display": "Rune Crucible", "texture": "rune_crucible", "tool": "pickaxe"},
+    "moss_cap": {"family": "plant", "display": "Moss Cap", "texture": "moss_cap"}
+  },
+  "items": {
+    "rune_dust": {"display": "Rune Dust", "texture": "rune_dust"},
+    "rune_gem": {"display": "Rune Gem", "texture": "rune_gem"},
+    "rune_tablet": {"display": "Rune Tablet", "texture": "rune_tablet"},
+    "rune_shard": {"display": "Rune Shard", "texture": "rune_shard"},
+    "rune_salt": {"display": "Rune Salt", "texture": "rune_salt"}
+  },
+  "knowledge": {
+    "gem_cutting": {
+      "title": "On Cutting Gems",
+      "text": "Two measures of dust, pressed together, will make a gem if you know how to ask them.",
+      "routes": [{"type": "read", "id": "$item:rune_tablet"}]
+    },
+    "shard_lore": {
+      "title": "The Broken Saying",
+      "text": "Pieced together from three shards.",
+      "routes": [{"type": "fragments", "id": "$item:rune_shard", "needed": 3}]
+    }
+  },
+  "recipes": {
+    "rune_crucible": {
+      "mode": "open",
+      "json": {
+        "type": "minecraft:crafting_shapeless",
+        "ingredients": ["minecraft:cauldron", "minecraft:amethyst_shard"],
+        "result": {"id": "$block:rune_crucible", "count": 1}
+      }
+    },
+    "rune_tablet": {
+      "mode": "open",
+      "json": {
+        "type": "minecraft:crafting_shapeless",
+        "ingredients": ["minecraft:paper", "minecraft:amethyst_shard"],
+        "result": {"id": "$item:rune_tablet", "count": 1}
+      }
+    },
+    "rune_shard": {
+      "mode": "open",
+      "json": {
+        "type": "minecraft:crafting_shapeless",
+        "ingredients": ["minecraft:flint", "minecraft:amethyst_shard"],
+        "result": {"id": "$item:rune_shard", "count": 1}
+      }
+    },
+    "rune_gem": {
+      "mode": "known",
+      "route": "gem_cutting",
+      "json": {
+        "type": "minecraft:crafting_shapeless",
+        "ingredients": ["$item:rune_dust", "$item:rune_dust"],
+        "result": {"id": "$item:rune_gem", "count": 1}
+      }
+    },
+    "rune_salt": {
+      "mode": "guessable",
+      "machine": "crucible",
+      "feedback": "The crucible hums louder the closer you are.",
+      "inputs": [{"item": "$item:rune_dust", "count": 1}, {"item": "$item:rune_gem", "count": 1}],
+      "output": {"item": "$item:rune_salt", "count": 1}
+    }
+  },
+  "mobs": {
+    "rune_crab": {
+      "category": "creature",
+      "display": "Rune Crab",
+      "model": "rune_crab",
+      "behaviour": "skittish",
+      "health": 8,
+      "damage": 0,
+      "speed": 0.25,
+      "width": 0.8,
+      "height": 0.6,
+      "drops": {"item": "rune_dust", "count": [1, 2]},
+      "spawn": {"weight": 10, "light": "any", "minY": 40, "maxY": 200, "cap": 3, "underground": false, "biomes": []}
+    }
+  },
+  "plants": [
+    {"id": "moss_cap_v1", "block": "moss_cap", "on": ["minecraft:grass_block"], "perChunk": 1.5, "minY": 40, "maxY": 200, "underground": false, "biomes": []}
+  ],
+  "biomes": {
+    "rune_meadow": {
+      "base": "minecraft:plains",
+      "effects": {"grass_color": 3050327, "foliage_color": 3050327},
+      "proportion": 0.4
+    }
+  }
+}

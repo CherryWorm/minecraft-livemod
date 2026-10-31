@@ -2,7 +2,7 @@
 import shutil
 import time
 
-from broker import runtime
+from broker import runtime, sign
 from broker.gates import shadow
 
 HEALTH_SECONDS = {"T1": 10, "T2": 15, "T3": 40}
@@ -137,5 +137,12 @@ def rollback(state, reason):
     if previous and (runtime.HISTORY / previous).exists():
         folder = runtime.HISTORY / previous
         _install_jars(folder)
+        # Players may already have run the failed release's generation, and companions refuse anything older, so
+        # the old code has to go out under a new generation. Signing trouble must never stop a rollback: the
+        # server comes back either way, and at worst client modules stay off until the next release.
+        try:
+            sign.sign_release(folder / "content")
+        except (sign.SigningError, OSError) as error:
+            print(f"couldn't sign client modules for the rollback, so companions may refuse them: {error}", flush=True)
         runtime.apply_content("prod", folder / "content")
     _restart_prod()

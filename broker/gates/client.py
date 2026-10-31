@@ -14,6 +14,7 @@ GATE = "client"
 CONTAINER = "livingmod-gate-client"
 PLAYER = "Player0"
 SHOT_TIMEOUT = 90
+REFERENCE_BLOCKS = ("minecraft:stone", "minecraft:iron_ore", "minecraft:oak_planks", "minecraft:grass_block", "minecraft:copper_block")
 
 
 def _fail(message):
@@ -39,27 +40,34 @@ def _wait_log(log, pattern, seconds, process):
     _fail(f"Timed out waiting for the test client: {pattern}")
 
 
-def build_scene(blocks, items):
-    """A clean, lit platform with the new blocks in a row, facing the camera."""
+def build_scene(blocks, items, mobs=()):
+    """A clean, lit platform with new content facing the camera, and vanilla blocks behind it to compare with."""
     commands = [
-        ("gamemode", "creative", PLAYER),
+        ("gamemode", "spectator", PLAYER),
         ("gamerule", "doDaylightCycle", "false"),
+        ("gamerule", "doMobSpawning", "false"),
         ("weather", "clear"),
         ("time", "set", "noon"),
         ("forceload", "add", "-16", "-16", "16", "16"),
         ("fill", "-10", "119", "-10", "10", "119", "10", "minecraft:smooth_stone"),
         ("fill", "-10", "120", "-10", "10", "130", "10", "minecraft:air"),
-        ("tp", PLAYER, "0", "120", "-7", "0", "12"),
-        ("clear", PLAYER),
+        ("kill", "@e[type=!player]"),
+        ("tp", PLAYER, "0", "121", "-5", "0", "10"),
     ]
     for command in commands:
         runtime.rcon("shadow", *command, check=False)
+    for index, block in enumerate(REFERENCE_BLOCKS):
+        runtime.rcon("shadow", "setblock", str(index * 2 - 4), "120", "3", block, check=False)
     for index, slot in enumerate(blocks[:15]):
         x = (index % 5) * 2 - 4
         y = 120 + (index // 5) * 2
         runtime.rcon("shadow", "setblock", str(x), str(y), "0", f"gm:{slot}", check=False)
-    for slot in items[:9]:
-        runtime.rcon("shadow", "give", PLAYER, f"gm:{slot}", "1", check=False)
+    # Items float in the air, at eye level and in front of the blocks, where they can't be picked up.
+    for index, slot in enumerate(items[:9]):
+        data = '{Item:{id:"gm:%s",count:1},NoGravity:1b,PickupDelay:32767,Age:-32768}' % slot
+        runtime.rcon("shadow", "summon", "minecraft:item", str(index - 4), "121.3", "-2", data, check=False)
+    for index, slot in enumerate(mobs[:5]):
+        runtime.rcon("shadow", "summon", f"gm:{slot}", str(index * 2 - 4), "120", "-1", "{NoAI:1b,PersistenceRequired:1b}", check=False)
 
 
 def check_image(path):
@@ -76,9 +84,9 @@ def check_image(path):
             _fail(f"{path.name} is almost completely black, so nothing rendered.")
 
 
-def run_gate(blocks, items, mods_dir, report_dir):
+def run_gate(blocks, items, mods_dir, report_dir, mobs=(), client_modules=False):
     """Returns the screenshots taken. Skips when there's nothing new to look at."""
-    if not blocks and not items:
+    if not blocks and not items and not mobs and not client_modules:
         return []
     report_dir.mkdir(parents=True, exist_ok=True)
     log = report_dir / "client.log"
@@ -92,17 +100,23 @@ def run_gate(blocks, items, mods_dir, report_dir):
             ["./scripts/stack.sh", "--profile", "tools", "run", "--rm", "-T", "--name", CONTAINER, "testclient",
              "./gradlew", "--no-daemon", "--console=plain", ":companion:runClientGameTest"],
             cwd=runtime.REPO, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT,
+            # Nothing's signed until a release is really going out, so this client takes unsigned modules. It's
+            # the test's own copy of the game, and it still refuses anything that fails the code check.
             env={**__import__("os").environ, "MODS_DIR": str(mods_dir), "CLIENT_TEST": "scene",
-                 "TEST_SERVER": "localhost:25566"},
+                 "TEST_SERVER": "localhost:25566", "COMPANION_ALLOW_UNSIGNED": "true"},
         )
     try:
         _wait_log(log, r"\[SCENE\] joined as [A-Za-z0-9_]+$", 300, process)
         time.sleep(2)
-        build_scene(blocks, items)
+        build_scene(blocks, items, mobs)
         time.sleep(2)
 
         shots = []
-        for name, time_of_day in (("day", "noon"), ("night", "midnight")):
+        scenes = [("day", "noon"), ("night", "midnight")]
+        if client_modules:
+            time.sleep(3)
+            scenes.append(("hud", "noon"))
+        for name, time_of_day in scenes:
             runtime.rcon("shadow", "time", "set", time_of_day, check=False)
             time.sleep(1)
             _tell(f"SCENE shot {name}")

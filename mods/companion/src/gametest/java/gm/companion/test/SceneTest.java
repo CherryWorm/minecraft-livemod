@@ -53,6 +53,14 @@ public final class SceneTest implements FabricClientGameTest {
 			}
 			if (request.startsWith("shot ")) {
 				String name = request.substring(5);
+				// The agent is judging the content, so nothing should cover it, unless a HUD is what's being judged.
+				boolean showHud = name.startsWith("hud");
+				context.runOnClient(client -> {
+					if (client.gui.hud.isHidden() == showHud) {
+						client.gui.hud.toggle();
+					}
+					client.gui.toastManager().clear();
+				});
 				context.waitTicks(40);
 				context.takeScreenshot("scene_" + name);
 				LOGGER.info("[SCENE] took {}", name);

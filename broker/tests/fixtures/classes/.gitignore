@@ -1,0 +1,2 @@
+# Prebuilt on purpose, so the bytecode tests need no JDK. The repository root ignores *.class.
+!*.class

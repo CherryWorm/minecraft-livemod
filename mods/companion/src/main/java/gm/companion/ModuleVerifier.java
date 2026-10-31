@@ -38,6 +38,8 @@ final class ModuleVerifier {
 			"java/io/File", "java/io/RandomAccessFile", "java/nio/file/", "java/net/", "java/lang/Runtime",
 			"java/lang/ProcessBuilder", "java/lang/reflect/", "java/lang/ClassLoader",
 			"sun/", "jdk/internal/", "org/lwjgl/", "net/minecraft/client/User", "java/lang/Thread");
+	// Ordinary error handling, whose name happens to start with java/lang/Runtime.
+	private static final String HARMLESS = "java/lang/RuntimeException";
 	// Every lambda mentions MethodHandles$Lookup, so it's getting hold of a lookup that has to be refused.
 	private static final Set<String> FORBIDDEN_NAMES = Set.of(
 			"forName", "getDeclaredMethod", "loadLibrary", "lookup", "publicLookup", "privateLookupIn");
@@ -119,7 +121,7 @@ final class ModuleVerifier {
 				int tag = data.readUnsignedByte();
 				switch (tag) {
 					case 1 -> {
-						String text = data.readUTF();
+						String text = data.readUTF().replace(HARMLESS, "");
 						for (String forbidden : FORBIDDEN) {
 							if (text.contains(forbidden)) {
 								return forbidden;

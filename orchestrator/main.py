@@ -2,7 +2,9 @@
 """The agent's main loop: plain code that routes events and decides when each role runs."""
 import asyncio
 import json
+import os
 import pathlib
+import re
 import time
 
 from orchestrator import llm, voice, workshop
@@ -17,6 +19,9 @@ OPENING_BORDER = 256
 OPEN_BORDER = 59_999_968
 CHAT_BATCH_SECONDS = 20
 WEEKLY_INTENTS_PER_PLAYER = 20
+WATCH_SECONDS = 5 * 60
+FEATURE_ID = r"[a-z][a-z0-9_]{1,40}"
+STOP_AFTER_RELEASES = os.environ.get("AGENT_STOP_AFTER_RELEASES")  # Lets a test spend a known amount.
 
 PHASES_TEMPLATE = """\
 # What each phase needs before the next begins. The director tracks this.
@@ -54,6 +59,8 @@ class Agent:
         self.queue = []
         self.building = set()
         self.wake_director = asyncio.Event()
+        self.locks = {}
+        self.choosing_direction = False
         self.state = {"direction_chosen": False, "briefs": {}, "first_finished_at": 0, "released": [], "border_open": False,
                       "phase": 1, "intents": {}}
         if OPENING.exists():
@@ -92,6 +99,7 @@ class Agent:
             await self.bridge.whisper(player, reply)
         if interview.finished:
             await self.bridge.capture(player, False)
+            await self.bridge.whisper(player, "§7That's the end of the private talk. Your chat is public again.")
             self.state["briefs"][player] = interview.brief
             self.state["first_finished_at"] = self.state["first_finished_at"] or time.time()
             del self.interviews[player]
@@ -105,14 +113,19 @@ class Agent:
         (folder / f"{player}.json").write_text(json.dumps(brief, indent=1), encoding="utf-8")
 
     async def maybe_choose_direction(self):
-        if self.state["direction_chosen"]:
+        # A timer and a finished interview can both get here while the first call is still thinking.
+        if self.state["direction_chosen"] or self.choosing_direction:
             return
         roster = self.roster()
         everyone_done = bool(roster) and roster.issubset(self.state["briefs"])
         waited = self.state["first_finished_at"] and time.time() - self.state["first_finished_at"] > DECIDE_AFTER_SECONDS
         called = (CONTROL / "decide_now").exists()
         if everyone_done or waited or called:
-            await self.choose_direction()
+            self.choosing_direction = True
+            try:
+                await self.choose_direction()
+            finally:
+                self.choosing_direction = False
 
     async def choose_direction(self):
         print("choosing the direction", flush=True)
@@ -125,6 +138,7 @@ class Agent:
         (BIBLE / "persona.md").write_text(direction["persona_md"], encoding="utf-8")
         (BIBLE / "persona_name.txt").write_text(direction["persona_name"], encoding="utf-8")
         (BIBLE / "discovery.md").write_text(direction["discovery_md"], encoding="utf-8")
+        (BIBLE / "discovery.json").write_text(json.dumps({"scope": direction["discovery_scope"]}), encoding="utf-8")
         (BIBLE / "phases.yaml").write_text(PHASES_TEMPLATE, encoding="utf-8")
         workshop.commit_all("The direction for this world")
         self.queue.extend(direction["phase1_features"])
@@ -158,6 +172,12 @@ class Agent:
                 await self.on_private_chat(player, text)
             else:
                 self.chat_buffer.append({"player": player, "text": text})
+        await self.speak_if_worthwhile(event, player)
+
+    async def speak_if_worthwhile(self, event, player):
+        # Nobody's met the character until the direction exists, so before then there's no one to speak.
+        if not self.state["direction_chosen"]:
+            return
         said = await self.watcher.consider(event, self.state["released"], self.briefs())
         if said:
             text, audience = said
@@ -174,13 +194,18 @@ class Agent:
         self.watcher._save()
         await self.bridge.whisper(player, "You won't hear unprompted remarks now." if muted else "Remarks are back on.")
 
-    async def event_loop(self):
-        while True:
-            event = await self.bridge.events.get()
+    async def handle_in_turn(self, event):
+        """Players don't wait on each other's slow calls, but each player's own events stay in order."""
+        async with self.locks.setdefault(event.get("player", ""), asyncio.Lock()):
             try:
                 await self.handle(event)
             except Exception as error:  # noqa: BLE001 - one bad event must not stop the agent
                 print(f"error handling {event.get('event')}: {error}", flush=True)
+
+    async def event_loop(self):
+        while True:
+            event = await self.bridge.events.get()
+            asyncio.create_task(self.handle_in_turn(event))
 
     async def chat_loop(self):
         """Reads chat in batches, because most of it needs nothing and each read uses some of the plan."""
@@ -222,6 +247,12 @@ class Agent:
         manifest = json.loads((tree / "mods/genesis/features" / feature_id / "feature.json").read_text(encoding="utf-8"))
         names = [entry.get("display") for table in ("blocks", "items") for entry in manifest.get(table, {}).values()]
         self.state["released"].extend(name for name in names if name)
+        self.state["release_count"] = self.state.get("release_count", 0) + 1
+        # What the engine couldn't do goes to the owner, because adding it is reviewed human work.
+        if manifest.get("host_requests"):
+            STATE.mkdir(parents=True, exist_ok=True)
+            with (STATE / "host_requests.jsonl").open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({"at": time.time(), "feature": feature_id, "requests": manifest["host_requests"]}) + "\n")
         if not self.state["border_open"]:
             await self.bridge.border(OPEN_BORDER)
             self.state["border_open"] = True
@@ -232,8 +263,13 @@ class Agent:
         intents = STATE / "intents.jsonl"
         recent = intents.read_text(encoding="utf-8").splitlines()[-30:] if intents.exists() else []
         body = "\n".join(llm.untrusted("intent", line) for line in recent) or "(no requests yet)"
+        try:
+            progress = json.dumps(await self.bridge.call("progress"))
+        except (RuntimeError, ConnectionError, TimeoutError):
+            progress = "(not available right now)"
         prompt = (f"Current phase: {self.state['phase']}. Released so far: {', '.join(self.state['released']) or 'nothing'}.\n\n"
-                  f"Player requests:\n{body}\n\nRead bible/theme.md and bible/phases.yaml, then choose the next features. "
+                  f"Player requests:\n{body}\n\nWhat players have found and learned:\n{llm.untrusted('progress', progress)}\n\n"
+                  "Read bible/theme.md and bible/phases.yaml, then choose the next features. "
                   "If the current phase's needs are all covered, move to the next phase.")
         result = await llm.ask(self.governor, "director", prompt, schema=DIRECTOR_SCHEMA, tools=["Read", "Glob", "Grep"],
                                allowed_tools=["Read", "Glob", "Grep"], cwd=str(workshop.REPO), max_turns=8)
@@ -245,6 +281,10 @@ class Agent:
 
     async def build_one(self, feature):
         try:
+            # The id comes from a model and becomes a folder and a branch name.
+            if not re.fullmatch(FEATURE_ID, feature["id"]):
+                print(f"refusing a feature with a bad id: {feature['id']!r}", flush=True)
+                return
             await self.workshop.build(feature["id"], feature["spec"], self.state["phase"])
         except Exception as error:  # noqa: BLE001 - one failed feature must not stop the others
             print(f"building {feature['id']} failed: {error}", flush=True)
@@ -255,10 +295,16 @@ class Agent:
     async def build_loop(self):
         while True:
             reason = self.governor.why_not_build()
+            if STOP_AFTER_RELEASES and self.state.get("release_count", 0) >= int(STOP_AFTER_RELEASES):
+                reason = "the test's release limit is reached"
             if reason or not self.state["direction_chosen"]:
                 if reason:
                     print(f"not building: {reason}", flush=True)
-                await asyncio.sleep(60)
+                self.wake_director.clear()
+                try:
+                    await asyncio.wait_for(self.wake_director.wait(), timeout=60)
+                except TimeoutError:
+                    pass
                 continue
             if not self.queue and not self.building:
                 self.queue.extend(await self.next_features())
@@ -279,14 +325,43 @@ class Agent:
                 await self.maybe_choose_direction()
             await asyncio.sleep(15)
 
+    async def status_loop(self):
+        """Notices the owner's in-game kill switch. The game and broker enforce it, and this just stops wasted work."""
+        while True:
+            try:
+                self.governor.owner_stopped = (await self.bridge.call("status"))["agent_disabled"]
+            except (RuntimeError, ConnectionError, TimeoutError) as error:
+                print(f"couldn't read the game's status: {error}", flush=True)
+            await asyncio.sleep(10)
+
+    async def watch_loop(self):
+        """Some things worth remarking on are an absence, so plain code checks for them now and then."""
+        while True:
+            await asyncio.sleep(WATCH_SECONDS)
+            if self.governor.why_not_speak() or not self.state["direction_chosen"]:
+                continue
+            try:
+                progress = await self.bridge.call("progress")
+            except (RuntimeError, ConnectionError, TimeoutError):
+                continue
+            for player, seen in progress.get("online", {}).items():
+                event = self.watcher.check_stuck(player, len(seen["found"]) + len(seen["known"]), progress.get("undiscovered", []))
+                if event:
+                    await self.speak_if_worthwhile(event, player)
+
     async def run(self):
         workshop.setup_repo()
         await self.bridge.connect()
         readers = asyncio.create_task(self.bridge.run())
         if not self.state["border_open"]:
             await self.bridge.border(OPENING_BORDER)
+        # Anyone already online joined while the agent wasn't listening, so they'd never be asked.
+        for player in await self.bridge.call("players"):
+            name = player["name"] if isinstance(player, dict) else player
+            await self.bridge.events.put({"event": "join", "player": name})
         print("agent running", flush=True)
-        await asyncio.gather(readers, self.event_loop(), self.chat_loop(), self.build_loop(), self.opening_loop())
+        await asyncio.gather(readers, self.event_loop(), self.chat_loop(), self.build_loop(), self.opening_loop(),
+                             self.status_loop(), self.watch_loop())
 
 
 if __name__ == "__main__":

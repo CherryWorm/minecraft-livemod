@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 runtime="$(pwd)/../runtime"
-mkdir -p "$runtime"/{secrets,velocity,prod,shadow,shadow-proxy,cache/gradle,cache/home,releases/current,releases/candidate,releases/history,broker,backups}
+mkdir -p "$runtime"/{secrets,velocity,prod,shadow,shadow-proxy,cache/gradle,cache/home,releases/current,releases/candidate,releases/history,broker,backups,control,agent-workspace}
 runtime=$(cd "$runtime" && pwd)
 
 for name in forwarding rcon bridge; do
@@ -31,6 +31,8 @@ PROXY_ONLINE_MODE=true
 LEVEL_SEED=
 # Set this to true only once you've read and accepted https://aka.ms/MinecraftEULA
 MINECRAFT_EULA=false
+# Your Minecraft account's UUID, which lets /agentstop work for you in game.
+OWNER_UUID=
 EOF
 fi
 echo "host ready: $runtime"

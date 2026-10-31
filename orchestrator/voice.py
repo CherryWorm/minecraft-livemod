@@ -43,11 +43,12 @@ DIRECTION_SCHEMA = {
         "persona_name": {"type": "string"},
         "persona_md": {"type": "string"},
         "discovery_md": {"type": "string"},
+        "discovery_scope": {"type": "string", "enum": ["shared", "per_player"]},
         "tease": {"type": "array", "items": {"type": "string"}},
         "phase1_features": {"type": "array", "items": {"type": "object", "properties": {
             "id": {"type": "string"}, "spec": {"type": "string"}}, "required": ["id", "spec"]}},
     },
-    "required": ["theme_md", "persona_name", "persona_md", "discovery_md", "tease", "phase1_features"],
+    "required": ["theme_md", "persona_name", "persona_md", "discovery_md", "discovery_scope", "tease", "phase1_features"],
 }
 
 TRIAGE_SCHEMA = {
@@ -156,6 +157,7 @@ class Watcher:
         self.deaths = {}
         self.seen_before = set()
         self.last_seen = {}
+        self.progress = {}
         self._load()
 
     def _path(self):
@@ -199,11 +201,25 @@ class Watcher:
             if len(recent) >= 3:
                 return f"{player} has died {len(recent)} times in the last few minutes, most recently from {event.get('cause')}"
             return None
+        if kind == "stuck":
+            return f"{player} hasn't found anything new for a while. Not yet worked out by anyone: {', '.join(event.get('undiscovered', [])) or 'nothing'}"
         if kind == "discovery":
             return f"{player} just found something for the first time: {event.get('what')}"
         if kind == "milestone":
             return f"The players reached a milestone: {event.get('what')}"
         return None
+
+    def check_stuck(self, player, known_count, undiscovered):
+        """Returns an event if this player has gone a long time without finding anything new."""
+        now = time.time()
+        count, since = self.progress.get(player, (-1, now))
+        if known_count != count:
+            self.progress[player] = (known_count, now)
+            return None
+        if now - since < self.NO_PROGRESS_SECONDS:
+            return None
+        self.progress[player] = (known_count, now)
+        return {"event": "stuck", "player": player, "undiscovered": undiscovered[:5]}
 
     def allowed(self, player):
         now = time.time()

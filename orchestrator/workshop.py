@@ -67,6 +67,8 @@ def setup_repo():
         source = pathlib.Path("/reference") / name
         if source.exists():
             subprocess.run(["rsync", "-a", "--delete", f"{source}/", f"{target}/"], check=False)
+    # Feature worktrees start from main, so anything they should see has to be committed there.
+    commit_all("Reference material")
 
 
 def commit_all(message, cwd=REPO):
@@ -112,6 +114,10 @@ def _tools_for(feature_id, tree):
 
 BUILDER_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Agent", "Task",
                  "mcp__broker__check_feature", "mcp__broker__java_api"]
+# Only Bash runs in the sandbox, so file tools need their own limits on where secrets could be found.
+BUILDER_DENIED = ["Read(//proc/**)", "Read(//run/**)", "Read(//home/agent/.claude/**)", "Read(//workspace/state/**)",
+                  "Grep(//proc/**)", "Grep(//run/**)", "Grep(//workspace/state/**)",
+                  "Glob(//workspace/state/**)", "WebFetch", "WebSearch"]
 
 
 class Workshop:
@@ -155,7 +161,7 @@ class Workshop:
                                   f"{llm.untrusted('spec', spec)}\n\nYour feature folder is mods/genesis/features/{feature_id}/.")
             began = time.monotonic()
             result = await llm.ask(self.governor, "builder", prompt, tools=BUILDER_TOOLS, allowed_tools=BUILDER_TOOLS,
-                                   agents=SUBAGENTS, cwd=str(tree), max_turns=60, resume=session,
+                                   disallowed_tools=BUILDER_DENIED, agents=SUBAGENTS, cwd=str(tree), max_turns=60, resume=session,
                                    mcp_servers={"broker": _tools_for(feature_id, tree)}, budget=8.0)
             timings[f"build_{attempt}"] = round(time.monotonic() - began, 1)
             session = result.session_id or session

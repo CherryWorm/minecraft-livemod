@@ -45,11 +45,16 @@ def assemble(commit):
 
 def promote(commit, release_id, *flags):
     source = assemble(commit)
-    subprocess.run(
+    # If this run dies before reporting, the agent must hear that rather than the previous run's result.
+    last = runtime.BROKER / "last.json"
+    last.unlink(missing_ok=True)
+    result = subprocess.run(
         [sys.executable, "-m", "broker.promote", "--source", str(source), "--release-id", release_id, *flags],
         cwd=runtime.REPO, stdin=subprocess.DEVNULL, capture_output=True, text=True, check=False, timeout=1200,
     )
-    report = json.loads((runtime.BROKER / "last.json").read_text(encoding="utf-8"))
+    if not last.exists():
+        return {"result": "blocked", "gate": "broker", "reason": f"The broker crashed:\n{result.stderr[-1500:]}"}
+    report = json.loads(last.read_text(encoding="utf-8"))
     # Screenshots go where the agent can read them.
     copied = []
     for path in report.get("screenshots", []):
@@ -76,7 +81,7 @@ def javap(class_name):
 
 def handle(request):
     kind = request["kind"]
-    if runtime.AGENT_DISABLED.exists() and kind != "javap":
+    if runtime.agent_disabled() and kind != "javap":
         return {"result": "blocked", "gate": "control", "reason": "The kill switch is on."}
     release_id = request.get("release_id", f"check-{request['id']}")
     if kind == "check":

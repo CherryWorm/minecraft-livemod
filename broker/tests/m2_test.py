@@ -110,7 +110,11 @@ def compile_error():
 
 def invalid_recipe():
     data = manifest()
-    data["recipes"]["ember_block"]["json"]["result"]["id"] = "minecraft:not_a_real_item"
+    # Added beside the real recipe, because without it nothing makes ember_block and the balance check stops this
+    # first. What's being tested is that only a real server notices an item that doesn't exist.
+    data["recipes"]["broken"] = {"mode": "open", "json": {"type": "minecraft:crafting_shapeless",
+                                                          "ingredients": ["$item:ember"],
+                                                          "result": {"id": "minecraft:not_a_real_item", "count": 1}}}
     save_manifest(data)
 
 
@@ -174,6 +178,10 @@ def scenario_rollback():
     add_ember()
     data = manifest()
     data["items"]["ember_dust"] = {"display": "Ember Dust", "texture": "ember"}
+    # Something has to make it, or the balance check would stop this release before it could crash.
+    data["recipes"]["ember_dust"] = {"mode": "open", "json": {"type": "minecraft:crafting_shapeless",
+                                                              "ingredients": ["$item:ember"],
+                                                              "result": {"id": "$item:ember_dust", "count": 1}}}
     save_manifest(data)
     before = runtime.load_state().get("current")
     time.sleep(4)

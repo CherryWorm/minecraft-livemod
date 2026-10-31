@@ -8,7 +8,8 @@
 		"fabric-client-gametest": [
 			"gm.companion.test.ModuleCycleTest",
 			"gm.companion.test.SceneTest",
-			"gm.companion.test.ModuleSafetyTest"
+			"gm.companion.test.ModuleSafetyTest",
+			"gm.companion.test.KnowledgeTest"
 		]
 	}
 }

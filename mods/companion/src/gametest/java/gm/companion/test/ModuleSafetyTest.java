@@ -36,7 +36,7 @@ public final class ModuleSafetyTest implements FabricClientGameTest {
 		context.waitFor(client -> client.gui.screen() == null, 2 * TICKS_PER_MINUTE);
 		LOGGER.info("[M7] joined");
 
-		// The script sends these in order: unsigned, then signed but forbidden, then good.
+		// The script sends these in order: unsigned, then signed but forbidden, then good, then an older good.
 		context.waitFor(client -> host.refused() >= 1, 3 * TICKS_PER_MINUTE);
 		LOGGER.info("[M7] refused unsigned refused={} active={}", host.refused(), host.isActive("m7_unsigned"));
 
@@ -47,6 +47,10 @@ public final class ModuleSafetyTest implements FabricClientGameTest {
 		context.waitTicks(40);
 		context.takeScreenshot("m7_good_module");
 		LOGGER.info("[M7] signed module active");
+
+		// The script now replays an older signed version of the same module.
+		context.waitFor(client -> host.refused() >= 3, 3 * TICKS_PER_MINUTE);
+		LOGGER.info("[M7] refused older refused={} active={}", host.refused(), host.isActive("m7_good"));
 
 		context.runOnClient(client -> host.setTurnedOff(true));
 		context.waitTicks(10);

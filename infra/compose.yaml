@@ -54,6 +54,7 @@ services:
       WHITE_LIST: ${WHITE_LIST:-true}
       LEVEL_SEED: ${LEVEL_SEED:-}
       PACK_PUBLIC_URL: ${PACK_PUBLIC_URL}
+      OWNER_UUID: ${OWNER_UUID:-}
     ports:
       # Polymer serves the resource pack here until the standalone pack host arrives.
       # This is also why prod is on the public network for now.
@@ -137,12 +138,36 @@ services:
       LIVINGMOD_SERVER: ${TEST_SERVER:-localhost:25566}
       CLIENT_TEST: ${CLIENT_TEST:-}
       S4_CYCLES: ${S4_CYCLES:-100}
+      # Only ever set by tests. A friend's game has neither, and no server can set them.
+      COMPANION_ALLOW_UNSIGNED: ${COMPANION_ALLOW_UNSIGNED:-false}
+      COMPANION_TEST_KEY: ${COMPANION_TEST_KEY:-}
     volumes:
       - ${MODS_DIR:-../mods}:/work
       - ${RUNTIME_DIR}/cache:/cache
 
+  # The agent's only route to the internet. See egress/Dockerfile.
+  egress:
+    profiles: [agent]
+    image: livingmod/egress:1
+    build:
+      context: egress
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /run/tinyproxy
+      - /var/log/tinyproxy
+    networks:
+      - public
+      - backend
+
   agent:
     profiles: [agent]
+    depends_on:
+      - egress
     image: livingmod/agent:${CLAUDE_AGENT_SDK_VERSION}
     build:
       context: agent
@@ -168,12 +193,32 @@ services:
       # Keeps the login token out of everything the agent runs, and keeps it on a tested version.
       CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
       DISABLE_AUTOUPDATER: "1"
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+      HTTPS_PROXY: http://egress:8888
+      HTTP_PROXY: http://egress:8888
+      NO_PROXY: prod,localhost,127.0.0.1
+      PYTHONPATH: /app
+      PYTHONUNBUFFERED: "1"
+      AGENT_DAILY_USAGE_LIMIT: ${AGENT_DAILY_USAGE_LIMIT:-25}
+      AGENT_MAX_BUILDERS: ${AGENT_MAX_BUILDERS:-2}
+      AGENT_STOP_AFTER_RELEASES: ${AGENT_STOP_AFTER_RELEASES:-}
     secrets:
       - claude_token
+      - bridge
+    # Read-only except the workspace. The broker on the host picks up requests from there.
     volumes:
       - ../spikes:/spikes:ro
+      - ../orchestrator:/app/orchestrator:ro
+      - ../docs:/reference/docs:ro
+      - ../assetkit:/reference/assetkit:ro
+      - ../mods/conduit/src/main/java/gm/conduit/api:/reference/conduit-api:ro
+      - ../mods/companion/src/main/java/gm/companion/api:/reference/companion-api:ro
+      - ${RUNTIME_DIR}/agent-workspace:/workspace
+      - ${RUNTIME_DIR}/control:/control:ro
+    command: ["python3", "-m", "orchestrator.main"]
+    # backend is internal: it reaches the game's bridge and the egress proxy, and nothing else.
     networks:
-      - public
+      - backend
 
 networks:
   public: {}

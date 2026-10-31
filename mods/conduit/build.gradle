@@ -1,4 +1,6 @@
 dependencies {
 	// Provided by the server image, so it isn't bundled into this jar.
 	implementation "eu.pb4:polymer-bundled:${project.polymer_version}"
+	implementation "maven.modrinth:blockbench-import-library:${project.bil_version}"
+	implementation "maven.modrinth:biolith:${project.biolith_version}"
 }

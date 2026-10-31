@@ -116,7 +116,7 @@ async def check_token_secrecy():
     results["token secrecy"] = (
         counts.get("env_length") == "0"
         and counts.get("file_readable") == "0"
-        and counts.get("uid") == "1000"
+        and counts.get("uid") == "1001"
         and names is not None
         and "claude" not in names
         and "python3" not in names

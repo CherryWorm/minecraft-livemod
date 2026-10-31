@@ -4,10 +4,21 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import gm.conduit.api.BlockBehavior;
 import gm.conduit.api.ItemBehavior;
+import gm.conduit.api.MachineAttempt;
 import gm.conduit.api.MachineBehavior;
+import gm.conduit.api.MobBehavior;
 import gm.conduit.api.ServerModule;
 import gm.conduit.api.ServerModuleContext;
+import gm.conduit.knowledge.Knowledge;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Block;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,6 +53,7 @@ public final class ServerModuleHost {
 	private final Map<String, BlockBehavior> blocks = new HashMap<>();
 	private final Map<String, ItemBehavior> items = new HashMap<>();
 	private final Map<String, MachineBehavior> machines = new HashMap<>();
+	private final Map<String, MobBehavior> mobs = new HashMap<>();
 	private Map<String, String> slotsByName = Map.of();
 	private MinecraftServer server;
 
@@ -61,6 +73,10 @@ public final class ServerModuleHost {
 
 	public MachineBehavior machineBehavior(String slotId) {
 		return this.machines.get(slotId);
+	}
+
+	public MobBehavior mobBehavior(String slotId) {
+		return this.mobs.get(slotId);
 	}
 
 	public void start(MinecraftServer server) {
@@ -156,6 +172,7 @@ public final class ServerModuleHost {
 				this.blocks.remove(entry.getKey());
 				this.items.remove(entry.getKey());
 				this.machines.remove(entry.getKey());
+				this.mobs.remove(entry.getKey());
 				return true;
 			}
 			return false;
@@ -253,8 +270,52 @@ public final class ServerModuleHost {
 		}
 
 		@Override
+		public void bindMob(String name, MobBehavior behavior) {
+			ServerModuleHost.this.mobs.put(slot(name), behavior);
+		}
+
+		@Override
 		public void onServerTick(Consumer<MinecraftServer> tick) {
 			this.ticks.add(tick);
+		}
+
+		private Identifier idOf(String name) {
+			String key = name.contains("/") ? name : this.moduleId + "/" + name;
+			String slot = ServerModuleHost.this.slotsByName.get(key);
+			if (slot == null) {
+				throw new IllegalArgumentException("Nothing is called " + key);
+			}
+			return Identifier.fromNamespaceAndPath("gm", slot);
+		}
+
+		@Override
+		public Block block(String name) {
+			return BuiltInRegistries.BLOCK.getValue(idOf(name));
+		}
+
+		@Override
+		public Item item(String name) {
+			return BuiltInRegistries.ITEM.getValue(idOf(name));
+		}
+
+		@Override
+		public EntityType<?> mob(String name) {
+			return BuiltInRegistries.ENTITY_TYPE.getValue(idOf(name));
+		}
+
+		@Override
+		public MachineAttempt attemptRecipe(Player player, String machine, List<ItemStack> inputs) {
+			return Knowledge.instance().attempt(player, this.moduleId + "/" + machine, inputs);
+		}
+
+		@Override
+		public boolean knows(Player player, String knowledge) {
+			return Knowledge.instance().knows(player, this.moduleId + "/" + knowledge);
+		}
+
+		@Override
+		public void teach(ServerPlayer player, String knowledge) {
+			Knowledge.instance().learn(player, this.moduleId + "/" + knowledge);
 		}
 	}
 }

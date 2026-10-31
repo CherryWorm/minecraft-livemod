@@ -23,6 +23,7 @@ class Governor:
     def __init__(self):
         self.path = STATE_ROOT / "governor.json"
         self.state = {"day": "", "usage": 0.0, "paused_until": 0, "last_warning": 0, "failures": 0, "last_player_seen": 0}
+        self.owner_stopped = False  # Set from the game, which is what actually enforces it.
         if self.path.exists():
             self.state.update(json.loads(self.path.read_text(encoding="utf-8")))
 
@@ -61,7 +62,7 @@ class Governor:
         self._save()
 
     def killed(self):
-        return (CONTROL / "agent_disabled").exists()
+        return self.owner_stopped or (CONTROL / "agent_disabled").exists()
 
     def why_not_speak(self):
         """Talking is cheap, so it only stops for the kill switch or a hard limit."""

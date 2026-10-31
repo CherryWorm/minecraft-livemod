@@ -185,8 +185,12 @@ def run_gate(tier, jars, content, patches):
         after = world_after_patches()
         timings["world_sample"] = round(time.monotonic() - started, 1)
         started = time.monotonic()
-        allowed = sorted({block for patch in patches for block in patch["replaces"]})
-        run_diff(before, after, sorted({patch["block"] for patch in patches}), allowed)
+        # Checked per block, so ore can't get away with replacing air just because a plant is allowed to.
+        allowed = {}
+        for patch in patches:
+            allowed.setdefault(patch["block"], set()).update(patch["replaces"])
+        for block, replaces in sorted(allowed.items()):
+            run_diff(before, after, [block], sorted(replaces))
         timings["world_diff"] = round(time.monotonic() - started, 1)
     return timings
 

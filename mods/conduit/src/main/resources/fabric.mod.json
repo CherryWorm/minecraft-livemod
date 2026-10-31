@@ -18,6 +18,8 @@
 		"minecraft": "~26.3",
 		"java": ">=25",
 		"fabric-api": "*",
-		"polymer-blocks": "*"
+		"polymer-blocks": "*",
+		"bil": "*",
+		"biolith": "*"
 	}
 }

@@ -29,6 +29,12 @@ STATE_FILE = BROKER / "state.json"
 TIMELINE = RUNTIME / "timeline.jsonl"
 CONTROL = RUNTIME / "control"
 AGENT_DISABLED = CONTROL / "agent_disabled"
+OWNER_KILL_SWITCH = RUNTIME / "prod" / "config" / "conduit" / "agent_disabled"
+
+
+def agent_disabled():
+    """Set from this host, or by the owner from inside the game. Either one stops every release."""
+    return AGENT_DISABLED.exists() or OWNER_KILL_SWITCH.exists()
 
 
 def run(command, *, check=True, capture=True, env=None, timeout=None, cwd=REPO):
@@ -125,10 +131,12 @@ def apply_content(server, content):
     sync_tree(content / "datapack", data / "world" / "datapacks" / "gm_content")
     conduit_config = data / "config" / "conduit"
     conduit_config.mkdir(parents=True, exist_ok=True)
-    for name in ("ore_patches.json", "bindings.json"):
-        source = content / "config" / name
-        if source.exists():
-            (conduit_config / name).write_bytes(source.read_bytes())
+    # Other files live in this folder, such as tuning values, so it's copied over rather than mirrored.
+    for source in (content / "config").glob("*.json"):
+        (conduit_config / source.name).write_bytes(source.read_bytes())
+    models = content / "config" / "models"
+    if models.exists():
+        sync_tree(models, conduit_config / "models")
     for side in ("server", "client"):
         source = content / "modules" / side
         source.mkdir(parents=True, exist_ok=True)
@@ -153,3 +161,19 @@ def reload_content(server):
         time.sleep(0.25)
     rcon(server, "conduit", "retrogen", "reload")
     rcon(server, "conduit", "modules", "reload")
+    rcon(server, "conduit", "module", "reload")
+
+
+def vanilla_biome(name):
+    """A biome's definition, read from the game's own jar, so new biomes start from what's really there."""
+    import zipfile
+
+    path = name.split(":", 1)[-1]
+    for folder in ("prod", "shadow"):
+        for jar in (RUNTIME / folder).glob("versions/*/server-*.jar"):
+            with zipfile.ZipFile(jar) as archive:
+                try:
+                    return json.loads(archive.read(f"data/minecraft/worldgen/biome/{path}.json"))
+                except KeyError as error:
+                    raise ValueError(f"There's no vanilla biome called {name}") from error
+    raise RuntimeError("No server jar found. Start prod once first.")

@@ -6,14 +6,23 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.Holder;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.entity.RandomizableContainerBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.levelgen.synth.SimplexNoise;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,10 +53,14 @@ public final class OrePatchQueue {
 	private static final int STATUS_INTERVAL_TICKS = 100;
 	/** A vein is a walk of at most veinSize steps, so this keeps it within the neighbouring chunks. */
 	private static final int MAX_VEIN_SIZE = 16;
+	private static final double BIOME_NOISE_SCALE = 0.02;
 
 	private static final OrePatchQueue INSTANCE = new OrePatchQueue();
 
 	private List<OrePatch> patches = List.of();
+	private List<SurfacePatch> surfacePatches = List.of();
+	private List<BiomePatch> biomePatches = List.of();
+	private List<RuinPatch> ruinPatches = List.of();
 	private final Deque<ChunkPos> queue = new ArrayDeque<>();
 	private final Set<Long> queued = new HashSet<>();
 	private final long budgetNanos = readBudgetMicros() * 1_000;
@@ -55,6 +68,7 @@ public final class OrePatchQueue {
 	private int tickIndex;
 	private long chunksPatched;
 	private long oresPlaced;
+	private long ruinsPlaced;
 
 	private OrePatchQueue() {}
 
@@ -82,11 +96,15 @@ public final class OrePatchQueue {
 			}
 		}
 		INSTANCE.patches = patches;
-		if (!patches.isEmpty()) {
-			LOGGER.info("retrogen: {} ore patches active", patches.size());
+		INSTANCE.surfacePatches = SurfacePatch.load();
+		INSTANCE.biomePatches = BiomePatch.load();
+		INSTANCE.ruinPatches = RuinPatch.load();
+		int total = patches.size() + INSTANCE.surfacePatches.size() + INSTANCE.biomePatches.size() + INSTANCE.ruinPatches.size();
+		if (total > 0) {
+			LOGGER.info("retrogen: {} patches active", total);
 			INSTANCE.scanLoadedChunks(server.overworld());
 		}
-		return patches.size();
+		return total;
 	}
 
 	private void scanLoadedChunks(ServerLevel level) {
@@ -110,11 +128,14 @@ public final class OrePatchQueue {
 
 	private boolean hasOutstanding(LevelChunk chunk) {
 		Set<String> applied = Provenance.appliedPatches(chunk);
-		return this.patches.stream().anyMatch(patch -> !applied.contains(patch.id()));
+		return this.patches.stream().anyMatch(patch -> !applied.contains(patch.id()))
+				|| this.surfacePatches.stream().anyMatch(patch -> !applied.contains(patch.id()))
+				|| this.biomePatches.stream().anyMatch(patch -> !applied.contains(patch.id()))
+				|| this.ruinPatches.stream().anyMatch(patch -> !applied.contains(patch.id()));
 	}
 
 	private void tick(MinecraftServer server) {
-		if (this.patches.isEmpty()) {
+		if (this.patches.isEmpty() && this.surfacePatches.isEmpty() && this.biomePatches.isEmpty() && this.ruinPatches.isEmpty()) {
 			return;
 		}
 		long started = System.nanoTime();
@@ -144,8 +165,8 @@ public final class OrePatchQueue {
 			this.tickIndex = 0;
 			long[] sorted = this.tickNanos.clone();
 			Arrays.sort(sorted);
-			LOGGER.info("retrogen: queued={} chunks={} ores={} tick_ms_p99={} tick_ms_max={}",
-					this.queue.size(), this.chunksPatched, this.oresPlaced,
+			LOGGER.info("retrogen: queued={} chunks={} ores={} ruins={} tick_ms_p99={} tick_ms_max={}",
+					this.queue.size(), this.chunksPatched, this.oresPlaced, this.ruinsPlaced,
 					"%.2f".formatted(sorted[STATUS_INTERVAL_TICKS * 99 / 100] / 1e6),
 					"%.2f".formatted(sorted[STATUS_INTERVAL_TICKS - 1] / 1e6));
 		}
@@ -168,9 +189,123 @@ public final class OrePatchQueue {
 				placeVeins(level, chunk, patch, visited);
 			}
 		}
+		// Nothing should spring up where someone has built, or it looks like the world is rearranging their base.
+		boolean built = Provenance.hasAnyTouched(chunk);
+		for (SurfacePatch patch : this.surfacePatches) {
+			if (applied.add(patch.id()) && !built) {
+				growPlants(level, chunk, patch);
+			}
+		}
+		for (BiomePatch patch : this.biomePatches) {
+			if (applied.add(patch.id()) && patch.sibling()) {
+				spreadBiome(level, chunk, patch);
+			}
+		}
+		for (RuinPatch patch : this.ruinPatches) {
+			if (applied.add(patch.id()) && !visited) {
+				placeRuin(level, chunk, patch);
+			}
+		}
 		Provenance.markApplied(chunk, applied);
 		chunk.markUnsaved();
 		this.chunksPatched++;
+	}
+
+	private void placeRuin(ServerLevel level, LevelChunk chunk, RuinPatch patch) {
+		ChunkPos pos = chunk.getPos();
+		RandomSource random = RandomSource.create(level.getSeed() ^ (patch.id().hashCode() * 0x9E3779B97F4A7C15L)
+				^ (pos.x() * 341873128712L) ^ (pos.z() * 132897987541L));
+		if (random.nextFloat() >= patch.chance()) {
+			return;
+		}
+		int x = pos.getMinBlockX();
+		int z = pos.getMinBlockZ();
+		BlockPos origin = patch.underground()
+				? new BlockPos(x, patch.minY() + random.nextInt(Math.max(1, patch.maxY() - patch.minY())), z)
+				: new BlockPos(x, chunk.getHeight(Heightmap.Types.OCEAN_FLOOR, x & 15, z & 15) + 1, z);
+		if (origin.getY() < patch.minY() || origin.getY() > patch.maxY()
+				|| !patch.on().contains(chunk.getBlockState(origin.below()).getBlock())
+				|| !(patch.biomes().isEmpty() || patch.biomes().stream().anyMatch(level.getBiome(origin)::is))) {
+			return;
+		}
+		// All of it or none of it, so no half-built ruin ever appears.
+		for (RuinPatch.Part part : patch.parts()) {
+			if (!patch.replaces().contains(chunk.getBlockState(origin.offset(part.x(), part.y(), part.z())).getBlock())) {
+				return;
+			}
+		}
+		Provenance.untracked(() -> {
+			for (RuinPatch.Part part : patch.parts()) {
+				BlockPos spot = origin.offset(part.x(), part.y(), part.z());
+				level.setBlock(spot, part.block().defaultBlockState(), Block.UPDATE_CLIENTS);
+				if (patch.loot() != null && level.getBlockEntity(spot) instanceof RandomizableContainerBlockEntity chest) {
+					chest.setLootTable(ResourceKey.create(Registries.LOOT_TABLE, Identifier.parse(patch.loot())), random.nextLong());
+				}
+			}
+		});
+		this.ruinsPlaced++;
+	}
+
+	private void growPlants(ServerLevel level, LevelChunk chunk, SurfacePatch patch) {
+		ChunkPos pos = chunk.getPos();
+		RandomSource random = RandomSource.create(level.getSeed() ^ (patch.id().hashCode() * 0x9E3779B97F4A7C15L)
+				^ (pos.x() * 341873128712L) ^ (pos.z() * 132897987541L));
+		int count = (int) patch.perChunk() + (random.nextFloat() < patch.perChunk() % 1 ? 1 : 0);
+		for (int i = 0; i < count; i++) {
+			int x = pos.getMinBlockX() + random.nextInt(16);
+			int z = pos.getMinBlockZ() + random.nextInt(16);
+			BlockPos spot = patch.underground() ? caveFloor(chunk, patch, x, z, random) : surface(chunk, patch, x, z);
+			if (spot != null && (patch.biomes().isEmpty() || patch.biomes().stream().anyMatch(level.getBiome(spot)::is))) {
+				// Natural growth, so it mustn't count as a player's change.
+				Provenance.untracked(() -> level.setBlock(spot, patch.block().defaultBlockState(), Block.UPDATE_CLIENTS));
+				this.oresPlaced++;
+			}
+		}
+	}
+
+	private static BlockPos surface(LevelChunk chunk, SurfacePatch patch, int x, int z) {
+		BlockPos spot = new BlockPos(x, chunk.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x & 15, z & 15) + 1, z);
+		return spot.getY() >= patch.minY() && spot.getY() <= patch.maxY() && canGrow(chunk, patch, spot) ? spot : null;
+	}
+
+	private static BlockPos caveFloor(LevelChunk chunk, SurfacePatch patch, int x, int z, RandomSource random) {
+		int surfaceY = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x & 15, z & 15);
+		int top = Math.min(patch.maxY(), surfaceY - 5);
+		if (top <= patch.minY()) {
+			return null;
+		}
+		int startY = patch.minY() + random.nextInt(top - patch.minY());
+		for (int y = startY; y > Math.max(patch.minY(), startY - 12); y--) {
+			BlockPos spot = new BlockPos(x, y, z);
+			if (canGrow(chunk, patch, spot)) {
+				return spot;
+			}
+		}
+		return null;
+	}
+
+	private static boolean canGrow(LevelChunk chunk, SurfacePatch patch, BlockPos spot) {
+		return chunk.getBlockState(spot).isAir()
+				&& patch.on().contains(chunk.getBlockState(spot.below()).getBlock())
+				&& !Provenance.isTouched(chunk, spot)
+				&& !Provenance.isTouched(chunk, spot.below());
+	}
+
+	private static void spreadBiome(ServerLevel level, LevelChunk chunk, BiomePatch patch) {
+		var biomes = level.registryAccess().lookupOrThrow(Registries.BIOME);
+		var target = biomes.get(patch.to());
+		if (target.isEmpty()) {
+			LOGGER.error("biome patch {} wants {}, which doesn't exist", patch.id(), patch.to().identifier());
+			return;
+		}
+		SimplexNoise noise = new SimplexNoise(RandomSource.create(level.getSeed() ^ patch.id().hashCode()));
+		// Noise runs from about -1 to 1, so a threshold puts a matching share of cells on one side of it.
+		double threshold = patch.proportion() * 2 - 1;
+		chunk.fillBiomesFromNoise((x, y, z) -> {
+			Holder<Biome> existing = chunk.getNoiseBiome(x, y, z);
+			return existing.is(patch.from()) && noise.get(x * BIOME_NOISE_SCALE, z * BIOME_NOISE_SCALE) < threshold ? target.get() : existing;
+		});
+		level.getChunkSource().chunkMap.resendBiomesForChunks(List.of(chunk));
 	}
 
 	private void placeVeins(ServerLevel level, LevelChunk chunk, OrePatch patch, boolean visited) {
@@ -212,6 +347,9 @@ public final class OrePatchQueue {
 			return;
 		}
 		if (visited && !fullyHidden(level, pos)) {
+			return;
+		}
+		if (!patch.biomes().isEmpty() && patch.biomes().stream().noneMatch(level.getBiome(pos)::is)) {
 			return;
 		}
 		// Written to the section directly: this isn't a player or world change, so it shouldn't count as

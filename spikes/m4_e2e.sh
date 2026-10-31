@@ -1,0 +1,137 @@
+#!/bin/bash
+# M4's exit test: in a blank world, the agent interviews two test players privately, chooses a direction,
+# teases it in role, ships one tested feature with no human help, and speaks up once unprompted.
+# It stops after one release, so what it spends is bounded. Start with a blank world from reset-dev-world.sh.
+# Usage: m4_e2e.sh
+set -uo pipefail
+cd "$(dirname "$0")/.."
+set -a; . ./.env; set +a
+
+work="$RUNTIME_DIR/e2e"
+state="$RUNTIME_DIR/agent-workspace/state"
+rm -rf "$work"; mkdir -p "$work"
+started=$(date +%s)
+elapsed() { echo "$(( $(date +%s) - started ))s"; }
+
+cat >"$work/aria.json" <<'JSON'
+{"answers": [
+  "I want exploring to feel dangerous, and to keep finding strange things. I'm so tired of grinding. quokkamarker",
+  "Maybe sunken ruins or a drowned world? Machines that run on the tides would be cool.",
+  "Create, because you can watch machines move. Thaumcraft, because you figure things out by studying them.",
+  "I hate when progress is just bigger numbers. That's about all from me.",
+  "Thanks, I'm happy to start playing now."],
+ "public": ["could we find something that glows in the caves?"]}
+JSON
+cat >"$work/bram.json" <<'JSON'
+{"answers": [
+  "I like building factories and tuning them until they hum. wombatmarker",
+  "Clockwork gods or living fungus, either would be a neat theme.",
+  "Botania for the puzzles, and Applied Energistics for how satisfying the logistics feel.",
+  "Too many inventory screens annoy me. That's everything, go ahead.",
+  "Done, thanks!"],
+ "public": []}
+JSON
+
+echo "=== baseline release, so the first feature doesn't need a restart ($(elapsed))"
+python3 -m broker.promote --source "$(pwd)" --release-id baseline 2>&1 | tail -14 | cut -c1-120
+printf 'Aria\nBram\n' >"$RUNTIME_DIR/control/roster.txt"
+
+echo "=== starting the agent ($(elapsed))"
+export AGENT_DAILY_USAGE_LIMIT=15 AGENT_STOP_AFTER_RELEASES=1 AGENT_MAX_BUILDERS=1
+./scripts/agent-up.sh --no-build
+
+python3 scripts/playtest_bot.py --name Aria --script "$work/aria.json" --log "$work/aria.jsonl" --never-see wombatmarker --seconds 7200 \
+  >"$work/aria.out" 2>&1 </dev/null &
+aria=$!
+python3 scripts/playtest_bot.py --name Bram --script "$work/bram.json" --log "$work/bram.jsonl" --never-see quokkamarker --seconds 7200 \
+  >"$work/bram.out" 2>&1 </dev/null &
+bram=$!
+trap 'kill "$aria" "$bram" 2>/dev/null; ./scripts/agent-down.sh >/dev/null 2>&1' EXIT
+
+wait_for() {
+  local description=$1 seconds=$2 condition=$3
+  for _ in $(seq 1 $((seconds / 5))); do
+    if eval "$condition" >/dev/null 2>&1; then
+      echo "$description after $(elapsed)"
+      return 0
+    fi
+    if [[ "$(docker inspect -f '{{.State.Running}}' livingmod-agent-1 2>/dev/null)" != "true" ]]; then
+      echo "FAIL: the agent stopped while waiting for: $description"
+      return 1
+    fi
+    sleep 5
+  done
+  echo "FAIL: timed out waiting for: $description"
+  return 1
+}
+
+failed=0
+wait_for "the direction was chosen" 1500 "grep -q '\"direction_chosen\": true' '$state/opening.json'" || failed=1
+
+if [[ $failed == 0 ]]; then
+  # Silence is an allowed answer for the watcher, so give it a few chances to speak up.
+  for round in 1 2 3 4; do
+    for _ in 1 2 3; do
+      ./scripts/mc.sh kill Bram >/dev/null
+      sleep 12
+    done
+    sleep 30
+    if docker exec livingmod-agent-1 grep -q '"role": "watcher"' /workspace/state/llm.jsonl </dev/null \
+      && grep '"kind": "died"' -A40 "$work/bram.jsonl" | grep '"heard"' | grep -q $'§d'; then
+      echo "the watcher spoke up after round $round ($(elapsed))"
+      break
+    fi
+  done
+  wait_for "the first feature shipped" 3600 "[ -s '$state/features.jsonl' ] || docker logs livingmod-agent-1 2>&1 | grep -q 'giving up after'" || failed=1
+fi
+sleep 60
+
+echo; echo "=== what the agent logged"
+docker logs livingmod-agent-1 2>&1 | grep -v 'Permission mode forced' | tail -60 | cut -c1-220
+echo; echo "=== broker requests"
+tail -30 "$RUNTIME_DIR/broker/daemon.log" | cut -c1-200
+for name in aria bram; do
+  echo; echo "=== transcript: $name"
+  python3 - "$work/$name.jsonl" <<'PY'
+import json, sys
+for line in open(sys.argv[1], encoding="utf-8"):
+    entry = json.loads(line)
+    if entry["kind"] in ("heard", "said"):
+        print(("  <- " if entry["kind"] == "heard" else "  -> ") + entry["text"][:260])
+    elif entry["kind"] not in ("player_chat",):
+        print("  [" + entry["kind"] + "] " + str(entry.get("reason", entry.get("word", "")))[:160])
+PY
+done
+echo; echo "=== direction"
+cat "$RUNTIME_DIR/agent-workspace/repo/bible/theme.md" 2>/dev/null | head -30 | cut -c1-300
+echo; echo "=== discovery plan"
+cat "$RUNTIME_DIR/agent-workspace/repo/bible/discovery.md" 2>/dev/null | head -20 | cut -c1-300
+echo; echo "=== shipped"
+cat "$state/features.jsonl" 2>/dev/null | cut -c1-900
+cat "$RUNTIME_DIR/broker/state.json"
+ls "$RUNTIME_DIR/agent-workspace/repo/mods/genesis/features/" 2>/dev/null
+echo; echo "=== usage by role"
+python3 - "$state/llm.jsonl" <<'PY'
+import collections, json, sys
+totals = collections.defaultdict(lambda: [0, 0.0, 0.0, 0])
+for line in open(sys.argv[1], encoding="utf-8"):
+    entry = json.loads(line)
+    total = totals[entry["role"]]
+    total[0] += 1; total[1] += entry.get("seconds") or 0; total[2] += entry.get("estimate") or 0; total[3] += 1 if entry.get("error") else 0
+for role, (calls, seconds, estimate, errors) in sorted(totals.items()):
+    print(f"{role}: {calls} calls, {seconds:.0f}s, estimate {estimate:.2f}, errors {errors}")
+PY
+
+echo; echo "=== checks"
+leaks=$(cat "$work"/aria.jsonl "$work"/bram.jsonl | grep -c '"kind": "leak"')
+echo "private words seen by the wrong player: $leaks"
+[[ "$leaks" == 0 ]] || failed=1
+for name in aria bram; do
+  grep -q '"kind": "said"' "$work/$name.jsonl" || { echo "FAIL: $name never answered"; failed=1; }
+  grep '"heard"' "$work/$name.jsonl" | grep -q $'§d' || { echo "FAIL: $name never heard the character"; failed=1; }
+done
+[[ -s "$state/features.jsonl" ]] || { echo "FAIL: nothing shipped"; failed=1; }
+grep -q '"role": "watcher"' "$state/llm.jsonl" || echo "note: the watcher never ran"
+echo "total time: $(elapsed)"
+[[ $failed == 0 ]] && echo "M4 PASS" || echo "M4 FAILED"
+exit $failed

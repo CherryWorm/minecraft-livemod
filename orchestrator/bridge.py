@@ -4,11 +4,15 @@ import json
 import os
 
 
+SECRET_FD = 3  # Opened for us by the container's entrypoint, which is the only thing able to read the file.
+
+
 class Bridge:
     def __init__(self, host=None, port=25580):
         self.host = host or os.environ.get("BRIDGE_HOST", "prod")
         self.port = port
-        self.secret = os.environ["BRIDGE_SECRET"].strip()
+        with os.fdopen(SECRET_FD) as stream:
+            self.secret = stream.read().strip()
         self.reader = None
         self.writer = None
         self.next_id = 1

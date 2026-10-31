@@ -3,7 +3,10 @@ package gm.conduit.retrogen;
 import com.google.gson.Gson;
 import com.google.gson.JsonParseException;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.Block;
 
 import java.io.IOException;
@@ -16,11 +19,13 @@ import java.util.stream.Collectors;
 /**
  * One ore added to the world. Patches are data, so a new ore needs no code and no restart. The id must
  * never be reused, because chunks remember which ids they've already had.
+ *
+ * @param biomes where it forms, or empty for anywhere
  */
-public record OrePatch(String id, Block ore, Set<Block> replaces, int veinsPerChunk, int veinSize, int minY, int maxY) {
+public record OrePatch(String id, Block ore, Set<Block> replaces, int veinsPerChunk, int veinSize, int minY, int maxY, Set<ResourceKey<Biome>> biomes) {
 	private static final Path FILE = Path.of("config", "conduit", "ore_patches.json");
 
-	private record Definition(String id, String block, List<String> replaces, int veinsPerChunk, int veinSize, int minY, int maxY) {}
+	private record Definition(String id, String block, List<String> replaces, int veinsPerChunk, int veinSize, int minY, int maxY, List<String> biomes) {}
 
 	public static List<OrePatch> load() {
 		if (!Files.exists(FILE)) {
@@ -35,6 +40,7 @@ public record OrePatch(String id, Block ore, Set<Block> replaces, int veinsPerCh
 	}
 
 	private static OrePatch resolve(Definition definition) {
+		List<String> biomes = definition.biomes() == null ? List.of() : definition.biomes();
 		return new OrePatch(
 				definition.id(),
 				block(definition.block()),
@@ -42,7 +48,8 @@ public record OrePatch(String id, Block ore, Set<Block> replaces, int veinsPerCh
 				definition.veinsPerChunk(),
 				definition.veinSize(),
 				definition.minY(),
-				definition.maxY());
+				definition.maxY(),
+				biomes.stream().map(id -> ResourceKey.create(Registries.BIOME, Identifier.parse(id))).collect(Collectors.toUnmodifiableSet()));
 	}
 
 	private static Block block(String id) {

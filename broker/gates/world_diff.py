@@ -194,6 +194,7 @@ def main():
     bad_entities = []
     forgotten = []
     chunks_with_ore = 0
+    unfinished = 0
     missing = [pos for pos in before if pos not in after]
 
     def in_protected(x, y, z):
@@ -205,6 +206,10 @@ def main():
     for pos, old in before.items():
         new = after.get(pos)
         if new is None:
+            continue
+        # Land still being generated when the copy was taken hasn't been seen by anyone, and carries on changing.
+        if old.get("Status") != "minecraft:full":
+            unfinished += 1
             continue
         if canonical(old.get("block_entities", [])) != canonical(new.get("block_entities", [])):
             bad_entities.append(pos)
@@ -238,7 +243,8 @@ def main():
                     bad_protected.append((x, y, z, old_name, new_name))
         chunks_with_ore += placed_here > 0
 
-    print(f"chunks compared: {len(before) - len(missing)}, chunks missing afterwards: {len(missing)}")
+    print(f"chunks compared: {len(before) - len(missing) - unfinished}, still generating when copied: {unfinished}, "
+          f"chunks missing afterwards: {len(missing)}")
     ore_total = sum(count for (_, new_name), count in transitions.items() if new_name == args.ore)
     print(f"chunks that received ore: {chunks_with_ore}, {ore_total} blocks placed")
     print("block changes:")

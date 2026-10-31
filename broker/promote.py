@@ -7,16 +7,18 @@ Exit codes: 0 released (or nothing to release), 2 blocked by a gate, 3 released 
 The result is also written to runtime/broker/last.json, so the agent can read why something failed.
 """
 import argparse
+import hashlib
 import json
 import pathlib
 import shutil
 import sys
 import time
 
-from broker import bundles, deploy, runtime
-from broker.gates import GateFailed, client, shadow, static
+from broker import bundles, deploy, runtime, sign
+from broker.gates import GateFailed, bytecode, client, shadow, static
 
 SERVER_MODS = ("conduit",)
+PASSED = runtime.BROKER / "passed_gates.json"
 
 
 class Stages:
@@ -65,8 +67,14 @@ def compile_content(source, mods, content):
     new_ledger = bundles.assign_slots(features, json.loads(json.dumps(old_ledger)), pool)
     if content.exists():
         shutil.rmtree(content)
-    bundles.render(features, new_ledger, content, runtime.data_format())
+    bundles.render(features, new_ledger, content, runtime.data_format(), runtime.vanilla_biome, discovery_scope(source))
     return features, pool, old_ledger, new_ledger
+
+
+def discovery_scope(source):
+    """Whether learning is shared or per player. The agent chooses this for each world in its discovery plan."""
+    path = source / "bible" / "discovery.json"
+    return json.loads(path.read_text(encoding="utf-8")).get("scope", "shared") if path.exists() else "shared"
 
 
 def build(mods):
@@ -98,6 +106,26 @@ def collect_modules(features, mods, content):
         shutil.copy(built[0], target / f"{feature_id}.jar")
 
 
+def check_modules(features, content):
+    """Checks the copies in the release, not the build output, so what's checked is what ships."""
+    for feature_id, side in bundles.find_modules(features):
+        bytecode.check_jar(content / "modules" / side / f"{feature_id}.jar", side, feature_id)
+
+
+def sign_modules(content, old_content):
+    """Signs last, because a jar can't change after this without breaking its signature, and only for a release
+    that's really going out, because every signature uses up a generation."""
+    try:
+        sign.sign_release(content, old_content)
+    except (sign.SigningError, OSError) as error:
+        raise GateFailed("sign", f"Client modules couldn't be signed, which only the owner can fix: {error}") from error
+
+
+def jar_hashes(folder):
+    return {str(path.relative_to(folder)): bundles.hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in folder.rglob("*.jar")} if folder.exists() else {}
+
+
 def choose_tier(content, jars):
     """Works out what the release needs from what actually changed. It's never taken from the agent."""
     state = runtime.load_state()
@@ -113,7 +141,9 @@ def choose_tier(content, jars):
     worldgen = bundles.tree_hash(content / "datapack/data/gm/worldgen") != bundles.tree_hash(old_content / "datapack/data/gm/worldgen")
     if old_jars != new_jars or worldgen or not current.exists():
         return "T3"
-    if changed("pack") or changed("modules") or changed("config"):
+    # Only the jars count in modules/. The last release's signatures sit beside its jars and this one has none
+    # yet, so comparing whole folders would make every check look like a change.
+    if changed("pack") or changed("config") or jar_hashes(content / "modules") != jar_hashes(old_content / "modules"):
         return "T2"
     if changed("datapack"):
         return "T1"
@@ -123,13 +153,53 @@ def choose_tier(content, jars):
 def new_visuals(old_ledger, new_ledger):
     blocks = [entry["slot"] for key, entry in new_ledger["blocks"].items() if key not in old_ledger.get("blocks", {})]
     items = [entry["slot"] for key, entry in new_ledger["items"].items() if key not in old_ledger.get("items", {})]
-    return blocks, items
+    mobs = [entry["slot"] for key, entry in new_ledger.get("mobs", {}).items() if key not in old_ledger.get("mobs", {})]
+    return blocks, items, mobs
+
+
+def fingerprint(content, jars, current):
+    """Identifies what a gate run proved: this exact content and these jars, on top of this release."""
+    digest = hashlib.sha256(str(current).encode())
+    digest.update(bundles.tree_hash(content).encode())
+    for jar in sorted(jars):
+        digest.update(jar.read_bytes())
+    return digest.hexdigest()
+
+
+def run_gates(tier, jars, content, old_ledger, new_ledger, old_content, mods, release_id, stages, report):
+    """The slow gates. The agent runs them, has the work reviewed, then asks to release the same commit, and
+    running them a second time would only make players wait, so a match with the last pass is enough."""
+    proof = fingerprint(content, jars, runtime.load_state().get("current"))
+    if PASSED.exists():
+        passed = json.loads(PASSED.read_text(encoding="utf-8"))
+        if passed["fingerprint"] == proof:
+            print("these exact gates have already passed", flush=True)
+            report["screenshots"] = passed["screenshots"]
+            return
+
+    new_patches = patches_changed(content, old_content)
+    client_modules = jar_hashes(content / "modules" / "client") != jar_hashes(old_content / "modules" / "client")
+    sign.mark_for_testing(content)
+    report["shadow"] = stages.run("shadow", lambda: shadow.run_gate(tier, jars, content, new_patches))
+
+    blocks, items, mobs = new_visuals(old_ledger, new_ledger)
+    report_dir = runtime.REPORTS / release_id
+    shots = stages.run("client", lambda: client.run_gate(blocks, items, mods, report_dir, mobs, client_modules))
+    report["screenshots"] = [str(path) for path in shots]
+    PASSED.write_text(json.dumps({"fingerprint": proof, "screenshots": report["screenshots"]}), encoding="utf-8")
 
 
 def patches_changed(content, old_content):
     def read(folder):
-        path = folder / "config" / "ore_patches.json"
-        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        found = []
+        ores = folder / "config" / "ore_patches.json"
+        if ores.exists():
+            found.extend(json.loads(ores.read_text(encoding="utf-8")))
+        plants = folder / "config" / "surface_patches.json"
+        if plants.exists():
+            # A plant grows into open air, so that's all it's allowed to replace.
+            found.extend({**plant, "replaces": ["minecraft:air"]} for plant in json.loads(plants.read_text(encoding="utf-8")))
+        return found
 
     old_ids = {patch["id"] for patch in read(old_content)}
     return [patch for patch in read(content) if patch["id"] not in old_ids]
@@ -148,6 +218,7 @@ def promote(source, release_id, deploy_to_prod, chaos_in_prod, stages, check_onl
     stages.run("build", lambda: build(mods))
     jars = collect_jars(mods)
     collect_modules(features, mods, content)
+    stages.run("bytecode", lambda: check_modules(features, content))
     if check_only:
         report["result"] = "passed_gates"
         return report
@@ -161,21 +232,16 @@ def promote(source, release_id, deploy_to_prod, chaos_in_prod, stages, check_onl
 
     state = runtime.load_state()
     old_content = runtime.HISTORY / str(state.get("current")) / "content"
-    new_patches = patches_changed(content, old_content)
-    report["shadow"] = stages.run("shadow", lambda: shadow.run_gate(tier, jars, content, new_patches))
-
-    blocks, items = new_visuals(old_ledger, new_ledger)
-    report_dir = runtime.REPORTS / release_id
-    shots = stages.run("client", lambda: client.run_gate(blocks, items, mods, report_dir))
-    report["screenshots"] = [str(path) for path in shots]
+    run_gates(tier, jars, content, old_ledger, new_ledger, old_content, mods, release_id, stages, report)
 
     if not deploy_to_prod:
         report["result"] = "passed_gates"
         return report
 
-    if runtime.AGENT_DISABLED.exists():
+    if runtime.agent_disabled():
         raise GateFailed("control", "The kill switch is on, so nothing can be released.")
 
+    stages.run("sign", lambda: sign_modules(content, old_content))
     release_folder = deploy.store_release(release_id, jars, content, ledger_path)
     if chaos_in_prod:
         marker = runtime.RUNTIME / "prod" / "config" / "conduit" / "chaos_crash_after_ticks"

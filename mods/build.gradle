@@ -8,6 +8,10 @@ subprojects {
 
 	repositories {
 		maven { url = 'https://maven.nucleoid.xyz' }
+		maven {
+			url = 'https://api.modrinth.com/maven'
+			content { includeGroup 'maven.modrinth' }
+		}
 	}
 
 	dependencies {
@@ -31,6 +35,7 @@ subprojects {
 			compileOnly project(project.name.endsWith('-server') ? ':conduit' : ':companion')
 			if (project.name.endsWith('-server')) {
 				compileOnly "eu.pb4:polymer-bundled:${project.polymer_version}"
+				compileOnly "maven.modrinth:blockbench-import-library:${project.bil_version}"
 			}
 		}
 	}

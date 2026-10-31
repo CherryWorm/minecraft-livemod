@@ -4,24 +4,41 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import gm.conduit.KillSwitch;
+import gm.conduit.knowledge.Knowledge;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.border.WorldBorder;
+
+import java.util.Set;
 
 /**
  * Everything the agent can do in the world. Speaking is limited to system messages, and no operation
  * can give anyone anything, so fairness rules can't be talked around through chat.
  */
 final class Operations {
+	private static final Set<String> READ_ONLY = Set.of("status", "players", "progress");
+
 	private Operations() {}
 
+	private static JsonElement status() {
+		JsonObject status = new JsonObject();
+		status.addProperty("agent_disabled", KillSwitch.on());
+		return status;
+	}
+
 	static JsonElement run(MinecraftServer server, String op, JsonObject request) {
+		if (KillSwitch.on() && !READ_ONLY.contains(op)) {
+			throw new IllegalStateException("The kill switch is on");
+		}
 		return switch (op) {
+			case "status" -> status();
 			case "whisper" -> whisper(server, text(request, "player"), text(request, "text"));
 			case "broadcast" -> broadcast(server, text(request, "text"));
 			case "capture" -> capture(text(request, "player"), request.get("on").getAsBoolean());
 			case "players" -> players(server);
 			case "border" -> border(server, request.get("size").getAsDouble());
+			case "progress" -> Knowledge.instance().progress();
 			default -> throw new IllegalArgumentException("Unknown operation " + op);
 		};
 	}

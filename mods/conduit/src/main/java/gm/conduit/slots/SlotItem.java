@@ -2,8 +2,10 @@ package gm.conduit.slots;
 
 import eu.pb4.polymer.core.api.item.SimplePolymerItem;
 import gm.conduit.api.ItemBehavior;
+import gm.conduit.knowledge.Knowledge;
 import gm.conduit.modules.ServerModuleHost;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.LivingEntity;
@@ -23,6 +25,9 @@ public final class SlotItem extends SimplePolymerItem {
 
 	@Override
 	public InteractionResult use(Level level, Player player, InteractionHand hand) {
+		if (player instanceof ServerPlayer serverPlayer && Knowledge.instance().useItem(serverPlayer, player.getItemInHand(hand))) {
+			return InteractionResult.SUCCESS;
+		}
 		ItemBehavior behavior = ServerModuleHost.instance().itemBehavior(this.slotId);
 		if (behavior == null || level.isClientSide()) {
 			return super.use(level, player, hand);

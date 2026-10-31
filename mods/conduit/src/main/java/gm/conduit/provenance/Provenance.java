@@ -25,6 +25,8 @@ public final class Provenance {
 	public static final AttachmentType<List<String>> APPLIED_PATCHES = AttachmentRegistry.createPersistent(
 			Identifier.fromNamespaceAndPath(Conduit.NAMESPACE, "applied_patches"), Codec.STRING.listOf());
 
+	private static boolean untracked;
+
 	private Provenance() {}
 
 	/**
@@ -33,8 +35,21 @@ public final class Provenance {
 	 */
 	public static void init() {}
 
+	/** Runs something on the server thread whose block changes are natural, not anyone's doing. */
+	public static void untracked(Runnable change) {
+		untracked = true;
+		try {
+			change.run();
+		} finally {
+			untracked = false;
+		}
+	}
+
 	/** Called for every block change on a live chunk. Worldgen writes to proto chunks and never gets here. */
 	public static void recordChange(LevelChunk chunk, BlockPos pos) {
+		if (untracked) {
+			return;
+		}
 		TouchedBlocks touched = chunk.getAttached(TOUCHED);
 		if (touched == null) {
 			touched = new TouchedBlocks();
