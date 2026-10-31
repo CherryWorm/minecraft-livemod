@@ -7,7 +7,7 @@ import time
 import unittest
 from unittest import mock
 
-from orchestrator import feedback, llm, main, progression, voice
+from orchestrator import feedback, llm, main, progression, voice, workshop
 
 
 def result(data=None, is_error=False):
@@ -265,6 +265,25 @@ class Directing(Base):
         await self.agent.plan()
         self.assertEqual(self.agent.state["director_saw"], 0)
         self.assertEqual(self.status(1), None)
+
+
+class CatchingUp(unittest.IsolatedAsyncioTestCase):
+    """Something shipping while another feature waits its turn is nobody's mistake."""
+
+    async def test_it_catches_up_and_asks_again(self):
+        answers = [{"result": "blocked", "reason": f"x/y {workshop.STALE} any more."}, {"result": "passed_gates"}]
+        with mock.patch.object(workshop, "ready_commit", return_value="abc") as commit, mock.patch.object(workshop, "request", mock.AsyncMock(side_effect=answers)), \
+                mock.patch.object(workshop.asyncio, "sleep", mock.AsyncMock()):
+            answer = await workshop.checked_against_main("gates", "message", "tree", "feature", "node", hurry=True)
+        self.assertEqual(answer["result"], "passed_gates")
+        self.assertEqual(commit.call_count, 2)
+
+    async def test_a_real_problem_goes_back_to_the_builder_straight_away(self):
+        request = mock.AsyncMock(return_value={"result": "blocked", "reason": "The texture is missing."})
+        with mock.patch.object(workshop, "ready_commit", return_value="abc"), mock.patch.object(workshop, "request", request):
+            answer = await workshop.checked_against_main("gates", "message", "tree", "feature", "node")
+        self.assertEqual(request.await_count, 1)
+        self.assertIn("texture", answer["reason"])
 
 
 class ThePlan(Base):

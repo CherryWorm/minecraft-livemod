@@ -29,6 +29,8 @@ REQUEST_TIMEOUT = {"lint": 300, "check": 300, "gates": 1800, "release": 1800, "j
 # nobody's waiting on them, because they're built in the background while people play.
 STAGE_LIMITS = {"early": (60, 8.0, 3), "mid": (120, 16.0, 4), "end": (200, 30.0, 5)}
 SMALL_LIMITS = (40, 3.0, 2)
+STALE = "is in the ledger but no feature declares it"
+STALE_RETRIES = 4
 SMALL_NOTE = ("This is a small change a player just asked for, and they're waiting for it. Do it yourself, quickly, with no subagents and no research, "
               "and change as little as you can. If it changes something players already have, say why in `changes_reached`.\n\n")
 
@@ -148,6 +150,18 @@ def ready_commit(message, tree, feature_id=None, node=None):
     return _git("rev-parse", "HEAD", cwd=tree)
 
 
+async def checked_against_main(kind, message, tree, feature_id, node, **fields):
+    """Something else can ship while this waits its turn, and then this looks like it's removing that. Nobody's made a
+    mistake, so it catches up and asks again, rather than sending a builder off to fix something that isn't wrong."""
+    for _ in range(STALE_RETRIES):
+        commit = ready_commit(message, tree, feature_id, node)
+        answer = await request(kind, commit=commit, **fields)
+        if STALE not in str(answer.get("reason")):
+            break
+        await asyncio.sleep(10)
+    return answer
+
+
 async def request(kind, **fields):
     """Asks the broker, which runs outside this container, and waits for its answer."""
     request_id = uuid.uuid4().hex[:12]
@@ -199,13 +213,11 @@ def _tools_for(feature_id, tree, node):
     @tool("lint_feature", "Instantly checks this feature against the release rules, with no compile, and gives advice. Use it as often as you like.", {})
     async def lint_feature(args):
         print(f"{feature_id}: used lint_feature", flush=True)
-        commit = ready_commit(f"{feature_id}: work in progress", tree, feature_id, node)
-        return _text(_verdict(await request("lint", commit=commit), ("passed_lint",)))
+        return _text(_verdict(await checked_against_main("lint", f"{feature_id}: work in progress", tree, feature_id, node), ("passed_lint",)))
 
     @tool("check_feature", "Compiles this feature and runs the static checks. Takes about 10 seconds.", {})
     async def check_feature(args):
-        commit = ready_commit(f"{feature_id}: work in progress", tree, feature_id, node)
-        return _text(_verdict(await request("check", commit=commit), ("passed_gates", "nothing_to_release")))
+        return _text(_verdict(await checked_against_main("check", f"{feature_id}: work in progress", tree, feature_id, node), ("passed_gates", "nothing_to_release")))
 
     @tool("preview_feature", "Draws this feature's art beside vanilla's in about a second, and says where the picture is, so read it with Read.", {})
     async def preview_feature(args):
@@ -378,16 +390,13 @@ class Workshop:
             session = result.session_id or session
             if result.is_error:
                 print(f"{feature_id}: builder failed: {result.stop_reason} {result.text[:200]}", flush=True)
-                self.governor.record_gate_result(False)
                 last_problem = f"The builder stopped: {result.stop_reason}"
                 continue
 
-            commit = ready_commit(f"{feature_id}: attempt {attempt}", tree, feature_id, node)
             began = time.monotonic()
-            gates = await request("gates", commit=commit, release_id=f"{feature_id}-{attempt}", hurry=small)
+            gates = await checked_against_main("gates", f"{feature_id}: attempt {attempt}", tree, feature_id, node, release_id=f"{feature_id}-{attempt}", hurry=small)
             timings[f"gates_{attempt}"] = round(time.monotonic() - began, 1)
             if gates.get("result") not in ("passed_gates", "nothing_to_release"):
-                self.governor.record_gate_result(False)
                 feedback = f"The automated gates stopped this at {gates.get('gate')}:\n{gates.get('reason')}\n\nFix it."
                 last_problem = f"Gate {gates.get('gate')}: {str(gates.get('reason'))[:300]}"
                 print(f"{feature_id}: blocked at {gates.get('gate')}", flush=True)
@@ -418,7 +427,6 @@ class Workshop:
                     _git("merge", "-q", "--no-ff", "-m", f"Released {feature_id}", f"feature/{feature_id}")
             timings["release"] = round(time.monotonic() - began, 1)
             if not went_out:
-                self.governor.record_gate_result(False)
                 feedback = f"Release failed at {released.get('gate')}: {released.get('reason')}\n\nFix it."
                 last_problem = f"Release: {str(released.get('reason'))[:300]}"
                 print(f"{feature_id}: release failed: {released.get('reason')}", flush=True)
@@ -431,6 +439,9 @@ class Workshop:
             await self.on_released(feature_id, tree)
             return True
         print(f"{feature_id}: giving up after {attempts} attempts", flush=True)
+        # Only a whole feature failing counts, because builders getting a check wrong on the way is just how they work,
+        # and with several at once, five of those in a row is nothing to stop for.
+        self.governor.record_gate_result(False)
         # So the director knows, instead of asking for the same thing in the same way.
         with pathlib.Path("/workspace/state/unfinished.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(json.dumps({"at": time.time(), "feature": feature_id, "problem": last_problem}) + "\n")

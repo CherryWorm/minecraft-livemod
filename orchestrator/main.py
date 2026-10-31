@@ -468,11 +468,13 @@ class Agent:
     async def sort_loop(self):
         while True:
             await self.sort_wanted.wait()
-            if not self.governor.why_not_build():
-                try:
-                    await self.sort_requests()
-                except Exception as error:  # noqa: BLE001
-                    print(f"sorting requests failed: {error}", flush=True)
+            if self.governor.why_not_build():
+                await asyncio.sleep(60)  # Still wanted, for whenever building can go ahead again.
+                continue
+            try:
+                await self.sort_requests()
+            except Exception as error:  # noqa: BLE001
+                print(f"sorting requests failed: {error}", flush=True)
             # Cleared only now, because the director shouldn't start on something this might be about to take.
             self.sort_wanted.clear()
             self.wake_director.set()

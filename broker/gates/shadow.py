@@ -42,8 +42,10 @@ def scan_logs(text):
 
 
 def _running():
+    """Really answering, because to Docker a server stuck crashing still counts as running, and then every release
+    after a bad one would fail for what that one did, rather than starting it afresh."""
     state = runtime.inspect_state("shadow")
-    return bool(state and state.get("Running"))
+    return bool(state and state.get("Running") and not state.get("Restarting")) and "players online" in runtime.rcon("shadow", "list", check=False)
 
 
 def clone_prod_world():
