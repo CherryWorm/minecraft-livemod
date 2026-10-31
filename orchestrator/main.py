@@ -7,11 +7,13 @@ import pathlib
 import re
 import time
 
-from orchestrator import llm, research, voice, workshop
+from orchestrator import icon, llm, minds, progression, research, voice, workshop, world_index
 from orchestrator.bridge import Bridge
 from orchestrator.governor import CONTROL, Governor
 
 BIBLE = workshop.REPO / "bible"
+PROGRESSION = workshop.REPO / workshop.PROGRESSION
+FEATURES = workshop.REPO / "mods/genesis/features"
 STATE = pathlib.Path("/workspace/state")
 OPENING = STATE / "opening.json"
 DECIDE_AFTER_SECONDS = 20 * 60
@@ -23,31 +25,38 @@ WATCH_SECONDS = 5 * 60
 FEATURE_ID = r"[a-z][a-z0-9_]{1,40}"
 DIRECTION_RESEARCH = 6
 DIRECTOR_RESEARCH = 3
+DIRECTOR_REST_SECONDS = 30 * 60
 STOP_AFTER_RELEASES = os.environ.get("AGENT_STOP_AFTER_RELEASES")  # Lets a test spend a known amount.
 
-PHASES_TEMPLATE = """\
-# What each phase needs before the next begins. The director tracks this.
-phases:
-  1:
-    name: Early to mid game
-    needs: [ores, tools_and_armor, plants_and_food, early_mobs, core_machines]
-  2:
-    name: Exploration
-    needs: [new_biomes, structures, things_to_find_and_do]
-  3:
-    name: Late game
-    needs: [new_worlds, boss_fights, absurd_machines]
+STAGES_TEMPLATE = """\
+# What each stage of the game is for. The world's own graph is in progression.json.
+early:
+  feel: Players still mine and build for themselves. There's just more to explore, more to build and more to work out.
+  needs: [ores, tools_and_armor, plants_and_food, early_mobs, things_to_find, a_first_convenience_or_two]
+mid:
+  feel: Much more elaborate, and gated by resources from the early game, like vanilla's own technology. Players still have to go down mines, fight and explore.
+  needs: [gating_resources, automated_crafting, machining, sorting, very_slow_automated_mining, very_slow_automated_mob_killing, stronger_gear_and_power_ups, biomes, structures]
+end:
+  feel: As crazy as it likes, with something big to build towards. This stage never has to be finished.
+  needs: [a_goal_to_work_towards, enormous_machines, overpowered_mobs, gear_power_ups_or_spells_to_beat_them, new_places]
 """
+
+NODE_SCHEMA = {"type": "object", "properties": {
+    "id": {"type": "string"}, "stage": {"type": "string", "enum": list(progression.STAGES)}, "name": {"type": "string"},
+    "requires": {"type": "array", "items": {"type": "string"}}, "opens_with": {"type": "string"}, "holds": {"type": "string"}},
+    "required": ["id", "stage", "name", "requires", "opens_with", "holds"]}
 
 DIRECTOR_SCHEMA = {
     "type": "object",
     "properties": {
-        "phase": {"type": "integer"},
         "features": {"type": "array", "items": {"type": "object", "properties": {
-            "id": {"type": "string"}, "spec": {"type": "string"}}, "required": ["id", "spec"]}},
+            "id": {"type": "string"}, "node": {"type": "string"}, "spec": {"type": "string"}}, "required": ["id", "node", "spec"]}},
+        "new_nodes": {"type": "array", "items": NODE_SCHEMA},
     },
-    "required": ["phase", "features"],
+    "required": ["features"],
 }
+
+TUNER_SCHEMA = {"type": "object", "properties": {"handled": {"type": "array", "items": {"type": "integer"}}}, "required": ["handled"]}
 
 
 class Agent:
@@ -56,16 +65,21 @@ class Agent:
         self.bridge = Bridge()
         self.watcher = voice.Watcher(self.governor)
         self.research = research.Research(self.governor, self.private_words)
-        self.workshop = workshop.Workshop(self.governor, self.on_released, self.research)
+        self.minds = minds.Minds(self.governor, self.bridge, self.private_words)
+        self.workshop = workshop.Workshop(self.governor, self.on_released, self.research, lambda: self.reached)
         self.interviews = {}
         self.chat_buffer = []
         self.queue = []
         self.building = set()
         self.wake_director = asyncio.Event()
+        self.tune_wanted = asyncio.Event()
+        self.director_rest_until = 0
+        self.reached = []
         self.locks = {}
         self.choosing_direction = False
+        self.direction_problems = []
         self.state = {"direction_chosen": False, "briefs": {}, "first_finished_at": 0, "released": [], "border_open": False,
-                      "phase": 1, "intents": {}}
+                      "intents": {}, "intent_count": 0, "tuner_saw": 0, "handled_intents": []}
         if OPENING.exists():
             self.state.update(json.loads(OPENING.read_text(encoding="utf-8")))
 
@@ -135,9 +149,16 @@ class Agent:
 
     async def choose_direction(self):
         print("choosing the direction", flush=True)
-        direction = await voice.choose_direction(self.governor, self.briefs(), self.research.server(DIRECTION_RESEARCH))
+        direction = await voice.choose_direction(self.governor, self.briefs(), self.research.server(DIRECTION_RESEARCH), self.direction_problems)
         if direction is None:
             print("the direction call failed, will try again", flush=True)
+            return
+        graph = progression.from_direction(direction["goal"], direction["progression"])
+        self.direction_problems = progression.problems(graph) + [
+            f"First feature {feature['id']} names node {feature['node']!r}, which isn't in the graph."
+            for feature in direction["first_features"] if feature["node"] not in graph["nodes"]]
+        if self.direction_problems:
+            print(f"the direction's progression has problems, will try again: {self.direction_problems}", flush=True)
             return
         BIBLE.mkdir(parents=True, exist_ok=True)
         (BIBLE / "theme.md").write_text(direction["theme_md"], encoding="utf-8")
@@ -145,9 +166,10 @@ class Agent:
         (BIBLE / "persona_name.txt").write_text(direction["persona_name"], encoding="utf-8")
         (BIBLE / "discovery.md").write_text(direction["discovery_md"], encoding="utf-8")
         (BIBLE / "discovery.json").write_text(json.dumps({"scope": direction["discovery_scope"]}), encoding="utf-8")
-        (BIBLE / "phases.yaml").write_text(PHASES_TEMPLATE, encoding="utf-8")
+        (BIBLE / "stages.yaml").write_text(STAGES_TEMPLATE, encoding="utf-8")
+        progression.save(PROGRESSION, graph)
         workshop.commit_all("The direction for this world")
-        self.queue.extend(direction["phase1_features"])
+        self.queue.extend(direction["first_features"])
         self.state["direction_chosen"] = True
         self.save()
         for line in direction["tease"]:
@@ -156,6 +178,13 @@ class Agent:
                 await self.bridge.broadcast(voice.styled(text))
         print(f"direction chosen, {len(self.queue)} features queued", flush=True)
         self.wake_director.set()
+        asyncio.create_task(self.make_icon())
+
+    async def make_icon(self):
+        try:
+            await icon.make(self.governor)
+        except Exception as error:  # noqa: BLE001 - a missing icon must never hold anything else up
+            print(f"making the server icon failed: {error}", flush=True)
 
     # Events -----------------------------------------------------------------------------------------
 
@@ -215,7 +244,8 @@ class Agent:
     async def event_loop(self):
         while True:
             event = await self.bridge.events.get()
-            asyncio.create_task(self.handle_in_turn(event))
+            # A creature's reply shouldn't hold up anything that player does next, or wait behind it.
+            asyncio.create_task(self.minds.handle(event) if event.get("event") == "mob" else self.handle_in_turn(event))
 
     async def chat_loop(self):
         """Reads chat in batches, because most of it needs nothing and each read uses some of the plan."""
@@ -244,12 +274,42 @@ class Agent:
             STATE.mkdir(parents=True, exist_ok=True)
             with (STATE / "intents.jsonl").open("a", encoding="utf-8") as stream:
                 for intent in accepted:
-                    stream.write(json.dumps({"at": time.time(), **intent}) + "\n")
+                    self.state["intent_count"] += 1
+                    stream.write(json.dumps({"at": time.time(), "number": self.state["intent_count"], **intent}) + "\n")
             self.save()
+            self.tune_wanted.set()
             self.wake_director.set()
         reply = voice.guard(result.get("reply"), self.briefs())
         if reply:
             await self.bridge.broadcast(voice.styled(reply))
+
+    # Tuning -----------------------------------------------------------------------------------------
+
+    async def tune_from_feedback(self):
+        """Feedback that a number can settle shouldn't wait for a builder. Anything else goes on to the director."""
+        path = STATE / "intents.jsonl"
+        entries = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+        fresh = [entry for entry in entries if entry.get("number", 0) > self.state["tuner_saw"]]
+        if not fresh or not any(FEATURES.glob("*/feature.json")):
+            return
+        body = "\n".join(llm.untrusted("intent", json.dumps({"number": entry["number"], "wants": entry["wants"]})) for entry in fresh)
+        result = await llm.ask(self.governor, "tuner", body, schema=TUNER_SCHEMA, allowed_tools=["mcp__world__world_index", "mcp__world__tune"],
+                               mcp_servers={"world": self.workshop.world_server(can_tune=True)}, max_turns=10)
+        self.state["tuner_saw"] = fresh[-1]["number"]
+        if isinstance(result.structured, dict):
+            self.state["handled_intents"] += result.structured.get("handled", [])
+        self.save()
+
+    async def tune_loop(self):
+        while True:
+            await self.tune_wanted.wait()
+            self.tune_wanted.clear()
+            if self.governor.why_not_build():
+                continue
+            try:
+                await self.tune_from_feedback()
+            except Exception as error:  # noqa: BLE001
+                print(f"tuning failed: {error}", flush=True)
 
     # Building ---------------------------------------------------------------------------------------
 
@@ -272,29 +332,40 @@ class Agent:
         """Asks the director what's next, once the first list has run out."""
         intents = STATE / "intents.jsonl"
         recent = intents.read_text(encoding="utf-8").splitlines()[-30:] if intents.exists() else []
-        body = "\n".join(llm.untrusted("intent", line) for line in recent) or "(no requests yet)"
+        handled = set(self.state["handled_intents"])
+        body = "\n".join(llm.untrusted("intent", line) for line in recent if json.loads(line).get("number") not in handled) or "(no requests yet)"
         try:
-            progress = json.dumps(await self.bridge.call("progress"))
+            found = await self.bridge.call("progress")
+            self.reached = found.get("reached", [])
+            progress = json.dumps(found)
         except (RuntimeError, ConnectionError, TimeoutError):
             progress = "(not available right now)"
         # Includes anyone who joined after the direction was chosen, whose answers can still steer what comes next.
         briefs = "\n".join(llm.untrusted("brief", json.dumps(brief)) for brief in self.briefs())
         unfinished_file = STATE / "unfinished.jsonl"
         unfinished = "\n".join(unfinished_file.read_text(encoding="utf-8").splitlines()[-10:]) if unfinished_file.exists() else "(none)"
-        prompt = (f"Current phase: {self.state['phase']}. Released so far: {', '.join(self.state['released']) or 'nothing'}.\n\n"
-                  f"Player requests:\n{body}\n\nWhat players have found and learned:\n{llm.untrusted('progress', progress)}\n\n"
+        prompt = (f"Player requests:\n{body}\n\nWhat players have found and learned:\n{llm.untrusted('progress', progress)}\n\n"
                   f"What each player privately said they wanted, never to be quoted or attributed:\n{briefs}\n\n"
                   f"Features that couldn't be finished, and why. Ask for these differently, or not at all:\n{unfinished}\n\n"
-                  "Read bible/theme.md and bible/phases.yaml, then choose the next features. "
-                  "If the current phase's needs are all covered, move to the next phase.")
+                  "Read bible/theme.md, bible/stages.yaml and bible/progression.json, look at world_index, then choose the next features.")
         result = await llm.ask(self.governor, "director", prompt, schema=DIRECTOR_SCHEMA, tools=["Read", "Glob", "Grep"],
-                               allowed_tools=["Read", "Glob", "Grep", research.TOOL_NAME], cwd=str(workshop.REPO), max_turns=12,
-                               mcp_servers={"web": self.research.server(DIRECTOR_RESEARCH)})
+                               allowed_tools=["Read", "Glob", "Grep", research.TOOL_NAME, "mcp__world__world_index"], cwd=str(workshop.REPO), max_turns=14,
+                               mcp_servers={"web": self.research.server(DIRECTOR_RESEARCH), "world": self.workshop.world_server()})
         if result.is_error or not isinstance(result.structured, dict):
             return []
-        self.state["phase"] = result.structured.get("phase", self.state["phase"])
-        self.save()
+        self.grow_progression(result.structured.get("new_nodes") or [])
         return result.structured.get("features", [])
+
+    def grow_progression(self, new_nodes):
+        if not new_nodes:
+            return
+        graph = progression.read(PROGRESSION)
+        merged, refused = progression.merge(graph, new_nodes, world_index.reached_nodes(FEATURES, self.reached))
+        for problem in refused:
+            print(f"a change to the progression was refused: {problem}", flush=True)
+        if merged is not graph:
+            progression.save(PROGRESSION, merged)
+            workshop.commit_all("The progression grew")
 
     async def build_one(self, feature):
         try:
@@ -302,7 +373,12 @@ class Agent:
             if not re.fullmatch(FEATURE_ID, feature["id"]):
                 print(f"refusing a feature with a bad id: {feature['id']!r}", flush=True)
                 return
-            await self.workshop.build(feature["id"], feature["spec"], self.state["phase"])
+            graph = progression.read(PROGRESSION)
+            node = feature.get("node")
+            if node not in graph["nodes"]:
+                print(f"refusing feature {feature['id']}: node {node!r} isn't in the progression", flush=True)
+                return
+            await self.workshop.build(feature["id"], feature["spec"], node, progression.stage_of(graph, node))
         except Exception as error:  # noqa: BLE001 - one failed feature must not stop the others
             print(f"building {feature['id']} failed: {error}", flush=True)
         finally:
@@ -323,8 +399,11 @@ class Agent:
                 except TimeoutError:
                     pass
                 continue
-            if not self.queue and not self.building:
+            if not self.queue and not self.building and time.time() >= self.director_rest_until:
                 self.queue.extend(await self.next_features())
+                # This should hardly ever come back empty, because there's always more to build, but asking again every
+                # few minutes would use up the day's limit if it did.
+                self.director_rest_until = 0 if self.queue else time.time() + DIRECTOR_REST_SECONDS
             while self.queue and len(self.building) < self.governor.builders_allowed():
                 feature = self.queue.pop(0)
                 self.building.add(feature["id"])
@@ -347,6 +426,7 @@ class Agent:
         while True:
             try:
                 self.governor.owner_stopped = (await self.bridge.call("status"))["agent_disabled"]
+                self.reached = (await self.bridge.call("progress")).get("reached", [])
             except (RuntimeError, ConnectionError, TimeoutError) as error:
                 print(f"couldn't read the game's status: {error}", flush=True)
             await asyncio.sleep(10)
@@ -377,7 +457,7 @@ class Agent:
             name = player["name"] if isinstance(player, dict) else player
             await self.bridge.events.put({"event": "join", "player": name})
         print("agent running", flush=True)
-        await asyncio.gather(readers, self.event_loop(), self.chat_loop(), self.build_loop(), self.opening_loop(),
+        await asyncio.gather(readers, self.event_loop(), self.chat_loop(), self.build_loop(), self.tune_loop(), self.opening_loop(),
                              self.status_loop(), self.watch_loop())
 
 

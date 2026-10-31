@@ -144,39 +144,27 @@ def sections_by_y(chunk):
     return {section["Y"]: section for section in chunk.get("sections", [])}
 
 
-# Timers the game itself advances, so they change with nobody touching anything. Named one by one, so
-# any other change to a block entity still fails the check.
-VOLATILE_FIELDS = {
-    "minecraft:vault": {"server_data"},
-    "minecraft:mob_spawner": {"Delay", "SpawnData"},
-    "minecraft:trial_spawner": {"cooldown_ends_at", "next_mob_spawns_at", "total_mobs_spawned", "spawn_data"},
-    "minecraft:hopper": {"TransferCooldown"},
-    "minecraft:campfire": {"CookingTimes", "CookingTotalTimes"},
-    "minecraft:soul_campfire": {"CookingTimes", "CookingTotalTimes"},
-    "minecraft:comparator": {"OutputSignal"},
-    "minecraft:sculk_catalyst": {"cursors"},
-    "minecraft:beehive": {"bees", "flower_pos"},
-    "minecraft:sculk_shrieker": {"warning_level", "listener"},
-    "minecraft:sculk_sensor": {"listener", "last_vibration_frequency"},
-    "minecraft:calibrated_sculk_sensor": {"listener", "last_vibration_frequency"},
-}
+# What a world would really lose: anything that holds items, plus our own machines. Most other block entities carry timers
+# the game advances by itself, and every new Minecraft adds more of them, so comparing those would refuse good releases in
+# any world that happens to contain one. The contents aren't compared either, because a furnace or hopper can be busy while
+# a chunk is loaded. A patch can only change blocks, so it can only harm these by replacing them, and that's what's checked.
+HOLDS_THINGS = {"minecraft:chest", "minecraft:trapped_chest", "minecraft:barrel", "minecraft:shulker_box", "minecraft:hopper", "minecraft:dispenser",
+                "minecraft:dropper", "minecraft:furnace", "minecraft:blast_furnace", "minecraft:smoker", "minecraft:brewing_stand", "minecraft:lectern",
+                "minecraft:chiseled_bookshelf", "minecraft:decorated_pot", "minecraft:crafter", "minecraft:shelf"}
 
 
-def canonical(entities):
-    """Compares block entities by position, since the list order isn't stable, ignoring natural timers."""
-    cleaned = [
-        {key: value for key, value in entity.items() if key not in VOLATILE_FIELDS.get(entity.get("id"), ())}
-        for entity in entities
-    ]
-    return json.dumps(sorted(cleaned, key=lambda e: (e.get("x"), e.get("y"), e.get("z"))), sort_keys=True)
+def holders(entities):
+    """Where things that hold items are, and what they are."""
+    return {(entity.get("x"), entity.get("y"), entity.get("z")): entity.get("id") for entity in entities
+            if entity.get("id") in HOLDS_THINGS or str(entity.get("id")).startswith("gm:")}
 
 
 def entities_kept(old, new, allow_added):
-    """Whether what was there is untouched. A ruin adds a chest of its own, and that's the only reason to allow one."""
-    if not allow_added:
-        return canonical(old) == canonical(new)
-    positions = {(entity.get("x"), entity.get("y"), entity.get("z")) for entity in old}
-    return canonical(old) == canonical([entity for entity in new if (entity.get("x"), entity.get("y"), entity.get("z")) in positions])
+    """Whether everything holding items is still there. A ruin adds a chest of its own, and that's the only reason to allow one."""
+    before, after = holders(old), holders(new)
+    if any(after.get(position) != kind for position, kind in before.items()):
+        return False
+    return allow_added or before.keys() == after.keys()
 
 
 def touched_blocks(chunk):

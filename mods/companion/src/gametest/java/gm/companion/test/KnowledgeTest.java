@@ -104,6 +104,13 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				int light = context.computeOnClient(client -> client.level.getBrightness(LightLayer.BLOCK, pos));
 				LOGGER.info("[M8] block light: {}", light);
 			}
+			case "say" -> context.runOnClient(client -> client.player.connection.sendChat(request.substring(4)));
+			case "rightclick" -> context.getInput().holdKeyFor(options -> options.keyUse, 2);
+			case "mine" -> {
+				String target = context.computeOnClient(client -> String.valueOf(client.hitResult == null ? null : client.hitResult.getLocation()));
+				LOGGER.info("[M8] mining what the crosshair is on, at {}", target);
+				context.getInput().holdKeyFor(options -> options.keyAttack, Integer.parseInt(words[1]));
+			}
 			case "shot" -> {
 				context.waitTicks(40);
 				context.takeScreenshot("m8_" + words[1]);

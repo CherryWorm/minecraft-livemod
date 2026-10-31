@@ -4,15 +4,32 @@ import de.tomalbrc.bil.api.AnimatedEntity;
 import de.tomalbrc.bil.api.AnimatedEntityHolder;
 import de.tomalbrc.bil.api.Animator;
 import de.tomalbrc.bil.core.holder.entity.living.LivingEntityHolder;
+import de.tomalbrc.bil.core.model.Animation;
+import de.tomalbrc.bil.core.model.Model;
 import eu.pb4.polymer.virtualentity.api.attachment.EntityAttachment;
+import eu.pb4.polymer.virtualentity.api.elements.TextDisplayElement;
 import gm.conduit.api.MobBehavior;
 import gm.conduit.modules.ServerModuleHost;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.util.Mth;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityDimensions;
+import net.minecraft.world.entity.EntityEvent;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.util.DefaultRandomPos;
+import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.Pose;
@@ -29,14 +46,46 @@ import net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 
+import java.util.UUID;
+
 /**
  * A creature with no fixed identity. Its type is one of a fixed pool registered at boot, and everything else
  * comes from the current release: looks, size, stats, behaviour, so a new mob needs no restart. A slot with
  * nothing bound removes itself rather than standing around invisible.
  */
 public final class SlotMob extends PathfinderMob implements AnimatedEntity {
+	private static final String IDLE = "idle";
+	private static final String WALK = "walk";
+	private static final String HURT = "hurt";
+	private static final String DEATH = "death";
+	private static final int NORMAL_DEATH_TICKS = 20;
+	private static final int LONGEST_DEATH_TICKS = 100;
+	private static final String STAY = "stay";
+	private static final String WANDER = "wander";
+	private static final int THINKING_TICKS = 120;
+	private static final int STAY_TICKS = 400;
+	private static final int ACTION_TICKS = 1200;
+	private static final double FOLLOW_DISTANCE = 3.0;
+	private static final int BUBBLE_WIDTH = 160;
+	private static final double BUBBLE_GAP = 0.4;
+	private static final int BUBBLE_MIN_TICKS = 60;
+	private static final int BUBBLE_TICKS_PER_LETTER = 2;
+	private static final int MOVE_WAIT_TICKS = 80;
+
 	private LivingEntityHolder<SlotMob> holder;
 	private MobDefinition applied;
+	/** The animation being held still for a photograph, if any. Nothing else plays while it's set. */
+	private String posed;
+	private int animatedDeathTicks;
+	/** What its mind decided to do, whose sake it's for, and until when. Null for nothing in particular. */
+	private String mindAction;
+	private UUID mindPlayer;
+	private BlockPos mindPlace;
+	private int mindUntil;
+	private TextDisplayElement bubble;
+	private int bubbleUntil;
+	/** When to choose a fight move by itself, if no decision has arrived by then. */
+	private int moveDeadline;
 
 	public SlotMob(EntityType<? extends PathfinderMob> type, Level level) {
 		super(type, level);
@@ -86,6 +135,9 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 
 	private void installGoals(MobDefinition definition) {
 		this.goalSelector.addGoal(0, new FloatGoal(this));
+		if (definition.mind() != null) {
+			this.goalSelector.addGoal(1, new MindGoal(this));
+		}
 		switch (definition.behaviour()) {
 			case "hostile" -> {
 				this.goalSelector.addGoal(2, new MeleeAttackGoal(this, 1.0, false));
@@ -125,6 +177,7 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 		if (this.tickCount % 2 == 0) {
 			updateAnimation();
 		}
+		tickMind();
 		MobBehavior behavior = ServerModuleHost.instance().mobBehavior(slotId());
 		if (behavior != null) {
 			ServerModuleHost.instance().guarded(slotId(), () -> behavior.tick(this));
@@ -133,16 +186,200 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 
 	private void updateAnimation() {
 		Animator animator = animator();
-		if (animator == null) {
+		if (animator == null || this.posed != null || isDeadOrDying()) {
 			return;
 		}
 		if (this.walkAnimation.isMoving() && this.walkAnimation.speed() > 0.02F) {
-			animator.pauseAnimation("idle");
-			animator.playAnimation("walk", 5);
+			animator.pauseAnimation(IDLE);
+			animator.playAnimation(WALK, 5);
 		} else {
-			animator.pauseAnimation("walk");
-			animator.playAnimation("idle", 1, true);
+			animator.pauseAnimation(WALK);
+			animator.playAnimation(IDLE, 1, true);
 		}
+	}
+
+	// Its mind ------------------------------------------------------------------------------------------
+
+	public Mind mind() {
+		return this.applied == null ? null : this.applied.mind();
+	}
+
+	String displayName() {
+		return this.applied == null || this.applied.display().isEmpty() ? getType().getDescription().getString() : this.applied.display();
+	}
+
+	boolean isPeaceful() {
+		return this.applied != null && (this.applied.behaviour().equals("passive") || this.applied.behaviour().equals("skittish"));
+	}
+
+	boolean isHostile() {
+		return this.applied != null && this.applied.behaviour().equals("hostile");
+	}
+
+	@Override
+	protected InteractionResult mobInteract(Player player, InteractionHand hand) {
+		if (mind() != null && player instanceof ServerPlayer serverPlayer) {
+			return Minds.onUse(this, serverPlayer, hand);
+		}
+		return super.mobInteract(player, hand);
+	}
+
+	/** Turns to whoever spoke straight away, so the short wait for a decision looks like it's considering them. */
+	void thinkAbout(ServerPlayer player) {
+		if (this.mindAction == null) {
+			startAction(STAY, player, null);
+			this.mindUntil = this.tickCount + THINKING_TICKS;
+		}
+	}
+
+	void startAction(String action, ServerPlayer player, BlockPos place) {
+		this.mindAction = WANDER.equals(action) ? null : action;
+		this.mindPlayer = player.getUUID();
+		this.mindPlace = place;
+		this.mindUntil = this.tickCount + (STAY.equals(action) ? STAY_TICKS : ACTION_TICKS);
+		getNavigation().stop();
+	}
+
+	boolean hasMindAction() {
+		return this.mindAction != null;
+	}
+
+	/** Only MindGoal calls this, so a mob with its AI turned off just stands still. */
+	void tickMindAction() {
+		String action = this.mindAction;
+		Player player = this.mindPlayer == null ? null : level().getPlayerByUUID(this.mindPlayer);
+		// It can be told to stop between a goal's check and its tick, and a mob's choice must never be able to stop the server.
+		if (action == null || player == null || this.tickCount >= this.mindUntil) {
+			this.mindAction = null;
+			return;
+		}
+		switch (action) {
+			case "follow" -> {
+				getLookControl().setLookAt(player);
+				if (distanceTo(player) > FOLLOW_DISTANCE && this.tickCount % 10 == 0) {
+					getNavigation().moveTo(player, 1.1);
+				}
+			}
+			case "flee" -> {
+				if (this.tickCount % 20 == 0) {
+					Vec3 away = DefaultRandomPos.getPosAway(this, 16, 7, player.position());
+					if (away != null) {
+						getNavigation().moveTo(away.x, away.y, away.z, 1.3);
+					}
+				}
+			}
+			case "lead" -> {
+				if (this.mindPlace != null && this.tickCount % 20 == 0) {
+					getNavigation().moveTo(this.mindPlace.getX() + 0.5, this.mindPlace.getY(), this.mindPlace.getZ() + 0.5, 1.0);
+				}
+				if (this.mindPlace == null || blockPosition().closerThan(this.mindPlace, 3)) {
+					getLookControl().setLookAt(player);
+				}
+			}
+			default -> getLookControl().setLookAt(player);
+		}
+	}
+
+	void say(String text) {
+		Minds.speakAround(this, text);
+		if (this.holder == null) {
+			return;
+		}
+		clearBubble();
+		this.bubble = new TextDisplayElement(Component.literal(text));
+		this.bubble.setBillboardMode(Display.BillboardConstraints.CENTER);
+		this.bubble.setLineWidth(BUBBLE_WIDTH);
+		this.bubble.setOffset(new Vec3(0, getBbHeight() + BUBBLE_GAP, 0));
+		this.holder.addElement(this.bubble);
+		this.bubbleUntil = this.tickCount + BUBBLE_MIN_TICKS + text.length() * BUBBLE_TICKS_PER_LETTER;
+	}
+
+	private void clearBubble() {
+		if (this.bubble != null && this.holder != null) {
+			this.holder.removeElement(this.bubble);
+		}
+		this.bubble = null;
+	}
+
+	boolean playIfAllowed(String name) {
+		Animator animator = animator();
+		if (animator == null || mind() == null || !mind().animations().contains(name) || animation(name) == null) {
+			return false;
+		}
+		animator.playAnimation(name, 9, true);
+		return true;
+	}
+
+	boolean soundIfAllowed(String name) {
+		if (mind() == null || !mind().sounds().contains(name)) {
+			return false;
+		}
+		Identifier id = Identifier.parse(name);
+		level().playSound(null, getX(), getY(), getZ(), SoundEvent.createVariableRangeEvent(id), SoundSource.NEUTRAL, 1.0F, 1.0F);
+		return true;
+	}
+
+	/** A fight move is the module's to carry out. All a mind does is choose when to use which. */
+	boolean performMove(String name) {
+		if (mind() == null || !mind().moves().contains(name)) {
+			return false;
+		}
+		this.moveDeadline = 0;
+		Animator animator = animator();
+		if (animator != null && animation(name) != null) {
+			animator.playAnimation(name, 12, true);
+		}
+		MobBehavior behavior = ServerModuleHost.instance().mobBehavior(slotId());
+		LivingEntity target = getTarget();
+		if (behavior != null) {
+			ServerModuleHost.instance().guarded(slotId(), () -> behavior.move(this, name, target));
+		}
+		return true;
+	}
+
+	private void tickMind() {
+		if (this.bubble != null && this.tickCount >= this.bubbleUntil) {
+			clearBubble();
+		}
+		Mind mind = mind();
+		if (mind == null || mind.moves().isEmpty() || !(getTarget() instanceof ServerPlayer target) || !target.isAlive()) {
+			return;
+		}
+		// If nothing's decided in time, say because the agent's out of usage, a fight carries on with a random move.
+		if (this.moveDeadline > 0 && this.tickCount >= this.moveDeadline) {
+			performMove(mind.moves().get(getRandom().nextInt(mind.moves().size())));
+		}
+		if (this.tickCount % (mind.fightSeconds() * 20) == 0) {
+			this.moveDeadline = this.tickCount + MOVE_WAIT_TICKS;
+			Minds.onFight(this, target);
+		}
+	}
+
+	private Animation animation(String name) {
+		Model model = this.applied == null ? null : SlotMobs.model(this.applied.model());
+		return model == null ? null : model.animations().get(name);
+	}
+
+	/**
+	 * Holds one moment of an animation, so a test client can photograph exactly that moment, whatever the timing of its
+	 * screenshots. Returns false if this mob has no such animation.
+	 */
+	public boolean pose(String name, float fraction) {
+		Animator animator = animator();
+		Animation animation = animation(name);
+		if (animator == null || animation == null) {
+			return false;
+		}
+		animator.stopAnimation(IDLE);
+		animator.stopAnimation(WALK);
+		if (this.posed != null) {
+			animator.stopAnimation(this.posed);
+		}
+		this.posed = name;
+		animator.playAnimation(name, 100, true);
+		animator.setAnimationFrame(name, Mth.clamp((int) (fraction * animation.frames().length), 0, animation.frames().length - 1));
+		animator.pauseAnimation(name);
+		return true;
 	}
 
 	@Override
@@ -151,7 +388,42 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 		if (behavior != null) {
 			ServerModuleHost.instance().guarded(slotId(), () -> behavior.hurt(this, source));
 		}
-		return super.hurtServer(level, source, amount);
+		boolean hurt = super.hurtServer(level, source, amount);
+		if (hurt && !isDeadOrDying() && animator() != null && animation(HURT) != null) {
+			animator().playAnimation(HURT, 8, true);
+		}
+		if (hurt && mind() != null && source.getEntity() instanceof ServerPlayer attacker) {
+			Minds.onHurt(this, attacker);
+		}
+		return hurt;
+	}
+
+	@Override
+	public void die(DamageSource source) {
+		super.die(source);
+		if (animator() != null && animation(DEATH) != null) {
+			animator().stopAnimation(IDLE);
+			animator().stopAnimation(WALK);
+			animator().playAnimation(DEATH, 20, true);
+		}
+	}
+
+	/**
+	 * A death animation gets to finish before the body goes. It counts by itself and leaves deathTime alone, because the
+	 * model library tips anything with a deathTime over on its side, which would turn every fall into a sideways one.
+	 */
+	@Override
+	protected void tickDeath() {
+		Animation death = animation(DEATH);
+		if (death == null) {
+			super.tickDeath();
+			return;
+		}
+		this.animatedDeathTicks++;
+		if (this.animatedDeathTicks >= Mth.clamp(death.duration(), NORMAL_DEATH_TICKS, LONGEST_DEATH_TICKS) && !level().isClientSide() && !isRemoved()) {
+			level().broadcastEntityEvent(this, EntityEvent.POOF);
+			remove(RemovalReason.KILLED);
+		}
 	}
 
 	@Override

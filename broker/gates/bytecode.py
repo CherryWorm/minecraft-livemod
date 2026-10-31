@@ -382,7 +382,8 @@ def _class_problem(name, side):
         if name in CLIENT_CLASSES or name in LIMITED_MEMBERS or name.startswith(CLIENT_PREFIXES):
             return None
         return "isn't on the list client modules may use"
-    if name.startswith("gm/conduit/") and not name.startswith("gm/conduit/api/"):
+    # A machine's tick and a mob's behaviour are handed these, so using them is what the API asks for.
+    if name.startswith("gm/conduit/") and not name.startswith("gm/conduit/api/") and name not in ("gm/conduit/slots/SlotBlockEntity", "gm/conduit/mobs/SlotMob"):
         return "is the module host's own code, and modules may only use gm/conduit/api"
     return _refusal(name, SERVER_REFUSED)
 

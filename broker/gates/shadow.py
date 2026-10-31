@@ -26,6 +26,9 @@ FORBIDDEN = [
     r"server module .* threw an error",
     r"Encountered an unexpected exception",
     r"This crash report",
+    # Nothing else checks an item's components against the game's own format before this.
+    r"Can't read the defaults for",
+    r"Can't read config",
 ]
 FORBIDDEN_RE = re.compile("|".join(FORBIDDEN))
 

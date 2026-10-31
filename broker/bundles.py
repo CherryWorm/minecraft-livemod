@@ -16,6 +16,7 @@ TOOL_TAGS = {"pickaxe": "pickaxe", "axe": "axe", "shovel": "shovel", "hoe": "hoe
 LEVEL_TAGS = {"stone": "needs_stone_tool", "iron": "needs_iron_tool", "diamond": "needs_diamond_tool"}
 ORE_FAMILIES = {"ore", "deep_ore"}
 LOOKS_ONLY_ATTRIBUTES = ("minecraft:visual/", "minecraft:audio/")
+BLOCK_FACES = {"top", "bottom", "front", "back", "left", "right", "side"}
 
 
 class BundleError(Exception):
@@ -26,7 +27,7 @@ def read_pool(repo):
     """Reads the slot pool from the mod's own source, so this can't drift from what's registered."""
     source = (repo / "mods/conduit/src/main/java/gm/conduit/slots/SlotFamily.java").read_text(encoding="utf-8")
     families = {}
-    for name, first, count in re.findall(r"^\s+([A-Z_]+)\((\d+), (\d+), BlockModelType", source, re.MULTILINE):
+    for name, first, count in re.findall(r"^\s+([A-Z_]+)\((\d+), (\d+), (?:BlockModelType|null)", source, re.MULTILINE):
         families[name.lower()] = {"first": int(first), "count": int(count)}
     if not families:
         raise BundleError("Couldn't read any slot families from SlotFamily.java")
@@ -149,6 +150,14 @@ def _write_json(path, value):
     path.write_text(json.dumps(value, indent=1, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _wearable(components):
+    """The game only wears something out if it has a damage value as well as a maximum, and it refuses anything that
+    both wears out and stacks. Vanilla's tools have both set for them, so a builder shouldn't have to know."""
+    if isinstance(components, dict) and "minecraft:max_damage" in components:
+        return {"minecraft:damage": 0, "minecraft:max_stack_size": 1, **components}
+    return components
+
+
 def _copy_texture(feature, kind, slot, texture, pack):
     source = feature["dir"] / "assets" / "textures" / f"{texture}.png"
     if not source.exists():
@@ -166,7 +175,16 @@ def _block_model(feature, feature_id, name, block, slot, ledger):
     if custom.exists():
         model = json.loads(custom.read_text(encoding="utf-8"))
         return _resolve_tokens(model, feature_id, ledger)
-    parent = "minecraft:block/cross" if block["family"] in ("plant", "glow_plant", "tinted_plant") else "minecraft:block/cube_all"
+    if block.get("faces"):
+        def face(*names):
+            found = next((name for name in names if name in block["faces"]), None)
+            return f"gm:block/{slot}_{found}" if found else f"gm:block/{slot}"
+        return {"parent": "minecraft:block/cube", "textures": {
+            "particle": face("side", "front"), "up": face("top", "side"), "down": face("bottom", "top", "side"),
+            "north": face("front", "side"), "south": face("back", "side"), "east": face("right", "side"), "west": face("left", "side")}}
+    # Only tinted_cross takes the biome's colour. On plain cross a tinted plant would stay the grey it's drawn in.
+    parents = {"plant": "minecraft:block/cross", "glow_plant": "minecraft:block/cross", "tinted_plant": "minecraft:block/tinted_cross"}
+    parent = parents.get(block["family"], "minecraft:block/cube_all")
     key = "cross" if "cross" in parent else "all"
     return {"parent": parent, "textures": {key: f"gm:block/{slot}"}}
 
@@ -202,15 +220,21 @@ def _loot_table(block, slot, feature_id, ledger):
     return {"type": "minecraft:block", "pools": [{"rolls": 1, "entries": [entry]}]}
 
 
-def _render_mob(feature, feature_id, name, mob, ledger, pack_lang, datapack, config):
-    slot = ledger["mobs"][f"{feature_id}/{name}"]["slot"]
-    source = feature["dir"] / "assets" / "models" / f"{mob.get('model', name)}.bbmodel"
+def _copy_model(feature, feature_id, name, model_name, config):
+    """Named by hash, so that nothing in the pack gives away what it's a model of."""
+    source = feature["dir"] / "assets" / "models" / f"{model_name}.bbmodel"
     if not source.exists():
         raise BundleError(f"{feature_id}/{name}: model {source.name} is missing")
     raw = source.read_bytes()
     model = "m" + hashlib.sha256(raw).hexdigest()[:16]
     (config / "models").mkdir(parents=True, exist_ok=True)
     (config / "models" / f"{model}.bbmodel").write_bytes(raw)
+    return model
+
+
+def _render_mob(feature, feature_id, name, mob, ledger, pack_lang, datapack, config):
+    slot = ledger["mobs"][f"{feature_id}/{name}"]["slot"]
+    model = _copy_model(feature, feature_id, name, mob.get("model", name), config)
     pack_lang[f"entity.gm.{slot}"] = mob["display"]
     if mob.get("drops"):
         _write_json(datapack / f"data/gm/loot_table/entities/{slot}.json", {
@@ -220,8 +244,20 @@ def _render_mob(feature, feature_id, name, mob, ledger, pack_lang, datapack, con
                 "count": {"type": "minecraft:uniform", "min": 0.0, "max": 1.0},
             })]}],
         })
-    fields = ("behaviour", "health", "damage", "speed", "width", "height", "followRange", "armor", "spawn")
-    return slot, {"model": model, **{field: mob[field] for field in fields if field in mob}}
+    fields = ("behaviour", "health", "damage", "speed", "width", "height", "followRange", "armor", "spawn", "display")
+    definition = {"model": model, **{field: mob[field] for field in fields if field in mob}}
+    if mob.get("mind"):
+        definition["mind"] = _render_mind(mob["mind"], feature_id, ledger)
+    return slot, definition
+
+
+def _render_mind(mind, feature_id, ledger):
+    """Slot ids for the game's checks, and readable names too, because the model choosing has to know what it's choosing."""
+    rendered = _resolve_tokens(mind, feature_id, ledger)
+    for original, item in zip(mind.get("stash", []), rendered.get("stash", [])):
+        item["name"] = original["item"].rsplit("/", 1)[-1].rsplit(":", 1)[-1].replace("_", " ")
+    rendered["teaches"] = {name if "/" in name else f"{feature_id}/{name}": trust for name, trust in mind.get("teaches", {}).items()}
+    return rendered
 
 
 def _render_biome(feature_id, name, biome, vanilla_biome, datapack):
@@ -306,6 +342,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
     names = {}
     mobs = {}
     sounds_json = {}
+    block_models = {}
 
     for feature_id, feature in features.items():
         manifest = feature["manifest"]
@@ -315,6 +352,14 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
             names[f"gm:{slot}"] = block["display"]
             lang[f"block.gm.{slot}"] = block["display"]
             _copy_texture(feature, "block", slot, block.get("texture", name), pack)
+            for face, texture in block.get("faces", {}).items():
+                if face not in BLOCK_FACES:
+                    raise BundleError(f"{feature_id}/{name}: there's no face called {face!r}. Use {', '.join(sorted(BLOCK_FACES))}.")
+                _copy_texture(feature, "block", f"{slot}_{face}", texture, pack)
+            if (block["family"] == "model") != ("model" in block):
+                raise BundleError(f"{feature_id}/{name}: a block in the model family needs a \"model\", and only those can have one.")
+            if "model" in block:
+                block_models[slot] = _copy_model(feature, feature_id, name, block["model"], config)
             _write_json(pack / f"assets/gm/models/block/{slot}.json",
                         _block_model(feature, feature_id, name, block, slot, ledger))
             _write_json(datapack / f"data/gm/loot_table/blocks/{slot}.json",
@@ -337,6 +382,8 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
             parent = "minecraft:item/handheld" if item.get("handheld") else "minecraft:item/generated"
             _write_json(pack / f"assets/gm/models/item/{slot}.json", {"parent": parent, "textures": {"layer0": f"gm:item/{slot}"}})
             defaults = {key: item[key] for key in ("components", "places") if key in item}
+            if "components" in defaults:
+                defaults["components"] = _wearable(defaults["components"])
             if defaults:
                 item_defaults[f"gm:{slot}"] = _resolve_tokens(defaults, feature_id, ledger)
         for name, recipe in manifest.get("recipes", {}).items():
@@ -355,7 +402,10 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
                     "needs": [route if "/" in route else f"{feature_id}/{route}"] if route else [],
                 })
                 continue
-            _write_json(datapack / f"data/gm/recipe/{hashed}.json", _resolve_tokens(recipe["json"], feature_id, ledger))
+            body = _resolve_tokens(recipe["json"], feature_id, ledger)
+            if isinstance(body.get("result"), dict) and "components" in body["result"]:
+                body["result"]["components"] = _wearable(body["result"]["components"])
+            _write_json(datapack / f"data/gm/recipe/{hashed}.json", body)
             if recipe.get("mode") == "known" and recipe.get("route"):
                 recipe_routes.append((f"gm:{hashed}", source, recipe["route"]))
             elif recipe.get("mode") == "open":
@@ -408,6 +458,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
     _write_json(config / "bindings.json", bindings)
     _write_json(config / "item_defaults.json", item_defaults)
     _write_json(config / "mobs.json", mobs)
+    _write_json(config / "block_models.json", block_models)
     _write_json(config / "knowledge.json", {"scope": scope, "entries": entries, "gated": gated, "open": sorted(open_recipes),
                                             "machines": machines, "names": names})
     _write_json(out / "recipes.json", recipe_modes)

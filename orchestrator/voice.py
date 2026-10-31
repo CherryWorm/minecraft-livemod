@@ -45,10 +45,15 @@ DIRECTION_SCHEMA = {
         "discovery_md": {"type": "string"},
         "discovery_scope": {"type": "string", "enum": ["shared", "per_player"]},
         "tease": {"type": "array", "items": {"type": "string"}},
-        "phase1_features": {"type": "array", "items": {"type": "object", "properties": {
-            "id": {"type": "string"}, "spec": {"type": "string"}}, "required": ["id", "spec"]}},
+        "goal": {"type": "string"},
+        "progression": {"type": "array", "items": {"type": "object", "properties": {
+            "id": {"type": "string"}, "stage": {"type": "string", "enum": ["early", "mid", "end"]}, "name": {"type": "string"},
+            "requires": {"type": "array", "items": {"type": "string"}}, "opens_with": {"type": "string"}, "holds": {"type": "string"}},
+            "required": ["id", "stage", "name", "requires", "opens_with", "holds"]}},
+        "first_features": {"type": "array", "items": {"type": "object", "properties": {
+            "id": {"type": "string"}, "node": {"type": "string"}, "spec": {"type": "string"}}, "required": ["id", "node", "spec"]}},
     },
-    "required": ["theme_md", "persona_name", "persona_md", "discovery_md", "discovery_scope", "tease", "phase1_features"],
+    "required": ["theme_md", "persona_name", "persona_md", "discovery_md", "discovery_scope", "tease", "goal", "progression", "first_features"],
 }
 
 TRIAGE_SCHEMA = {
@@ -113,10 +118,12 @@ class Interview:
         return data.get("reply")
 
 
-async def choose_direction(governor, briefs, web):
+async def choose_direction(governor, briefs, web, problems=()):
     blocks = "\n\n".join(llm.untrusted("brief", json.dumps(brief, indent=1)) for brief in briefs)
     prompt = (blocks or "No player gave a brief. Choose a direction you think friends would enjoy.") + \
         "\n\nChoose this world's direction."
+    if problems:
+        prompt += "\n\nLast time, the progression had these problems, so fix them:\n" + "\n".join(problems)
     result = await llm.ask(governor, "direction", prompt, schema=DIRECTION_SCHEMA, allowed_tools=["mcp__web__research"],
                            mcp_servers={"web": web}, max_turns=10)
     return result.structured if isinstance(result.structured, dict) and not result.is_error else None

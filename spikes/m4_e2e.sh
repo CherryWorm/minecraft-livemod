@@ -38,7 +38,7 @@ printf 'Aria\nBram\n' >"$RUNTIME_DIR/control/roster.txt"
 
 echo "=== starting the agent ($(elapsed))"
 wanted=${1:-1}
-export AGENT_DAILY_USAGE_LIMIT=$((wanted * 3 + 6)) AGENT_STOP_AFTER_RELEASES=$wanted AGENT_MAX_BUILDERS=$(( wanted > 1 ? 2 : 1 ))
+export AGENT_DAILY_USAGE_LIMIT=$((wanted * 3 + 16)) AGENT_STOP_AFTER_RELEASES=$wanted AGENT_MAX_BUILDERS=$(( wanted > 1 ? 2 : 1 ))
 ./scripts/agent-up.sh --no-build
 
 python3 scripts/playtest_bot.py --name Aria --script "$work/aria.json" --log "$work/aria.jsonl" --never-see wombatmarker --seconds 7200 \
@@ -88,6 +88,12 @@ if [[ $failed == 0 ]]; then
 fi
 sleep 60
 
+if [[ $failed == 0 ]]; then
+  echo; echo "=== the tuner, and a mid-game machine from a real builder ($(elapsed))"
+  ./scripts/stack.sh --profile agent run --rm -T agent python3 /spikes/m4_tools.py </dev/null 2>&1 | grep -v 'Container livingmod' | grep -v 'Permission mode forced' | cut -c1-700
+  [[ ${PIPESTATUS[0]} == 0 ]] || failed=1
+fi
+
 echo; echo "=== the kill switch"
 ./scripts/mc.sh agentstop
 python3 -c "from broker import runtime; print('broker sees it on:', runtime.agent_disabled())"
@@ -119,6 +125,14 @@ PY
 done
 echo; echo "=== direction"
 cat "$RUNTIME_DIR/agent-workspace/repo/bible/theme.md" 2>/dev/null | head -30 | cut -c1-300
+echo; echo "=== progression"
+python3 - "$RUNTIME_DIR/agent-workspace/repo/bible/progression.json" <<'PY'
+import json, sys
+graph = json.load(open(sys.argv[1], encoding="utf-8"))
+print("goal:", graph["goal"][:300])
+for name, node in graph["nodes"].items():
+    print(f"  {node['stage']:5} {name}: needs {node['requires']}, opens with: {node['opens_with'][:90]}")
+PY
 echo; echo "=== discovery plan"
 cat "$RUNTIME_DIR/agent-workspace/repo/bible/discovery.md" 2>/dev/null | head -20 | cut -c1-300
 echo; echo "=== shipped"
@@ -141,7 +155,11 @@ echo; echo "=== research"
 ls "$RUNTIME_DIR/agent-workspace/research" 2>/dev/null | cut -c1-120
 docker logs livingmod-web-1 2>/dev/null </dev/null | grep CONNECT | awk '{print $7}' | sort | uniq -c | sort -rn | head -20
 
+echo; echo "=== which tools the builders used"
+docker logs livingmod-agent-1 2>&1 | grep -E ': used ' | sed -E 's/^[^:]+: used //' | sort | uniq -c | sort -rn
+
 echo; echo "=== checks"
+if [[ -s "$RUNTIME_DIR/velocity/server-icon.png" ]]; then echo "the server icon was installed"; else echo "FAIL: no server icon"; failed=1; fi
 leaks=$(cat "$work"/aria.jsonl "$work"/bram.jsonl | grep -c '"kind": "leak"')
 echo "private words seen by the wrong player: $leaks"
 [[ "$leaks" == 0 ]] || failed=1

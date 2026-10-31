@@ -32,6 +32,8 @@ done
 rm -rf "${RUNTIME_DIR:?}/broker"/{state.json,last.json,passed_gates.json,assembled,work,reports}
 rm -rf "${RUNTIME_DIR:?}/releases/history"
 rm -f "${RUNTIME_DIR:?}/timeline.jsonl" "$RUNTIME_DIR/control/decide_now" "$RUNTIME_DIR/control/agent_disabled"
+rm -f "$RUNTIME_DIR/velocity/server-icon.png"
+timeout 2 bash -c 'echo "velocity reload" >"$RUNTIME_DIR/velocity/console.pipe"' || true
 # The agent's container runs as another user, so some of these files aren't ours to remove directly.
 docker run --rm -v "$RUNTIME_DIR:/runtime" alpine:3.22 rm -rf /runtime/agent-workspace </dev/null
 ./scripts/prepare-workspace.sh

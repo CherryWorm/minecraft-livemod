@@ -94,6 +94,7 @@ class Research:
         @tool("research", DESCRIPTION, {"question": str})
         async def research(args):
             nonlocal used
+            print("research: used research", flush=True)
             if used >= limit:
                 return {"content": [{"type": "text", "text": "That's all the research this job gets. Go with what you know."}]}
             text, new = await self.answer(args["question"])

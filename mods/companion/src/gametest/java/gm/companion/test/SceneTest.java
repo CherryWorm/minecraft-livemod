@@ -61,7 +61,8 @@ public final class SceneTest implements FabricClientGameTest {
 					}
 					client.gui.toastManager().clear();
 				});
-				context.waitTicks(40);
+				// A frame of a filmed animation is held still and comes in a long series, so a moment to settle is enough.
+				context.waitTicks(name.startsWith("frame") ? 6 : 40);
 				context.takeScreenshot("scene_" + name);
 				LOGGER.info("[SCENE] took {}", name);
 			}

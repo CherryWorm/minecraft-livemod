@@ -11,7 +11,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * What's been learned, kept beside the world so it's backed up and restored with it. It only ever grows, so
@@ -67,6 +69,13 @@ final class KnowledgeLedger {
 			this.found.getAsJsonArray(key).forEach(item -> list.add(item.getAsString()));
 		}
 		return list;
+	}
+
+	/** Everything anyone has ever found, whether or not they're online, because what they found is still in the world. */
+	Set<String> foundByAnyone() {
+		Set<String> all = new HashSet<>();
+		this.found.asMap().values().forEach(list -> list.getAsJsonArray().forEach(item -> all.add(item.getAsString())));
+		return all;
 	}
 
 	int addFragment(String key, String entry) {

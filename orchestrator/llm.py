@@ -21,6 +21,9 @@ ROLES = {
     "builder": {"model": "claude-opus-5-5", "effort": "medium"},
     "reviewer": {"model": "claude-opus-5-5", "effort": "medium"},
     "researcher": {"model": "claude-haiku-5-5", "effort": "low"},
+    "tuner": {"model": "claude-haiku-5-5", "effort": "low"},
+    "mind": {"model": "claude-haiku-5-5", "effort": "low"},
+    "icon": {"model": "claude-opus-5-5", "effort": "medium"},
 }
 WORKER = {"model": "claude-opus-5-5", "effort": "low"}
 

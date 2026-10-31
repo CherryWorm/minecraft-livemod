@@ -14,6 +14,9 @@ CONTROL = pathlib.Path(os.environ.get("CONTROL_DIR", "/control"))
 
 DAILY_USAGE_LIMIT = float(os.environ.get("AGENT_DAILY_USAGE_LIMIT", "25"))
 MAX_BUILDERS = int(os.environ.get("AGENT_MAX_BUILDERS", "2"))
+# Mob minds get their own small share of the day, so chatting to creatures can't use up what building needs.
+MIND_DAILY_USAGE = float(os.environ.get("AGENT_MIND_USAGE_LIMIT", str(DAILY_USAGE_LIMIT / 10)))
+MINDS_PER_MINUTE = 30
 FAILURE_LIMIT = 5
 FAILURE_PAUSE_SECONDS = 30 * 60
 IDLE_AFTER_SECONDS = 2 * 24 * 60 * 60
@@ -24,6 +27,7 @@ class Governor:
         self.path = STATE_ROOT / "governor.json"
         self.state = {"day": "", "usage": 0.0, "paused_until": 0, "last_warning": 0, "failures": 0, "last_player_seen": 0}
         self.owner_stopped = False  # Set from the game, which is what actually enforces it.
+        self.mind_calls = []
         if self.path.exists():
             self.state.update(json.loads(self.path.read_text(encoding="utf-8")))
 
@@ -36,6 +40,7 @@ class Governor:
         if self.state["day"] != today:
             self.state["day"] = today
             self.state["usage"] = 0.0
+            self.state["mind_usage"] = 0.0
 
     def record_usage(self, estimate):
         self._roll_day()
@@ -63,6 +68,28 @@ class Governor:
 
     def killed(self):
         return self.owner_stopped or (CONTROL / "agent_disabled").exists()
+
+    def record_mind(self, estimate):
+        self._roll_day()
+        self.state["mind_usage"] = self.state.get("mind_usage", 0.0) + float(estimate or 0)
+        self._save()
+
+    def why_no_mind(self):
+        """Returns the reason mobs should run on plain code for now, or None. It takes a call from the budget if not."""
+        self._roll_day()
+        reason = self.why_not_speak()
+        if reason:
+            return reason
+        if (CONTROL / "no_minds").exists():
+            return "the owner has turned minds off"
+        if self.state.get("mind_usage", 0.0) >= MIND_DAILY_USAGE:
+            return "the day's share for minds is used up"
+        now = time.time()
+        self.mind_calls = [stamp for stamp in self.mind_calls if now - stamp < 60]
+        if len(self.mind_calls) >= MINDS_PER_MINUTE:
+            return "too many in the last minute"
+        self.mind_calls.append(now)
+        return None
 
     def why_not_speak(self):
         """Talking is cheap, so it only stops for the kill switch or a hard limit."""

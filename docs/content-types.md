@@ -87,12 +87,57 @@ Use `known` with a `route` for recipes learned elsewhere, `open` for ones that a
 }
 ```
 
-- `category` is `monster` or `creature`, and can't change after release. There are 24 of the first and 16 of the second, so don't spend them casually.
-- `model` is `assets/models/<model>.bbmodel`, made with `assetkit/bbmodel.py`. It needs animations named `idle` and `walk`, and `attack` if it fights.
+- `category` is `monster` or `creature`, and can't change after release. There are 240 of the first and 480 of the second.
+- `model` is `assets/models/<model>.bbmodel`. Model each creature for itself with `assetkit/sculpt.py`, so it looks like nothing else in the world. See `assetkit/README.md`. It needs animations named `idle` and `walk`, and `attack` if it fights, and should have `hurt` and `death`. The game plays all of these by itself, and a mob stays until its `death` finishes, up to 5 seconds. Set `width` and `height` from what `sculpt.stats` says.
 - `behaviour` is `hostile`, `neutral` (fights back), `passive` or `skittish` (avoids players).
 - `spawn` is optional. Leave it out for something only a module summons. `light` is `dark`, `bright` or `any`. `cap` limits how many gather near one player. Biomes can be ids or `#tags`.
 
 For anything more, bind code to it: `context.bindMob("rune_crab", new MobBehavior() { ... })`, with `tick(mob)` and `hurt(mob, source)`. A model's animations are played with `mob.animator().playAnimation("name")`.
+
+## Minds
+
+A mob can have a mind: at the moments that matter, a very fast and cheap model decides what it does, as itself. Most mobs shouldn't have one. Give it to the ones players will want to talk to, make friends with or get to know: a hermit, a shopkeeper, a beloved companion, a village elder, a boss that reads the fight. Everything else about a mob stays plain code, and if the day's share of usage runs out, it just carries on without words.
+
+```json
+"mobs": {
+  "hermit_crab": {
+    "category": "creature", "display": "Old Pinch", "model": "hermit_crab", "behaviour": "neutral", "health": 20, "damage": 2, "speed": 0.15, "width": 1, "height": 1,
+    "mind": {
+      "character": "A grumpy old crab who has lived under the pier longer than anyone remembers. Vain about his shell. Knows where the tin is, and how to cut gems, but tells nobody who hasn't brought him something shiny.",
+      "voice": "words",
+      "actions": ["follow", "flee", "stay", "wander", "lead", "give", "teach"],
+      "animations": ["wave", "sulk"],
+      "sounds": ["$sound:crab_click"],
+      "loves": ["minecraft:emerald"],
+      "stash": [{"item": "$item:rune_dust", "count": 3, "trust": 2}],
+      "teaches": {"gem_cutting": 4},
+      "leads_to": ["$block:tin_ore"],
+      "greets": true
+    }
+  }
+}
+```
+
+- **`character`** is all it knows about anything, up to 800 characters, and it's read at every decision. Write who it is, what it wants and what it knows, in a way that gives it a reason to be interesting. Never put anything in it that's coming later.
+- **`voice`** is `words`, `cries` for something that only makes noises like "Pika!", or `silent` for something that only moves. A creature that can't talk but clearly understands is often better than one that can.
+- **`actions`** is what it can choose from: `follow`, `flee`, `stay`, `wander`, `lead` (to the nearest block in `leads_to`, within 24 blocks), `give`, `teach` and `attack` (neutral or hostile only, and a neutral one only against someone it distrusts).
+- **`animations`** and **`sounds`** are how it expresses itself, so give it a few that suit it. They have to exist in its model. Moving is how a creature talks.
+- **`stash`** is what it can hand over. It's per player and per kind of mob, so killing one doesn't refill it, and it needs that much **trust** first. Up to 8 things in all, from this feature's step in the progression or earlier.
+- **`teaches`** gives the trust needed for knowledge it can pass on. The entry still needs its own routes, because nobody should depend on a model to progress.
+- **`greets`** makes it react the first time each player comes near.
+
+Players talk to it by facing it up close and typing in chat, or by using its name from further away. Using an empty hand on it says hello, and using an item offers it. Trust runs from -10 to 10: gifts raise it, and hitting one lowers it with that whole kind. It remembers per player. What's said to one creature can spread as rumour to others, changing as it goes.
+
+For a boss, list `"moves": ["slam", "charge"]` and optionally `"fight_seconds": 10`. Every so often during a fight its mind picks the next move from what's happening, or plain code picks one if it can't. Moves play the animation of the same name, and do what your module says:
+
+```java
+context.bindMob("colossus", new MobBehavior() {
+    @Override
+    public void move(SlotMob mob, String name, LivingEntity target) {
+        if (name.equals("slam")) { /* ... */ }
+    }
+});
+```
 
 ## Plants
 
@@ -211,4 +256,4 @@ List names in `"sounds": ["chime"]`, with `assets/sounds/chime.ogg` from `assetk
 
 ## What the engine doesn't do yet
 
-Structures larger than a chunk, new dimensions and client rendering beyond the HUD. Build the closest thing that works, and say what you wanted in `host_requests`.
+Structures larger than a chunk, new dimensions and client rendering beyond the HUD. Armor can only look like vanilla's when worn, and custom tools can't take enchantments at an enchanting table. Build the closest thing that works, and say what you wanted in `host_requests`.

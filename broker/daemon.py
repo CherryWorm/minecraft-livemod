@@ -8,12 +8,15 @@ that polices it, comes from this trusted checkout, so the agent can't change the
 Usage: python3 -m broker.daemon
 """
 import json
+import os
 import shutil
 import subprocess
 import sys
 import time
 
-from broker import runtime
+from PIL import Image, ImageStat
+
+from broker import reference_textures, runtime
 
 WORKSPACE = runtime.RUNTIME / "agent-workspace"
 REQUESTS = WORKSPACE / "requests"
@@ -22,6 +25,9 @@ AGENT_REPO = WORKSPACE / "repo"
 ASSEMBLED = runtime.BROKER / "assembled"
 REPORTS_FOR_AGENT = WORKSPACE / "reports"
 CACHE_JAR = "/cache/gradle/caches/fabric-loom/26.3/minecraft-client.jar"
+AGENT_ICON = WORKSPACE / "icon" / "server-icon.png"
+PROXY_DATA = runtime.RUNTIME / "velocity"
+ICON_SIZE = 64
 
 
 def assemble(commit):
@@ -79,11 +85,46 @@ def javap(class_name):
     return {"output": "\n".join(lines)[:12000]}
 
 
+def type_into_proxy(command):
+    """Velocity only takes commands at its console, so its container reads them from this pipe."""
+    try:
+        pipe = os.open(PROXY_DATA / "console.pipe", os.O_WRONLY | os.O_NONBLOCK)
+    except OSError as error:
+        raise RuntimeError(f"the proxy isn't listening: {error}") from error
+    with os.fdopen(pipe, "w") as stream:
+        stream.write(command + "\n")
+
+
+def install_icon():
+    """Checks what the agent drew and writes a fresh copy of it, so that only a plain image reaches the proxy."""
+    if AGENT_ICON.is_symlink() or not AGENT_ICON.is_file():
+        return {"result": "blocked", "gate": "icon", "reason": f"Expected a file at /workspace/icon/{AGENT_ICON.name}."}
+    try:
+        with Image.open(AGENT_ICON) as image:
+            if image.format != "PNG" or image.size != (ICON_SIZE, ICON_SIZE):
+                return {"result": "blocked", "gate": "icon", "reason": f"It must be a {ICON_SIZE}x{ICON_SIZE} PNG. Found a {image.size} {image.format}."}
+            clean = image.convert("RGBA")
+    except OSError as error:
+        return {"result": "blocked", "gate": "icon", "reason": f"That isn't a readable image: {error}"}
+    if max(ImageStat.Stat(clean.convert("RGB")).stddev) < 8:
+        return {"result": "blocked", "gate": "icon", "reason": "It's almost one flat colour, so there's nothing to see."}
+    target = PROXY_DATA / AGENT_ICON.name
+    temporary = target.with_suffix(".tmp")
+    clean.save(temporary, format="PNG")
+    temporary.replace(target)
+    type_into_proxy("velocity reload")
+    return {"result": "installed"}
+
+
 def handle(request):
     kind = request["kind"]
     if runtime.agent_disabled() and kind != "javap":
         return {"result": "blocked", "gate": "control", "reason": "The kill switch is on."}
     release_id = request.get("release_id", f"check-{request['id']}")
+    if kind == "lint":
+        return promote(request["commit"], release_id, "--lint-only")
+    if kind == "server_icon":
+        return install_icon()
     if kind == "check":
         return promote(request["commit"], release_id, "--check-only")
     if kind == "gates":
@@ -98,6 +139,10 @@ def handle(request):
 def main():
     for folder in (REQUESTS, RESPONSES, REPORTS_FOR_AGENT):
         folder.mkdir(parents=True, exist_ok=True)
+    # Vanilla's own art, for builders to compare theirs with. The game's jar is outside the agent's reach.
+    client_jar = runtime.RUNTIME / CACHE_JAR.removeprefix("/")
+    if client_jar.exists():
+        reference_textures.extract(client_jar, WORKSPACE / "reference-textures")
     print("broker waiting for requests", flush=True)
     while True:
         # One at a time, oldest first: there's one shadow server, and releases must not overlap.

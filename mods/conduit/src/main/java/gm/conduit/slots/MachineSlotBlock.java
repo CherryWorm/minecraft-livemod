@@ -11,7 +11,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.jspecify.annotations.Nullable;
 
 /** A blank block that can hold data and run every tick, which is what machines need. */
-public final class MachineSlotBlock extends SlotBlock implements EntityBlock {
+public class MachineSlotBlock extends SlotBlock implements EntityBlock {
 	public MachineSlotBlock(Properties properties, SlotFamily family, Identifier model, String slotId) {
 		super(properties, family, model, slotId);
 	}

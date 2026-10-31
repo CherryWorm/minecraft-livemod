@@ -15,9 +15,10 @@ import sys
 import time
 
 from broker import bundles, deploy, runtime, sign
-from broker.gates import GateFailed, bytecode, client, shadow, static
+from broker.gates import GateFailed, advice, bytecode, client, progression, shadow, static
 
 SERVER_MODS = ("conduit",)
+PROGRESS_SNAPSHOT = "progress_snapshot.json"
 
 
 class Stages:
@@ -44,7 +45,7 @@ class Stages:
 def prepare_source(source):
     """Copies the source to a stable folder, so Gradle's caches make repeat builds fast."""
     mods = runtime.WORK / "mods"
-    runtime.sync_tree(source / "mods", mods, "build/", ".gradle/", "run/")
+    runtime.sync_tree(source / "mods", mods, "build/", ".gradle/", "run/", exact=True)
     # Build folders are kept for speed, so a deleted feature's would otherwise linger and look like a feature.
     kept = mods / "genesis" / "features"
     if kept.is_dir():
@@ -53,7 +54,7 @@ def prepare_source(source):
                 shutil.rmtree(folder)
     for name in ("bible",):
         if (source / name).exists():
-            runtime.sync_tree(source / name, runtime.WORK / name)
+            runtime.sync_tree(source / name, runtime.WORK / name, exact=True)
     return mods
 
 
@@ -68,6 +69,17 @@ def compile_content(source, mods, content):
         shutil.rmtree(content)
     bundles.render(features, new_ledger, content, runtime.data_format(), runtime.vanilla_biome, discovery_scope(source))
     return features, pool, old_ledger, new_ledger
+
+
+def check_progression(source, features, new_ledger, content):
+    """Compares with the live release, because that's what players' things came from."""
+    current = runtime.HISTORY / str(runtime.load_state().get("current")) / "content" / PROGRESS_SNAPSHOT
+    old_prints = json.loads(current.read_text(encoding="utf-8")) if current.exists() else {}
+    new_prints = progression.snapshot(features)
+    content.mkdir(parents=True, exist_ok=True)
+    (content / PROGRESS_SNAPSHOT).write_text(json.dumps(new_prints, indent=1), encoding="utf-8")
+    knowledge = runtime.RUNTIME / "prod" / "world" / "conduit_knowledge.json"
+    progression.run(features, source / "bible", new_ledger, old_prints, knowledge, new_prints)
 
 
 def discovery_scope(source):
@@ -212,12 +224,17 @@ def patches_changed(content, old_content):
     return [patch for patch in read(content) if patch["id"] not in old_ids]
 
 
-def promote(source, release_id, deploy_to_prod, chaos_in_prod, stages, check_only=False):
+def promote(source, release_id, deploy_to_prod, chaos_in_prod, stages, check_only=False, lint_only=False):
     report = {"release": release_id}
     content = runtime.WORK / "content"
     mods = stages.run("prepare", lambda: prepare_source(source))
     features, pool, old_ledger, new_ledger = stages.run("compile", lambda: compile_content(source, mods, content))
     stages.run("static", lambda: static.run(features, old_ledger, new_ledger, pool, content))
+    stages.run("progression", lambda: check_progression(source, features, new_ledger, content))
+    report["advice"] = advice.run(features)
+    if lint_only:
+        report["result"] = "passed_lint"
+        return report
 
     ledger_path = runtime.WORK / "registry-ledger.json"
     bundles.save_ledger(ledger_path, new_ledger)
@@ -265,6 +282,7 @@ def main():
     parser.add_argument("--release-id", default=time.strftime("r%Y%m%d-%H%M%S"))
     parser.add_argument("--no-deploy", action="store_true")
     parser.add_argument("--check-only", action="store_true", help="stop after the static checks and build")
+    parser.add_argument("--lint-only", action="store_true", help="stop after the static checks, with no compile")
     parser.add_argument("--chaos-in-prod", action="store_true", help="test only: crash prod to exercise rollback")
     args = parser.parse_args()
 
@@ -272,7 +290,7 @@ def main():
     report = {"release": args.release_id}
     code = 0
     try:
-        report = promote(args.source.resolve(), args.release_id, not args.no_deploy, args.chaos_in_prod, stages, args.check_only)
+        report = promote(args.source.resolve(), args.release_id, not args.no_deploy, args.chaos_in_prod, stages, args.check_only, args.lint_only)
     except GateFailed as error:
         report.update(result="blocked", gate=error.gate, reason=error.message)
         code = 2

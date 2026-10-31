@@ -1,5 +1,8 @@
 package gm.conduit.slots;
 
+import de.tomalbrc.bil.api.Animator;
+import de.tomalbrc.bil.core.holder.base.AbstractAnimationHolder;
+import eu.pb4.polymer.virtualentity.api.attachment.BlockBoundAttachment;
 import gm.conduit.api.MachineBehavior;
 import gm.conduit.modules.ServerModuleHost;
 import net.minecraft.core.BlockPos;
@@ -8,6 +11,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
+
+import java.util.function.Consumer;
 
 /**
  * Generic machine storage. Modules can be replaced at any time, so everything a machine remembers lives
@@ -23,6 +28,24 @@ public final class SlotBlockEntity extends BlockEntity {
 	/** The machine's saved state. Call {@link #setChanged()} after changing it. */
 	public CompoundTag data() {
 		return this.data;
+	}
+
+	/** Plays one of this machine's model animations by name. It does nothing on a machine that's a plain cube. */
+	public void play(String animation) {
+		withAnimator(animator -> animator.playAnimation(animation));
+	}
+
+	public void stop(String animation) {
+		withAnimator(animator -> animator.stopAnimation(animation));
+	}
+
+	private void withAnimator(Consumer<Animator> action) {
+		if (this.level != null && !this.level.isClientSide()) {
+			BlockBoundAttachment attachment = BlockBoundAttachment.get(this.level, getBlockPos());
+			if (attachment != null && attachment.holder() instanceof AbstractAnimationHolder holder) {
+				action.accept(holder.getAnimator());
+			}
+		}
 	}
 
 	void tick(String slotId) {

@@ -14,7 +14,10 @@ from broker.bundles import TOKEN
 from broker.gates import GateFailed
 
 GATE = "balance"
-TIERS = ("wood", "stone", "iron", "diamond", "netherite", "beyond")
+TIERS = ("wood", "stone", "iron", "diamond", "netherite", "beyond", "mythic")
+# The endgame is meant to get arbitrarily crazy, so this one has no limits. What keeps it fair is that it's only
+# allowed at the end of the progression, behind everything else. See gates/progression.py.
+UNLIMITED = "mythic"
 MARGIN = 1.1
 # beyond has no vanilla curve, so it's measured from netherite. 150% is the highest multiplier at which a
 # full armor set (20 points) still lands exactly on the game's cap of 30, so no number is wasted, and it's
@@ -98,7 +101,7 @@ def _expected(veins, size, low, high):
 ORE_CURVE = {tier: sum(_expected(*ore) for ore in ores) for tier, ores in _VANILLA_ORES.items()}
 # Ancient debris: one vein of 3 and one of 2 per chunk, all of it inside the Nether's rock. Nothing in vanilla
 # sits above it, so beyond is set at half, to stay rarer than the rarest thing players already know.
-ORE_CURVE.update(netherite=5.0, beyond=2.5)
+ORE_CURVE.update(netherite=5.0, beyond=2.5, mythic=1.25)
 
 
 def _is_number(value):
@@ -215,6 +218,8 @@ def _limits(tier, slot, armored):
 def _over_budget(label, tier, claim):
     if tier not in TIERS:
         return [f"{label} declares tier {tier!r}, but a tier must be one of {', '.join(TIERS)}."]
+    if tier == UNLIMITED:
+        return []
     stats = {stat: value for stat, value in claim.items() if stat != "slot"}
     if any(stat in stats for stat in WEAPON_STATS):
         stats["damage_per_second"] = (stats.get("attack_damage", BASE_ATTACK_DAMAGE)
@@ -342,7 +347,7 @@ def check_power(features, recipes):
         # An item's own components are what every stack of it starts with, so they answer to the same curve.
         if isinstance(thing.get("components"), dict):
             defaults, found = _from_components(f"{label}, by default,", thing["components"])
-            problems += found
+            problems += [] if tier == UNLIMITED else found
             if any(stat != "slot" for stat in defaults):
                 if tier is None:
                     problems.append(f"{label} sets {', '.join(sorted(defaults))} but has no tier. Add \"tier\": one of {', '.join(TIERS)}.")
@@ -352,10 +357,10 @@ def check_power(features, recipes):
         for node, _, components in recipe["outputs"]:
             label = f"Recipe {recipe['source']} makes {node.split(':', 1)[-1] if node in things else node}, which"
             claim, found = _from_components(label, components)
-            problems += found
+            tier = things[node].get("tier") if node in things else recipe["tier"]
+            problems += [] if tier == UNLIMITED else found
             if not any(stat != "slot" for stat in claim):
                 continue
-            tier = things[node].get("tier") if node in things else recipe["tier"]
             if tier is None:
                 where = "the item" if node in things else "the recipe, since the item is vanilla's"
                 problems.append(f"{label} sets {', '.join(sorted(claim))} but has no tier. Add \"tier\" to {where}: "
@@ -528,8 +533,16 @@ def _highest_tier(tiers):
     return max(known, key=TIERS.index) if known else None
 
 
-def _tiers_fed(start, recipes, things):
-    """Every tier a material ends up in. A label can't undercut this: an ore called iron-tier that makes diamond-tier gear feeds diamond."""
+def _tiers_fed(start, recipes, things, features):
+    """Every tier a material ends up in. A label can't undercut this: an ore called iron-tier that makes diamond-tier gear feeds diamond.
+
+    Only within its own step of the world's progression, though. A later step is meant to use up what came before as
+    one of its ingredients, and it needs materials of its own, so that doesn't make an early ore into a rare one.
+    """
+    def step(node):
+        feature = features.get(node.split(":", 1)[-1].split("/")[0])
+        return feature["manifest"].get("node") if feature else None
+
     edges = {}
     for recipe in recipes:
         for alternatives, _ in recipe["inputs"]:
@@ -538,7 +551,7 @@ def _tiers_fed(start, recipes, things):
     seen, waiting = set(), [start]
     while waiting:
         node = waiting.pop()
-        if node not in seen:
+        if node not in seen and (step(node) is None or step(node) == step(start)):
             seen.add(node)
             waiting += edges.get(node, ())
     return [things[node].get("tier") for node in seen if node in things]
@@ -557,6 +570,11 @@ def check_ores(features, recipes):
             if not all(_is_number(number) and not math.isnan(number) for number in numbers):
                 problems.append(f"Ore {label} needs numbers for veinsPerChunk, veinSize, minY and maxY.")
                 continue
+            # The server reads these as whole numbers, and one that isn't loses every ore patch in the release.
+            if not all(float(number).is_integer() for number in numbers):
+                problems.append(f"Ore {label} needs whole numbers for veinsPerChunk, veinSize, minY and maxY. For something rarer than one "
+                                "vein a chunk, make the veins smaller or limit it to a narrow range of heights.")
+                continue
             if "tier" in ore and ore["tier"] not in TIERS:
                 problems.append(f"Ore {label} declares tier {ore['tier']!r}, but a tier must be one of {', '.join(TIERS)}.")
             node = f"block:{_key(feature_id, ore.get('block', ''))}"
@@ -570,7 +588,7 @@ def check_ores(features, recipes):
     ceiling = max(ORE_CURVE.values()) * ORE_TOLERANCE
     for node, entry in supply.items():
         label, amount = node.split(":", 1)[1], entry["amount"]
-        tier = _highest_tier(entry["tiers"] + _tiers_fed(entry["start"], recipes, things))
+        tier = _highest_tier(entry["tiers"] + _tiers_fed(entry["start"], recipes, things, features))
         about = f"gives about {amount:.1f} per chunk"
         if amount <= 0:
             problems.append(f"Ore {label} never generates: its veins or Y range give nothing inside rock, "

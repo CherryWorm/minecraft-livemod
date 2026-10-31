@@ -1,13 +1,18 @@
 package gm.conduit;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.FloatArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import gm.conduit.bridge.SafeMoment;
+import gm.conduit.mobs.SlotMob;
 import gm.conduit.modules.ServerModuleHost;
 import gm.conduit.retrogen.OrePatchQueue;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.Entity;
 
 /** Operator commands the broker uses when applying a release. Players never have the permission for these. */
 final class ConduitCommands {
@@ -26,6 +31,19 @@ final class ConduitCommands {
 					context.getSource().sendSuccess(() -> Component.literal("Players not safe: " + unsafe), false);
 					return (int) unsafe;
 				}))
+				.then(Commands.literal("pose").then(Commands.argument("mobs", EntityArgument.entities())
+						.then(Commands.argument("animation", StringArgumentType.word())
+						.then(Commands.argument("fraction", FloatArgumentType.floatArg(0, 1)).executes(context -> {
+							int posed = 0;
+							for (Entity entity : EntityArgument.getEntities(context, "mobs")) {
+								if (entity instanceof SlotMob mob && mob.pose(StringArgumentType.getString(context, "animation"), FloatArgumentType.getFloat(context, "fraction"))) {
+									posed++;
+								}
+							}
+							int count = posed;
+							context.getSource().sendSuccess(() -> Component.literal("Posed: " + count), false);
+							return count;
+						})))))
 				.then(Commands.literal("modules").then(Commands.literal("reload").executes(context -> {
 					int changed = ServerModuleHost.instance().reloadAll();
 					context.getSource().sendSuccess(() -> Component.literal("Server modules changed: " + changed

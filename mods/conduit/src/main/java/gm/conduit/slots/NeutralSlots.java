@@ -23,7 +23,7 @@ import java.util.List;
  */
 public final class NeutralSlots {
 	public static final int FIRST_ITEM_ID = 1;
-	public static final int ITEM_COUNT = 400;
+	public static final int ITEM_COUNT = 1200;
 
 	private static final List<String> BLOCK_IDS = new ArrayList<>();
 	private static final List<String> ITEM_IDS = new ArrayList<>();
@@ -48,7 +48,7 @@ public final class NeutralSlots {
 		for (SlotFamily family : SlotFamily.values()) {
 			for (int i = 0; i < family.count(); i++) {
 				Block block = registerBlock("s%04d".formatted(family.firstId() + i), family);
-				if (family == SlotFamily.MACHINE) {
+				if (family == SlotFamily.MACHINE || family == SlotFamily.MODEL) {
 					machines.add(block);
 				}
 			}
@@ -66,9 +66,11 @@ public final class NeutralSlots {
 		Identifier id = id(path);
 		Identifier model = id("block/" + path);
 		var properties = family.properties().setId(ResourceKey.create(Registries.BLOCK, id));
-		Block block = family == SlotFamily.MACHINE
-				? new MachineSlotBlock(properties, family, model, path)
-				: new SlotBlock(properties, family, model, path);
+		Block block = switch (family) {
+			case MACHINE -> new MachineSlotBlock(properties, family, model, path);
+			case MODEL -> new ModelSlotBlock(properties, family, model, path);
+			default -> new SlotBlock(properties, family, model, path);
+		};
 		Registry.register(BuiltInRegistries.BLOCK, id, block);
 		Registry.register(BuiltInRegistries.ITEM, id, new PolymerBlockItem(
 				block,

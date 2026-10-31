@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import gm.conduit.KillSwitch;
 import gm.conduit.knowledge.Knowledge;
+import gm.conduit.mobs.Minds;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.border.WorldBorder;
@@ -13,8 +14,9 @@ import net.minecraft.world.level.border.WorldBorder;
 import java.util.Set;
 
 /**
- * Everything the agent can do in the world. Speaking is limited to system messages, and no operation
- * can give anyone anything, so fairness rules can't be talked around through chat.
+ * Everything the agent can do in the world. Speaking is limited to system messages, and fairness rules can't be
+ * talked around through chat. The only operation that can give anyone anything is a mob's own small stash, whose
+ * size and price in trust come from the release and are enforced in {@link Minds#act}.
  */
 final class Operations {
 	private static final Set<String> READ_ONLY = Set.of("status", "players", "progress");
@@ -39,6 +41,7 @@ final class Operations {
 			case "players" -> players(server);
 			case "border" -> border(server, request.get("size").getAsDouble());
 			case "progress" -> Knowledge.instance().progress();
+			case "mob_act" -> Minds.act(request);
 			default -> throw new IllegalArgumentException("Unknown operation " + op);
 		};
 	}

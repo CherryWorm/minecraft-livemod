@@ -17,8 +17,17 @@ ROUTE_TYPES = {"obtain", "examine", "kill", "read", "fragments"}
 LEDGER_TABLES = ("blocks", "items", "mobs")
 OLD_LOOT_FIELDS = {"functions", "function", "conditions"}
 MACHINE_RECIPE_TYPES = {"gm:machine"}
+# Starting values, to be tuned once real players' computers have shown what they can draw.
+MAX_BONES_ROAMING = 16
+MAX_BONES_ONE_OFF = 48
+MAX_BONES_BLOCK = 16
+MAX_MODEL_CUBES = 3000
+MIND_ACTIONS = {"follow", "flee", "stay", "wander", "lead", "give", "teach", "attack"}
+MIND_VOICES = {"words", "cries", "silent"}
+MAX_CHARACTER = 800
+MAX_STASH = 8
 # Words that would give content away if they appeared in a path players can see.
-SAFE_PATH = re.compile(r"^assets/(gm/(textures/(block/s\d{4}|item/i\d{4})\.png(\.mcmeta)?"
+SAFE_PATH = re.compile(r"^assets/(gm/(textures/(block/s\d{4}(_(top|bottom|front|back|left|right|side))?|item/i\d{4})\.png(\.mcmeta)?"
                        r"|models/(block/s\d{4}|item/i\d{4})\.json|lang/en_us\.json|sounds/[0-9a-f]+\.ogg|sounds\.json))$")
 
 
@@ -183,6 +192,92 @@ def check_knowledge(features):
                       "Only crafting and machine recipes can. Use 'open' here.")
 
 
+def check_no_tags_in_patches(features):
+    """Ores, plants and ruins are read by name on the server, and a tag there stops the whole file from loading."""
+    fields = {"ores": ("replaces", "biomes"), "plants": ("on", "biomes"), "ruins": ("on", "replaces", "biomes")}
+    for feature_id, feature in features.items():
+        for table, names in fields.items():
+            entries = feature["manifest"].get(table, [])
+            for entry in entries.values() if isinstance(entries, dict) else entries:
+                for field in names:
+                    tags = [value for value in entry.get(field) or [] if str(value).startswith("#")]
+                    if tags:
+                        _fail(f"{feature_id} has {tags[0]} in the {field} of one of its {table}. Those only take exact names, "
+                              "so list them instead of using a tag. Only mob spawns can use tags.")
+
+
+def _model_cost(path):
+    """Bones that have cubes, because each is an entity for players' computers to draw, and the number of cubes."""
+    model = json.loads(path.read_text(encoding="utf-8"))
+    cubes = {element["uuid"] for element in model.get("elements", [])}
+
+    def bones_in(node):
+        children = node.get("children", [])
+        own = any(isinstance(child, str) and child in cubes for child in children)
+        return own + sum(bones_in(child) for child in children if isinstance(child, dict))
+
+    return sum(bones_in(root) for root in model.get("outliner", []) if isinstance(root, dict)), len(cubes)
+
+
+def check_model_costs(features):
+    """Something that roams around in numbers costs more than one boss, so each has its own limit."""
+    for feature_id, feature in features.items():
+        models = feature["dir"] / "assets" / "models"
+        drawn = [(name, mob.get("model", name), MAX_BONES_ROAMING if mob.get("spawn") else MAX_BONES_ONE_OFF)
+                 for name, mob in feature["manifest"].get("mobs", {}).items()]
+        drawn += [(name, block["model"], MAX_BONES_BLOCK) for name, block in feature["manifest"].get("blocks", {}).items() if block.get("model")]
+        for name, model, limit in drawn:
+            path = models / f"{model}.bbmodel"
+            if not path.exists():
+                continue
+            bones, cubes = _model_cost(path)
+            if bones > limit:
+                _fail(f"{feature_id}/{name} has {bones} moving parts, over the limit of {limit} for something like it. Each is an entity "
+                      "for players' computers to draw, so merge some. A boss that only a module summons is allowed more.")
+            if cubes > MAX_MODEL_CUBES:
+                _fail(f"{feature_id}/{name} has {cubes} cubes, over the limit of {MAX_MODEL_CUBES}. Use a coarser grain.")
+
+
+def check_minds(features):
+    """What a mob's mind is allowed to do comes from here, because the model choosing can be talked into anything."""
+    knowledge = {f"{feature_id}/{name}" for feature_id, feature in features.items() for name in feature["manifest"].get("knowledge", {})}
+    for feature_id, feature in features.items():
+        for name, mob in feature["manifest"].get("mobs", {}).items():
+            mind = mob.get("mind")
+            if mind is None:
+                continue
+            label = f"Mob {feature_id}/{name}'s mind"
+            character = str(mind.get("character", "")).strip()
+            if not character or len(character) > MAX_CHARACTER:
+                _fail(f"{label} needs a character of up to {MAX_CHARACTER} characters, because it's read at every decision.")
+            if mind.get("voice", "words") not in MIND_VOICES:
+                _fail(f"{label} has voice {mind.get('voice')!r}. Use one of {sorted(MIND_VOICES)}.")
+            unknown = set(mind.get("actions", [])) - MIND_ACTIONS
+            if unknown:
+                _fail(f"{label} lists actions {sorted(unknown)}. Use only {sorted(MIND_ACTIONS)}.")
+            actions = set(mind.get("actions", []))
+            if "attack" in actions and mob.get("behaviour") not in ("hostile", "neutral"):
+                _fail(f"{label} can attack, but it's {mob.get('behaviour')}. Make it neutral or hostile, or leave attack out.")
+            if bool(mind.get("stash")) != ("give" in actions):
+                _fail(f"{label} needs both a stash and the give action, or neither.")
+            if bool(mind.get("teaches")) != ("teach" in actions):
+                _fail(f"{label} needs both teaches and the teach action, or neither.")
+            if bool(mind.get("leads_to")) != ("lead" in actions):
+                _fail(f"{label} needs both leads_to and the lead action, or neither.")
+            stash = mind.get("stash", [])
+            if sum(item.get("count", 0) for item in stash) > MAX_STASH or any(item.get("count", 0) < 1 for item in stash):
+                _fail(f"{label} has too large a stash. It's per player, so {MAX_STASH} things in all is the limit.")
+            for entry in mind.get("teaches", {}):
+                if (entry if "/" in entry else f"{feature_id}/{entry}") not in knowledge:
+                    _fail(f"{label} teaches {entry}, which no feature declares. Knowledge needs its own routes as well, so no one depends on a mob.")
+            model = feature["dir"] / "assets" / "models" / f"{mob.get('model', name)}.bbmodel"
+            if model.exists():
+                have = {animation.get("name") for animation in json.loads(model.read_text(encoding="utf-8")).get("animations", [])}
+                missing = set(mind.get("animations", [])) - have
+                if missing:
+                    _fail(f"{label} lists animations {sorted(missing)}, which its model doesn't have.")
+
+
 def run(features, old_ledger, new_ledger, pool, content):
     pack = content / "pack"
     check_ledger_append_only(old_ledger, new_ledger)
@@ -196,4 +291,7 @@ def run(features, old_ledger, new_ledger, pool, content):
     check_guessable_only_on_machines(features)
     check_knowledge(features)
     check_loot_format(features)
+    check_no_tags_in_patches(features)
+    check_model_costs(features)
+    check_minds(features)
     balance.run(features)

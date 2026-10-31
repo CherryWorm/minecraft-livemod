@@ -116,9 +116,10 @@ def data_format():
     raise RuntimeError("No server jar found. Start prod once first.")
 
 
-def sync_tree(source, target, *excludes):
+def sync_tree(source, target, *excludes, exact=False):
+    """exact compares what's in each file. Otherwise two edits of the same size in the same second look unchanged."""
     target.mkdir(parents=True, exist_ok=True)
-    command = ["rsync", "-a", "--delete"]
+    command = ["rsync", "-a", "--delete", *(["--checksum"] if exact else [])]
     for pattern in excludes:
         command += ["--exclude", pattern]
     run([*command, f"{source}/", f"{target}/"])

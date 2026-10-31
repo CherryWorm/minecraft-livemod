@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import time
 
-from PIL import Image, ImageStat
+from PIL import Image, ImageDraw, ImageStat
 
 from broker import runtime
 from broker.gates import GateFailed
@@ -15,6 +15,11 @@ CONTAINER = "livingmod-gate-client"
 PLAYER = "Player0"
 SHOT_TIMEOUT = 90
 REFERENCE_BLOCKS = ("minecraft:stone", "minecraft:iron_ore", "minecraft:oak_planks", "minecraft:grass_block", "minecraft:copper_block")
+# Each frame is a real screenshot, so this keeps a release with new mobs from taking much longer than one without.
+FILMED_MOBS = 2
+FILMED_ANIMATIONS = ("walk", "attack", "hurt", "death")
+FILMED_PHASES = (0.0, 0.25, 0.5, 0.75)
+EYE_HEIGHT = 1.62
 
 
 def _fail(message):
@@ -87,6 +92,55 @@ def check_image(path):
             _fail(f"{path.name} is almost completely black, so nothing rendered.")
 
 
+def film(mobs, log, process):
+    """Holds new mobs at set points in their animations, on the real client, for a reviewer to judge how they move."""
+    filmed = {}
+    definitions = json.loads((runtime.RUNTIME / "shadow" / "config" / "conduit" / "mobs.json").read_text(encoding="utf-8"))
+    for slot in mobs[:FILMED_MOBS]:
+        # Close enough that it fills the frame, whatever its size, with the camera level with the middle of it.
+        height = max(0.5, min(float(definitions.get(f"gm:{slot}", {}).get("height", 1)), 8))
+        back = 1 - max(2.2, height * 1.5 + 0.8)
+        runtime.rcon("shadow", "kill", "@e[type=!player]", check=False)
+        runtime.rcon("shadow", "tp", PLAYER, "0", str(round(120 + height / 2 - EYE_HEIGHT, 2)), str(round(back, 2)), "0", "0", check=False)
+        runtime.rcon("shadow", "summon", f"gm:{slot}", "0", "120", "1", "{NoAI:1b,PersistenceRequired:1b,Rotation:[150f,0f]}", check=False)
+        time.sleep(1)
+        rows = filmed.setdefault(slot, {})
+        for animation in FILMED_ANIMATIONS:
+            for index, phase in enumerate(FILMED_PHASES):
+                answer = runtime.rcon("shadow", "conduit", "pose", f"@e[type=gm:{slot}]", animation, str(phase), check=False)
+                if answer.endswith(": 0") or "Posed" not in answer:
+                    break
+                name = f"frame_{slot}_{animation}_{index}"
+                _tell(f"SCENE shot {name}")
+                _wait_log(log, rf"\[SCENE\] took {name}$", SHOT_TIMEOUT, process)
+                rows.setdefault(animation, []).append(name)
+    return filmed
+
+
+def motion_sheet(slot, rows, shots_dir, out):
+    """One image per mob, with a row for each animation, which is far easier to judge than a pile of separate shots."""
+    sheet = None
+    for row, (animation, names) in enumerate(rows.items()):
+        for column, name in enumerate(names):
+            found = sorted(shots_dir.glob(f"*scene_{name}.png"))
+            if not found:
+                continue
+            with Image.open(found[-1]) as image:
+                frame = image.convert("RGB")
+            width, height = frame.size
+            frame = frame.crop(((width - height) // 2, 0, (width + height) // 2, height)).resize((height // 2, height // 2))
+            if sheet is None:
+                sheet = Image.new("RGB", (frame.width * len(FILMED_PHASES), (frame.height + 16) * len(rows)), (30, 30, 34))
+            sheet.paste(frame, (column * frame.width, row * (frame.height + 16) + 16))
+            if column == 0:
+                ImageDraw.Draw(sheet).text((4, row * (frame.height + 16) + 2), f"{animation}, across the animation from left to right", fill=(230, 230, 230))
+    if sheet is None:
+        return None
+    target = out / f"motion_{slot}.png"
+    sheet.save(target)
+    return target
+
+
 def run_gate(blocks, items, mods_dir, report_dir, mobs=(), client_modules=False):
     """Returns the screenshots taken. Skips when there's nothing new to look at."""
     if not blocks and not items and not mobs and not client_modules:
@@ -125,6 +179,8 @@ def run_gate(blocks, items, mods_dir, report_dir, mobs=(), client_modules=False)
             _tell(f"SCENE shot {name}")
             _wait_log(log, rf"\[SCENE\] took {name}$", SHOT_TIMEOUT, process)
             shots.append(name)
+        runtime.rcon("shadow", "time", "set", "noon", check=False)
+        filmed = film(mobs, log, process)
         _tell("SCENE done")
         process.wait(timeout=120)
     finally:
@@ -134,6 +190,8 @@ def run_gate(blocks, items, mods_dir, report_dir, mobs=(), client_modules=False)
 
     saved = []
     for path in sorted(shots_dir.glob("*.png")):
+        if "scene_frame_" in path.name:
+            continue
         target = report_dir / path.name
         shutil.copy(path, target)
         saved.append(target)
@@ -142,4 +200,8 @@ def run_gate(blocks, items, mods_dir, report_dir, mobs=(), client_modules=False)
     for path in saved:
         if "day" in path.name:
             check_image(path)
+    for slot, rows in filmed.items():
+        sheet = motion_sheet(slot, rows, shots_dir, report_dir)
+        if sheet:
+            saved.append(sheet)
     return saved

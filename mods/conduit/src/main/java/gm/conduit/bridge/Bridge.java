@@ -3,6 +3,7 @@ package gm.conduit.bridge;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import gm.conduit.KillSwitch;
+import gm.conduit.mobs.Minds;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
@@ -77,6 +78,9 @@ public final class Bridge {
 			chat.addProperty("text", message.signedContent());
 			chat.addProperty("private", captured);
 			emit(chat);
+			if (!captured) {
+				Minds.onChat(sender, message.signedContent());
+			}
 			return !captured;
 		});
 

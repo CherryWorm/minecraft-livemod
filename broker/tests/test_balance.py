@@ -540,8 +540,11 @@ class Ores(Case):
 
     def test_edges_of_the_tolerance(self):
         limit = balance.ORE_CURVE["diamond"] * balance.ORE_TOLERANCE
-        self.assert_passes({"f": self.ore(veins=limit / 10, size=10, low=-64, high=0, tier="diamond")})
-        self.assert_fails({"f": self.ore(veins=(limit + 1) / 10, size=10, low=-64, high=0, tier="diamond")}, "feeds tier diamond")
+        self.assert_passes({"f": self.ore(veins=int(limit // 10), size=10, low=-64, high=0, tier="diamond")})
+        self.assert_fails({"f": self.ore(veins=int(limit // 10) + 1, size=10, low=-64, high=0, tier="diamond")}, "feeds tier diamond")
+
+    def test_the_server_only_reads_whole_numbers(self):
+        self.assert_fails({"f": self.ore(veins=2.5, size=8, low=-64, high=16, tier="diamond")}, "whole numbers")
 
     def test_y_range_above_the_rock_counts_for_little(self):
         # Half this range is in the air, so veins there are wasted.

@@ -58,6 +58,34 @@ Each feature is one folder, `mods/genesis/features/<id>/`, where `<id>` is lower
 }
 ```
 
+## Where a feature sits in the world
+
+`bible/progression.json` is this world's progression, a graph of nodes where each lists the nodes that come before it. Every feature belongs to one, named as `"node"` in `feature.json`. You're told which node when you're given a feature. These are checked when it's released:
+
+- **Recipes follow the graph.** A recipe can only use your content from its own node or from nodes that come before it.
+- **Later things have to be earned.** Past the first nodes, any recipe for tiered gear or a machine has to need a material from a node directly before it in the graph, either itself or through something else you make from it. So endgame gear needs what the step before it makes, not just the first ore anyone found. If there are several recipes for one thing, all of them do, so a cheap one can't get around it.
+- **Each stage has limits.**
+
+| Stage | Strongest tier | Strongest mob (health, damage) | What can run by itself |
+|---|---|---|---|
+| `early` | `iron` | 30, 6 | Nothing |
+| `mid` | `beyond` | 150, 15 | Limited, as listed below |
+| `end` | `mythic` | No limit | No limit |
+
+**What runs by itself.** Anything that works without a player being there is declared, with what it does and how fast, and a reviewer compares that with your code:
+
+```json
+"automation": [{"what": "mining", "per_minute": 6}]
+```
+
+The most the mid game allows, per minute: `mining` 6, `mob_killing` 1, `crafting` 20, `machining` 20, `farming` 20, `sorting` 150, `transport` 150.
+
+**What players already have stays as it is.** Once anyone has held or killed something, a release that changes it (its numbers, recipes, art or where it's found) is refused, unless you give a reason for that thing, and a reviewer judges whether it's a good one. `world_index` marks what players have.
+
+```json
+"changes_reached": {"tin_pick": "Three players said it breaks too quickly to be worth making"}
+```
+
 ## Block families
 
 A family fixes what can't change on a live block. `stone`, `ore`, `deep_ore`, `metal` and `machine` need the right tool to drop anything, so give them a `tool` and usually a `tool_level` (`stone`, `iron` or `diamond`).
@@ -76,8 +104,24 @@ A family fixes what can't change on a live block. `stone`, `ore`, `deep_ore`, `m
 | `plant` | Small plants, cross-shaped, no collision. Only 5 exist, so use them sparingly |
 | `glow_plant` | The same, giving light at level 10. Only 2 exist |
 | `tinted_plant` | The same, tinted by biome |
+| `model` | Drawn by a 3D model with moving parts instead of a texture. See below |
 
 Families are limited, and a name stays assigned to its slot forever, so don't create blocks casually. A block's family can never change once it's been released.
+
+A cube block can have different textures on its faces. `side` covers any side you don't name, and a face with nothing named uses `texture`. A block always faces the same way once placed, so `front` is always north, and it can't turn to face the player.
+
+```json
+"press": {"family": "machine", "display": "Press", "texture": "press_side",
+          "faces": {"front": "press_front", "side": "press_side", "top": "press_top", "bottom": "press_top"}}
+```
+
+A `model` block is any shape you can model, with moving parts, for machines that should look like machines. It works like a `machine` block for modules and saving data, and its hitbox is always one full block, though the model can reach beyond that. Its `texture` is what it looks like in an inventory. Make the model the way you'd make a mob's, as described in `assetkit/README.md`, with its feet on the block's floor at Y 0 and its centre over X 0, Z 0.
+
+```json
+"great_press": {"family": "model", "display": "Great Press", "texture": "great_press_icon", "model": "great_press", "tool": "pickaxe"}
+```
+
+An animation called `idle` plays by itself. Start and stop others from a module with `machine.play("stamp")` and `machine.stop("stamp")`. Every moving part is an entity for players' computers to draw, so this suits things that matter. Use a cube for anything players will place by the hundred.
 
 ## Names
 
@@ -91,7 +135,7 @@ A released name can never be removed, because worlds may contain it. To retire s
 
 Items stack to 64 and do nothing by default. To make a tool, weapon or armor, set components on the recipe's result, for example `"components": {"minecraft:max_damage": 250, "minecraft:tool": {...}}`.
 
-Anything with combat or tool numbers must say which tier it belongs to, with a `tier` on the item or block: `wood`, `stone`, `iron`, `diamond`, `netherite` or `beyond`. Numbers can also be declared in `stats`, as a statement of intent that gets the same check. Things with no such numbers need no tier.
+Anything with combat or tool numbers must say which tier it belongs to, with a `tier` on the item or block: `wood`, `stone`, `iron`, `diamond`, `netherite`, `beyond` or `mythic`. Numbers can also be declared in `stats`, as a statement of intent that gets the same check. Things with no such numbers need no tier.
 
 ```json
 "items": {
@@ -120,7 +164,9 @@ Nothing may go over 110% of vanilla at its tier:
 | `diamond` | 1561 | 8 | 9 | 11.2 | 3, 8, 6, 3, 11 | 528 | 2 |
 | `netherite` | 2031 | 9 | 10 | 12.8 | 3, 8, 6, 3, 19 | 592 | 3 |
 
-`beyond` is for late-game content, and allows 150% of netherite rather than 110%.
+`beyond` is for late mid-game content, and allows 150% of netherite rather than 110%.
+
+`mythic` is only for the endgame, and has no limits at all. The attributes and components refused below are allowed on it too, including enchantments, extra health and anything else that fits. It only ships from a node in the `end` stage, and has to take earlier materials to make. Let it be absurd.
 
 Things to watch for:
 
@@ -159,6 +205,7 @@ An ore's yield must suit the tier it feeds. Yield is `veinsPerChunk` times `vein
 | `diamond` | diamond | 47 | 23 to 94 |
 | `netherite` | ancient debris | 5 | 2.5 to 10 |
 | `beyond` | none | 2.5 | 1.25 to 5 |
+| `mythic` | none | 1.25 | 0.6 to 2.5 |
 
 The tier it feeds is the highest of any `tier` on the ore entry, its block or what it drops, and the tier of anything those get crafted into. With no tier anywhere, it only has to stay under 255.
 

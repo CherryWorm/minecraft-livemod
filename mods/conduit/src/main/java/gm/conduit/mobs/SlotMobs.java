@@ -49,8 +49,10 @@ import java.util.Map;
  * biomes, because a biome's spawn list can't change without a restart.
  */
 public final class SlotMobs {
-	public static final int MONSTER_COUNT = 24;
-	public static final int CREATURE_COUNT = 16;
+	// Enough for a world that's all about its creatures. These can only grow while no world depends on them, because
+	// creature IDs start where monster IDs end, and worlds store those IDs.
+	public static final int MONSTER_COUNT = 240;
+	public static final int CREATURE_COUNT = 480;
 
 	private static final Logger LOGGER = LoggerFactory.getLogger("Conduit");
 	private static final Path FILE = Path.of("config", "conduit", "mobs.json");
@@ -121,13 +123,16 @@ public final class SlotMobs {
 		}
 	}
 
-	private static void loadModel(String name) throws IOException {
-		if (LOADED_MODELS.containsKey(name)) {
-			return;
+	public static Model loadModel(String name) throws IOException {
+		Model loaded = LOADED_MODELS.get(name);
+		if (loaded != null) {
+			return loaded;
 		}
 		// Named by hash, so a changed model is simply another file and nothing in the pack gives it away.
 		try (InputStream input = Files.newInputStream(MODELS.resolve(name + ".bbmodel"))) {
-			LOADED_MODELS.put(name, new BbModelLoader().load(input, name));
+			loaded = new BbModelLoader().load(input, name);
+			LOADED_MODELS.put(name, loaded);
+			return loaded;
 		}
 	}
 

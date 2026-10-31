@@ -98,6 +98,10 @@ public final class Knowledge {
 			if (killer instanceof ServerPlayer player) {
 				String type = BuiltInRegistries.ENTITY_TYPE.getKey(killed.getType()).toString();
 				INSTANCE.plan.withRoute("kill", type).forEach(entry -> INSTANCE.learn(player, entry));
+				String name = INSTANCE.plan.names().get(type);
+				if (name != null && INSTANCE.ledger.markFound(player.getStringUUID(), type)) {
+					INSTANCE.emitDiscovery(player, name);
+				}
 			}
 		});
 	}
@@ -314,6 +318,12 @@ public final class Knowledge {
 		return matched;
 	}
 
+	/** What players call one of our items. The server has no language files, so it can't work this out from the stack. */
+	public String nameOf(ItemStack stack) {
+		String name = this.plan.names().get(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
+		return name != null ? name : stack.getHoverName().getString();
+	}
+
 	public List<KnowledgePlan.Entry> knownEntries(Player player) {
 		return this.plan.entries().values().stream().filter(entry -> knows(player, entry.id())).toList();
 	}
@@ -338,6 +348,14 @@ public final class Knowledge {
 			players.add(player.getGameProfile().name(), entry);
 		}
 		out.add("online", players);
+		JsonArray reached = new JsonArray();
+		for (String id : this.ledger.foundByAnyone()) {
+			String name = this.plan.names().get(id);
+			if (name != null) {
+				reached.add(name);
+			}
+		}
+		out.add("reached", reached);
 		JsonArray unknown = new JsonArray();
 		for (KnowledgePlan.Entry entry : this.plan.entries().values()) {
 			boolean anyone = this.server.getPlayerList().getPlayers().stream().anyMatch(player -> knows(player, entry.id()));

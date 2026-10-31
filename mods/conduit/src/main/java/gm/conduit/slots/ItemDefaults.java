@@ -60,13 +60,18 @@ public final class ItemDefaults {
 			RegistryOps<JsonElement> ops = server.registryAccess().createSerializationContext(JsonOps.INSTANCE);
 			JsonObject json = new Gson().fromJson(Files.readString(FILE), JsonObject.class);
 			for (Map.Entry<String, JsonElement> entry : json.entrySet()) {
-				Item item = BuiltInRegistries.ITEM.getValue(Identifier.parse(entry.getKey()));
-				JsonObject defaults = entry.getValue().getAsJsonObject();
-				if (defaults.has("components") && item instanceof SlotItem slot) {
-					slot.setReleaseComponents(DataComponentMap.CODEC.parse(ops, defaults.get("components")).getOrThrow());
-				}
-				if (defaults.has("places")) {
-					PLACEMENTS.put(item, readPlacement(defaults.getAsJsonObject("places")));
+				// One bad item shouldn't take every item after it down too, and the error fails the release's log scan.
+				try {
+					Item item = BuiltInRegistries.ITEM.getValue(Identifier.parse(entry.getKey()));
+					JsonObject defaults = entry.getValue().getAsJsonObject();
+					if (defaults.has("components") && item instanceof SlotItem slot) {
+						slot.setReleaseComponents(DataComponentMap.CODEC.parse(ops, defaults.get("components")).getOrThrow());
+					}
+					if (defaults.has("places")) {
+						PLACEMENTS.put(item, readPlacement(defaults.getAsJsonObject("places")));
+					}
+				} catch (RuntimeException error) {
+					LOGGER.error("Can't read the defaults for {}", entry.getKey(), error);
 				}
 			}
 			LOGGER.info("item defaults loaded for {} items", json.size());

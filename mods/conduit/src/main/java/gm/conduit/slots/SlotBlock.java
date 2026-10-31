@@ -1,5 +1,6 @@
 package gm.conduit.slots;
 
+import eu.pb4.polymer.blocks.api.BlockModelType;
 import eu.pb4.polymer.blocks.api.PolymerBlockModel;
 import eu.pb4.polymer.blocks.api.PolymerBlockResourceUtils;
 import eu.pb4.polymer.blocks.api.PolymerTexturedBlock;
@@ -21,16 +22,31 @@ import org.jspecify.annotations.Nullable;
 
 /** A blank block. Its behaviour comes from whichever module has bound this slot, if any. */
 public class SlotBlock extends Block implements PolymerTexturedBlock {
+	private static BlockState emptyState;
+
 	private final BlockState polymerState;
 	private final String slotId;
 
 	public SlotBlock(Properties properties, SlotFamily family, Identifier model, String slotId) {
 		super(properties);
 		this.slotId = slotId;
-		this.polymerState = PolymerBlockResourceUtils.requestBlock(family.modelType(), PolymerBlockModel.of(model));
+		this.polymerState = family.modelType() == null
+				? emptyState()
+				: PolymerBlockResourceUtils.requestBlock(family.modelType(), PolymerBlockModel.of(model));
 		if (this.polymerState == null) {
 			throw new IllegalStateException("No free " + family.modelType() + " slots for " + slotId);
 		}
+	}
+
+	/**
+	 * What a client sees for a block drawn by a model: a solid block with nothing to draw. It's a leaves-like one because those
+	 * don't hide their neighbours' faces, and all model blocks can share it, since they all look the same to a client.
+	 */
+	private static BlockState emptyState() {
+		if (emptyState == null) {
+			emptyState = PolymerBlockResourceUtils.requestEmpty(BlockModelType.LEAVES);
+		}
+		return emptyState;
 	}
 
 	public String slotId() {

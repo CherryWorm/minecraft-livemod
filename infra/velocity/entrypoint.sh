@@ -18,4 +18,9 @@ log-sent-data=false
 log-response-status-text=false
 EOF
 
-exec java -Xms512M -Xmx512M -XX:+UseG1GC -jar /opt/velocity/velocity.jar
+# Velocity only takes commands at its console, so the broker types them into this. Opening it for both reading and
+# writing means it never reports an end of input while nobody's typing.
+[[ -p console.pipe ]] || mkfifo console.pipe
+exec 9<>console.pipe
+
+exec java -Xms512M -Xmx512M -XX:+UseG1GC -jar /opt/velocity/velocity.jar <&9
