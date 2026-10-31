@@ -1,6 +1,7 @@
 package gm.conduit.pack;
 
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.network.protocol.common.ServerboundResourcePackPacket;
 import net.minecraft.server.level.ServerPlayer;
 import org.jspecify.annotations.Nullable;
@@ -28,12 +29,16 @@ public final class PackStatus {
 			long now = System.nanoTime();
 			PROTECTED.entrySet().removeIf(entry -> {
 				if (entry.getKey().isRemoved() || now - entry.getValue() > MAX_PROTECTED_NANOS) {
-					entry.getKey().setInvulnerable(false);
+					entry.getKey().setPermanentlyInvulnerable(false);
 					return true;
 				}
 				return false;
 			});
 		});
+		// The flag is saved with the player, so clear it before that save happens.
+		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> release(handler.player));
+		// Nothing else grants it to players, so one found here came from a crash during a pack load.
+		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> handler.player.setPermanentlyInvulnerable(false));
 	}
 
 	public static void record(String name, @Nullable ServerPlayer player, ServerboundResourcePackPacket.Action action) {
@@ -41,8 +46,8 @@ public final class PackStatus {
 			case ACCEPTED -> {
 				STARTED.put(name, System.nanoTime());
 				LOGGER.info("pack accepted by {}", name);
-				if (player != null && !player.isInvulnerable()) {
-					player.setInvulnerable(true);
+				if (player != null && !player.isPermanentlyInvulnerable()) {
+					player.setPermanentlyInvulnerable(true);
 					PROTECTED.put(player, System.nanoTime());
 				}
 			}
@@ -60,7 +65,7 @@ public final class PackStatus {
 
 	private static void release(@Nullable ServerPlayer player) {
 		if (player != null && PROTECTED.remove(player) != null) {
-			player.setInvulnerable(false);
+			player.setPermanentlyInvulnerable(false);
 		}
 	}
 

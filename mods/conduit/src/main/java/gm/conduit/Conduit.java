@@ -31,7 +31,10 @@ public final class Conduit implements ModInitializer {
 		ConduitCommands.register();
 		Chaos.register();
 
-		ServerLifecycleEvents.SERVER_STARTED.register(server -> ServerModuleHost.instance().start(server));
+		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+			ServerModuleHost.instance().start(server);
+			ModulePush.loadOnStart();
+		});
 		ServerTickEvents.END_SERVER_TICK.register(server -> ServerModuleHost.instance().tick(server));
 	}
 }

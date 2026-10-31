@@ -6,12 +6,15 @@ import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.network.chat.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -22,17 +25,41 @@ import java.util.function.Consumer;
 
 /**
  * Loads, runs and unloads client modules. Vanilla hooks can't be removed once added, so the host
- * registers one of each and dispatches to its modules. A module that keeps throwing is switched off
- * rather than taking the game down.
+ * registers one of each and dispatches to its modules. A module that keeps throwing or slows the game
+ * down is switched off rather than taking the game with it.
+ *
+ * <p>Two safety nets live outside the JVM's reach, because code can't be sandboxed in-process on Java 25:
+ * a crash while modules were active starts the next launch in safe mode, and any player can turn modules
+ * off for themselves.
  */
 public final class ModuleHost {
 	private static final Logger LOGGER = LoggerFactory.getLogger("Companion");
 	private static final int MAX_FAILURES = 3;
+	private static final long FRAME_BUDGET_NANOS = 3_000_000;
+	private static final int FRAME_WINDOW = 240;
+	private static final Path CONFIG = Path.of("config", "companion");
+	private static final Path RUNNING_MARKER = CONFIG.resolve("modules_running");
+	private static final Path TURNED_OFF = CONFIG.resolve("modules_off");
 
 	private final Map<String, LoadedModule> modules = new LinkedHashMap<>();
 	private final Map<String, byte[][]> incoming = new HashMap<>();
+	private final ModuleVerifier verifier = new ModuleVerifier();
+	private final boolean safeMode = Files.exists(RUNNING_MARKER);
+	private boolean turnedOff = Files.exists(TURNED_OFF);
 	private int completedUnloads;
 	private int disabledForErrors;
+	private int refused;
+
+	ModuleHost() {
+		if (this.safeMode) {
+			LOGGER.warn("The game didn't shut down cleanly while modules were running. Starting without them this time.");
+			try {
+				Files.deleteIfExists(RUNNING_MARKER);
+			} catch (IOException error) {
+				LOGGER.warn("Couldn't clear the safe mode marker", error);
+			}
+		}
+	}
 
 	public boolean isActive(String moduleId) {
 		return this.modules.containsKey(moduleId);
@@ -46,7 +73,36 @@ public final class ModuleHost {
 		return this.disabledForErrors;
 	}
 
+	public int refused() {
+		return this.refused;
+	}
+
+	public boolean turnedOff() {
+		return this.turnedOff;
+	}
+
+	/** The player's own switch. It always wins, and it's remembered between sessions. */
+	public void setTurnedOff(boolean off) {
+		this.turnedOff = off;
+		try {
+			Files.createDirectories(CONFIG);
+			if (off) {
+				Files.writeString(TURNED_OFF, "");
+			} else {
+				Files.deleteIfExists(TURNED_OFF);
+			}
+		} catch (IOException error) {
+			LOGGER.warn("Couldn't save the module setting", error);
+		}
+		if (off) {
+			unloadAll();
+		}
+	}
+
 	void onChunk(ModulePayloads.Chunk chunk) {
+		if (this.turnedOff || this.safeMode) {
+			return;
+		}
 		String key = chunk.moduleId() + "#" + chunk.generation();
 		byte[][] parts = this.incoming.computeIfAbsent(key, k -> new byte[chunk.total()][]);
 		parts[chunk.index()] = chunk.data();
@@ -60,10 +116,16 @@ public final class ModuleHost {
 		for (byte[] part : parts) {
 			jar.writeBytes(part);
 		}
-		load(chunk.moduleId(), chunk.generation(), jar.toByteArray());
+		load(chunk.moduleId(), chunk.generation(), jar.toByteArray(), chunk.signature());
 	}
 
-	private void load(String moduleId, int generation, byte[] jar) {
+	private void load(String moduleId, int generation, byte[] jar, String signature) {
+		String refusal = this.verifier.refusal(moduleId, generation, jar, signature);
+		if (refusal != null) {
+			this.refused++;
+			LOGGER.warn("module {} generation {} refused: {}", moduleId, generation, refusal);
+			return;
+		}
 		unload(moduleId);
 		try {
 			ModuleClassLoader loader = new ModuleClassLoader(jar, ModuleHost.class.getClassLoader());
@@ -71,9 +133,24 @@ public final class ModuleHost {
 			LoadedModule loaded = new LoadedModule(moduleId, generation, module);
 			module.enable(loaded);
 			this.modules.put(moduleId, loaded);
+			this.verifier.accepted(moduleId, generation);
+			markRunning(true);
 			LOGGER.info("module {} generation {} enabled", moduleId, generation);
 		} catch (Exception | LinkageError error) {
 			LOGGER.error("module {} generation {} failed to load", moduleId, generation, error);
+		}
+	}
+
+	private void markRunning(boolean running) {
+		try {
+			Files.createDirectories(CONFIG);
+			if (running) {
+				Files.writeString(RUNNING_MARKER, "");
+			} else {
+				Files.deleteIfExists(RUNNING_MARKER);
+			}
+		} catch (IOException error) {
+			LOGGER.warn("Couldn't update the safe mode marker", error);
 		}
 	}
 
@@ -96,6 +173,9 @@ public final class ModuleHost {
 		loaded.shutdown();
 		this.completedUnloads++;
 		LOGGER.info("module {} generation {} unloaded", moduleId, loaded.generation);
+		if (this.modules.isEmpty()) {
+			markRunning(false);
+		}
 	}
 
 	void unloadAll() {
@@ -116,13 +196,17 @@ public final class ModuleHost {
 	private void dispatch(Consumer<LoadedModule> call) {
 		List<String> broken = new ArrayList<>();
 		for (LoadedModule module : this.modules.values()) {
+			long started = System.nanoTime();
 			call.accept(module);
 			if (module.failures >= MAX_FAILURES) {
 				broken.add(module.moduleId);
+				LOGGER.warn("module {} disabled after repeated errors", module.moduleId);
+			} else if (module.overBudget(System.nanoTime() - started)) {
+				broken.add(module.moduleId);
+				LOGGER.warn("module {} disabled for slowing the game down", module.moduleId);
 			}
 		}
 		for (String moduleId : broken) {
-			LOGGER.warn("module {} disabled after repeated errors", moduleId);
 			this.disabledForErrors++;
 			unload(moduleId);
 		}
@@ -135,6 +219,8 @@ public final class ModuleHost {
 		private final List<Consumer<Minecraft>> ticks = new ArrayList<>();
 		private ClientModule module;
 		private int failures;
+		private long windowNanos;
+		private int windowCalls;
 
 		LoadedModule(String moduleId, int generation, ClientModule module) {
 			this.moduleId = moduleId;
@@ -160,6 +246,18 @@ public final class ModuleHost {
 		@Override
 		public void onClientTick(Consumer<Minecraft> tick) {
 			this.ticks.add(tick);
+		}
+
+		/** An average over many calls, so one slow frame while chunks load doesn't count. */
+		boolean overBudget(long nanos) {
+			this.windowNanos += nanos;
+			if (++this.windowCalls < FRAME_WINDOW) {
+				return false;
+			}
+			boolean over = this.windowNanos / this.windowCalls > FRAME_BUDGET_NANOS;
+			this.windowCalls = 0;
+			this.windowNanos = 0;
+			return over;
 		}
 
 		void renderHud(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {

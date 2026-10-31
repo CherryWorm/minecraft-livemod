@@ -1,11 +1,16 @@
 package gm.companion;
 
+import com.mojang.brigadier.Command;
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 
 public final class Companion implements ClientModInitializer {
@@ -26,5 +31,20 @@ public final class Companion implements ClientModInitializer {
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("gm", "modules"), HOST::renderHud);
 		ClientTickEvents.END_CLIENT_TICK.register(HOST::tick);
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> HOST.unloadAll());
+		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> HOST.unloadAll());
+
+		// A friend can always turn this off on their own machine, with no permission from anyone.
+		ClientCommandRegistrationCallback.EVENT.register((dispatcher, buildContext) -> dispatcher.register(
+				ClientCommands.literal("companion")
+						.then(ClientCommands.literal("off").executes(context -> {
+							HOST.setTurnedOff(true);
+							context.getSource().sendFeedback(Component.literal("Modules are off on this computer."));
+							return Command.SINGLE_SUCCESS;
+						}))
+						.then(ClientCommands.literal("on").executes(context -> {
+							HOST.setTurnedOff(false);
+							context.getSource().sendFeedback(Component.literal("Modules are on. They'll load next time you join."));
+							return Command.SINGLE_SUCCESS;
+						}))));
 	}
 }

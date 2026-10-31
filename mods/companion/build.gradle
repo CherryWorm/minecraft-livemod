@@ -17,6 +17,11 @@ loom {
 		clientGameTest {
 			// The synchronizer expects a server inside the test, and this one connects to a real proxy.
 			vmArg "-Dfabric.client.gametest.disableNetworkSynchronizer=true"
+			// Test runs only. A real install has neither of these, and a server has no way to set them.
+			vmArg "-Dcompanion.allowUnsigned=${System.getenv('COMPANION_ALLOW_UNSIGNED') ?: 'false'}"
+			if (System.getenv('COMPANION_TEST_KEY')) {
+				vmArg "-Dcompanion.publicKey=${System.getenv('COMPANION_TEST_KEY')}"
+			}
 		}
 	}
 }

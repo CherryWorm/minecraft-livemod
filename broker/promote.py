@@ -44,6 +44,12 @@ def prepare_source(source):
     """Copies the source to a stable folder, so Gradle's caches make repeat builds fast."""
     mods = runtime.WORK / "mods"
     runtime.sync_tree(source / "mods", mods, "build/", ".gradle/", "run/")
+    # Build folders are kept for speed, so a deleted feature's would otherwise linger and look like a feature.
+    kept = mods / "genesis" / "features"
+    if kept.is_dir():
+        for folder in kept.iterdir():
+            if not (source / "mods" / "genesis" / "features" / folder.name).exists():
+                shutil.rmtree(folder)
     for name in ("bible",):
         if (source / name).exists():
             runtime.sync_tree(source / name, runtime.WORK / name)

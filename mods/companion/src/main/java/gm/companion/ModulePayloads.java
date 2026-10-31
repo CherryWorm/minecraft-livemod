@@ -10,13 +10,14 @@ import net.minecraft.resources.Identifier;
 final class ModulePayloads {
 	private ModulePayloads() {}
 
-	record Chunk(String moduleId, int generation, int index, int total, byte[] data) implements CustomPacketPayload {
+	record Chunk(String moduleId, int generation, int index, int total, String signature, byte[] data) implements CustomPacketPayload {
 		static final Type<Chunk> TYPE = new Type<>(Identifier.fromNamespaceAndPath("gm", "module_chunk"));
 		static final StreamCodec<ByteBuf, Chunk> CODEC = StreamCodec.composite(
 				ByteBufCodecs.STRING_UTF8, Chunk::moduleId,
 				ByteBufCodecs.VAR_INT, Chunk::generation,
 				ByteBufCodecs.VAR_INT, Chunk::index,
 				ByteBufCodecs.VAR_INT, Chunk::total,
+				ByteBufCodecs.STRING_UTF8, Chunk::signature,
 				ByteBufCodecs.BYTE_ARRAY, Chunk::data,
 				Chunk::new);
 
