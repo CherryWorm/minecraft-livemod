@@ -1,0 +1,163 @@
+# The whole stack. Moving from WSL to the rented server should only need a different .env.
+name: livingmod
+
+x-server: &server
+  image: livingmod/server:${MINECRAFT_VERSION}
+  build:
+    context: .
+    dockerfile: server/Dockerfile
+    args:
+      MINECRAFT_VERSION: ${MINECRAFT_VERSION}
+      FABRIC_LOADER_VERSION: ${FABRIC_LOADER_VERSION}
+      FABRIC_INSTALLER_VERSION: ${FABRIC_INSTALLER_VERSION}
+  user: "1000:1000"
+  restart: unless-stopped
+  stop_grace_period: 60s
+  secrets:
+    - forwarding
+    - rcon
+
+services:
+  velocity:
+    image: livingmod/velocity:${VELOCITY_VERSION}-${VELOCITY_BUILD}
+    build:
+      context: .
+      dockerfile: velocity/Dockerfile
+      args:
+        VELOCITY_URL: ${VELOCITY_URL}
+        VELOCITY_SHA256: ${VELOCITY_SHA256}
+    user: "1000:1000"
+    restart: unless-stopped
+    environment:
+      PROXY_ONLINE_MODE: ${PROXY_ONLINE_MODE:-true}
+    ports:
+      - "${GAME_PORT:-25565}:25565"
+    volumes:
+      - ${RUNTIME_DIR}/velocity:/data
+    secrets:
+      - forwarding
+    networks:
+      - public
+      - backend
+
+  prod:
+    <<: *server
+    environment:
+      SERVER_ROLE: prod
+      MINECRAFT_EULA: ${MINECRAFT_EULA:-false}
+      JAVA_MEMORY: ${PROD_MEMORY:-8G}
+      WHITE_LIST: ${WHITE_LIST:-true}
+      LEVEL_SEED: ${LEVEL_SEED:-}
+      PACK_PUBLIC_URL: ${PACK_PUBLIC_URL}
+    ports:
+      # Polymer serves the resource pack here until the standalone pack host arrives.
+      # This is also why prod is on the public network for now. M2 removes its outbound access.
+      - "${PACK_PORT:-25567}:25567"
+    volumes:
+      - ${RUNTIME_DIR}/prod:/data
+      - ${RUNTIME_DIR}/releases/current:/opt/release:ro
+    networks:
+      - public
+      - backend
+
+  shadow:
+    <<: *server
+    profiles: [shadow]
+    cpus: 4
+    environment:
+      SERVER_ROLE: shadow
+      MINECRAFT_EULA: ${MINECRAFT_EULA:-false}
+      JAVA_MEMORY: ${SHADOW_MEMORY:-6G}
+      WHITE_LIST: "false"
+      LEVEL_SEED: ${LEVEL_SEED:-}
+      PACK_PUBLIC_URL: http://shadow:25567/
+    volumes:
+      - ${RUNTIME_DIR}/shadow:/data
+      - ${RUNTIME_DIR}/releases/candidate:/opt/release:ro
+    networks:
+      - backend
+
+  builder:
+    profiles: [tools]
+    image: eclipse-temurin:25-jdk
+    user: "1000:1000"
+    working_dir: /work
+    environment:
+      GRADLE_USER_HOME: /cache/gradle
+      HOME: /cache/home
+    volumes:
+      - ../mods:/work
+      - ${RUNTIME_DIR}/cache:/cache
+    networks:
+      - public
+
+  testclient:
+    profiles: [tools]
+    image: livingmod/testclient:${MINECRAFT_VERSION}
+    build:
+      context: testclient
+    init: true
+    user: "1000:1000"
+    working_dir: /work
+    # Uses the host's network so the pack URL means the same thing here as for a real player.
+    network_mode: host
+    environment:
+      GRADLE_USER_HOME: /cache/gradle
+      HOME: /cache/home
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      # The game asks for an sRGB framebuffer, which Xvfb can't provide, so it renders with no display.
+      SDL_VIDEO_DRIVER: offscreen
+      EGL_PLATFORM: surfaceless
+      ALSOFT_DRIVERS: "null"
+      LIVINGMOD_SERVER: localhost:${GAME_PORT:-25565}
+      S4_CYCLES: ${S4_CYCLES:-100}
+    volumes:
+      - ../mods:/work
+      - ${RUNTIME_DIR}/cache:/cache
+
+  agent:
+    profiles: [agent]
+    image: livingmod/agent:${CLAUDE_AGENT_SDK_VERSION}
+    build:
+      context: agent
+      args:
+        CLAUDE_AGENT_SDK_VERSION: ${CLAUDE_AGENT_SDK_VERSION}
+    init: true
+    security_opt:
+      # Docker's defaults plus the namespace calls bubblewrap needs. See agent/make_seccomp.py.
+      - seccomp=agent/seccomp.json
+      # Bubblewrap has to set a limit inside its own namespace, under /proc/sys, which Docker mounts
+      # read-only. This relaxes that, so the lines below offset it: the agent is non-root with no
+      # capabilities, so it can't change anything outside its own namespace.
+      - systempaths=unconfined
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      # Only for the entrypoint to read its token and switch to the agent user. They end at the switch.
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    environment:
+      # Keeps the login token out of everything the agent runs, and keeps it on a tested version.
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
+      DISABLE_AUTOUPDATER: "1"
+    secrets:
+      - claude_token
+    volumes:
+      - ../spikes:/spikes:ro
+    networks:
+      - public
+
+networks:
+  public: {}
+  backend:
+    internal: true
+
+secrets:
+  forwarding:
+    file: ${RUNTIME_DIR}/secrets/forwarding.secret
+  rcon:
+    file: ${RUNTIME_DIR}/secrets/rcon.secret
+  claude_token:
+    file: ${RUNTIME_DIR}/secrets/claude_token.secret

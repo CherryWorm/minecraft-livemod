@@ -1,0 +1,6 @@
+# Everything runs on Linux, so keep LF endings even when edited on Windows.
+* text=auto eol=lf
+*.jar binary
+*.png binary
+*.ogg binary
+*.bat text eol=crlf

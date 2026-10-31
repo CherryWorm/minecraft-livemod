@@ -1,0 +1,15 @@
+{
+	"required": true,
+	"package": "gm.conduit.mixin",
+	"compatibilityLevel": "JAVA_25",
+	"mixins": [
+		"LevelChunkMixin",
+		"ServerCommonPacketListenerImplMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	},
+	"overwrites": {
+		"requireAnnotations": true
+	}
+}

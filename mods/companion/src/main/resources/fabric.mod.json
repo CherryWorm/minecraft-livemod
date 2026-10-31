@@ -1,0 +1,19 @@
+{
+	"schemaVersion": 1,
+	"id": "companion",
+	"version": "${version}",
+	"name": "Companion",
+	"description": "Hosts client modules that the Living Mod server pushes while the game runs.",
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			"gm.companion.Companion"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.20.1",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

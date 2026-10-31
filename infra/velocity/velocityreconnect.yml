@@ -1,0 +1,50 @@
+# VelocityReconnect: keeps players connected to the proxy while the backend restarts.
+# Copied over the plugin's generated file on every boot, so this is the version that counts.
+version: 25
+debug: false
+
+virtual-holding:
+  enabled: true
+
+Animations:
+  "%dots%":
+    Delay Millis: 1000
+    Animation:
+      - "&b.&7.."
+      - "&7.&b.&7."
+      - "&7..&b.&7"
+
+default-locale: "en_US"
+
+timing:
+  auto-start-delay: 2
+  scan-interval: 1
+  update-rate: 50
+  connect-finalization-timeout: 2
+  reconnect-timeout: 6
+  max-reconnect-time: 240
+  server-overrides: {}
+
+queue:
+  enabled: false
+  players-per-batch: 5
+  batch-interval: 2
+  server-overrides: {}
+
+max-reconnects: 128
+
+servers:
+  mode: blacklist
+  list: []
+  permissions: {}
+  holding-server: ""
+  fallback-servers: []
+
+shutdown:
+  # The plugin's default pattern only matches English text, but a clean stop sends the untranslated key
+  # multiplayer.disconnect.server_shutdown. Without it here, every restart kicks everyone.
+  # A hard process death (kill -9, out of memory) can't be held: the plugin doesn't react to it at all,
+  # whatever this pattern says, so those players have to reconnect.
+  text: "((?i)^(multiplayer\\.disconnect\\.server_shutdown|server closed|server is restarting|outdated (server|client).*))$"
+  regex: true
+  exclude-regex: "(?i)(multiplayer\\.disconnect\\.expired_public_key)$"

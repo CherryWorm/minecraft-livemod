@@ -1,0 +1,12 @@
+{
+  "enabled": true,
+  "required": true,
+  "type": "polymer:http_server",
+  "settings": {
+    "port": 25567,
+    "external_address": "@PACK_PUBLIC_URL@"
+  },
+  "message": "",
+  "setup_early": true,
+  "include_hash_in_name": true
+}

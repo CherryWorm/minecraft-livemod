@@ -1,0 +1,4 @@
+dependencies {
+	// Provided by the client at runtime. A module jar only ever contains its own classes.
+	compileOnly project(':companion')
+}

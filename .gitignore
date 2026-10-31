@@ -1,0 +1,21 @@
+# Worlds, backups, built releases and logs live on the host, not in git.
+runtime/
+
+# Secrets
+.env
+*.secret
+
+# Build output
+.gradle/
+build/
+out/
+*.class
+
+# Editors
+.idea/
+.vscode/
+*.iml
+
+__pycache__/
+*.pyc
+.venv/

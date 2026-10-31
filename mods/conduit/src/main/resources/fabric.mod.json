@@ -1,0 +1,23 @@
+{
+	"schemaVersion": 1,
+	"id": "conduit",
+	"version": "${version}",
+	"name": "Conduit",
+	"description": "Stable infrastructure for the Living Mod server.",
+	"environment": "server",
+	"entrypoints": {
+		"main": [
+			"gm.conduit.Conduit"
+		]
+	},
+	"mixins": [
+		"conduit.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=0.20.1",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*",
+		"polymer-blocks": "*"
+	}
+}

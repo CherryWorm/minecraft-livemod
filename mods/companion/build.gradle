@@ -1,0 +1,22 @@
+fabricApi {
+	configureTests {
+		createSourceSet = true
+		modId = "companion-test"
+		enableGameTests = false
+		enableClientGameTests = true
+	}
+}
+
+// So broken test code fails the normal build instead of only showing up when a client starts.
+tasks.named('build') {
+	dependsOn 'compileGametestJava'
+}
+
+loom {
+	runs {
+		clientGameTest {
+			// The synchronizer expects a server inside the test, and this one connects to a real proxy.
+			vmArg "-Dfabric.client.gametest.disableNetworkSynchronizer=true"
+		}
+	}
+}

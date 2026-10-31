@@ -1,0 +1,12 @@
+{
+	"schemaVersion": 1,
+	"id": "companion-test",
+	"version": "${version}",
+	"name": "Companion tests",
+	"environment": "client",
+	"entrypoints": {
+		"fabric-client-gametest": [
+			"gm.companion.test.ModuleCycleTest"
+		]
+	}
+}
