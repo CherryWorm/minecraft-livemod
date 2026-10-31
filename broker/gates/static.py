@@ -15,6 +15,7 @@ RESERVE = 0.2
 RECIPE_MODES = {"open", "known", "guessable"}
 ROUTE_TYPES = {"obtain", "examine", "kill", "read", "fragments"}
 LEDGER_TABLES = ("blocks", "items", "mobs")
+OLD_LOOT_FIELDS = {"functions", "function", "conditions"}
 MACHINE_RECIPE_TYPES = {"gm:machine"}
 # Words that would give content away if they appeared in a path players can see.
 SAFE_PATH = re.compile(r"^assets/(gm/(textures/(block/s\d{4}|item/i\d{4})\.png(\.mcmeta)?"
@@ -131,6 +132,27 @@ def check_guessable_only_on_machines(features):
                           "so experimenting at the machine wouldn't tell players anything.")
 
 
+def _old_loot_fields(value):
+    if isinstance(value, dict):
+        for key, inner in value.items():
+            if key in OLD_LOOT_FIELDS:
+                yield key
+            yield from _old_loot_fields(inner)
+    elif isinstance(value, list):
+        for inner in value:
+            yield from _old_loot_fields(inner)
+
+
+def check_loot_format(features):
+    """The game ignores fields it doesn't know without a word, so an old-style loot table loads and quietly does less."""
+    for feature_id, feature in features.items():
+        for name, ruin in feature["manifest"].get("ruins", {}).items():
+            found = sorted(set(_old_loot_fields(ruin.get("loot") or {})))
+            if found:
+                _fail(f"Ruin {feature_id}/{name} has loot using {', '.join(found)}, which Minecraft 26 ignores. "
+                      "See 'Loot tables' in docs/content-types.md.")
+
+
 def check_knowledge(features):
     """A recipe that has to be learned needs a way of learning it that players can actually reach."""
     entries = {f"{feature_id}/{name}": entry for feature_id, feature in features.items()
@@ -173,4 +195,5 @@ def run(features, old_ledger, new_ledger, pool, content):
     check_recipes(json.loads((content / "recipes.json").read_text(encoding="utf-8")))
     check_guessable_only_on_machines(features)
     check_knowledge(features)
+    check_loot_format(features)
     balance.run(features)

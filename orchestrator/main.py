@@ -95,8 +95,8 @@ class Agent:
             await self.bridge.capture(player, False)
             return
         reply = await interview.turn(text)
-        if reply:
-            await self.bridge.whisper(player, reply)
+        # The player is waiting in private, so even a failed call needs an answer.
+        await self.bridge.whisper(player, reply or "§7Sorry, I didn't catch that. Could you say it again?")
         if interview.finished:
             await self.bridge.capture(player, False)
             await self.bridge.whisper(player, "§7That's the end of the private talk. Your chat is public again.")
@@ -158,6 +158,10 @@ class Agent:
         player = event.get("player", "")
         self.governor.player_seen()
         if self.governor.why_not_speak():
+            # The character has gone quiet for now, so don't leave someone talking to nobody in private.
+            if kind == "chat" and event.get("private"):
+                await self.bridge.capture(player, False)
+                await self.bridge.whisper(player, "§7The private talk is on hold, and that message wasn't sent. Your chat is public again.")
             return
         if kind == "join":
             if player not in self.state["briefs"] and player not in self.interviews:
@@ -267,8 +271,11 @@ class Agent:
             progress = json.dumps(await self.bridge.call("progress"))
         except (RuntimeError, ConnectionError, TimeoutError):
             progress = "(not available right now)"
+        # Includes anyone who joined after the direction was chosen, whose answers can still steer what comes next.
+        briefs = "\n".join(llm.untrusted("brief", json.dumps(brief)) for brief in self.briefs())
         prompt = (f"Current phase: {self.state['phase']}. Released so far: {', '.join(self.state['released']) or 'nothing'}.\n\n"
                   f"Player requests:\n{body}\n\nWhat players have found and learned:\n{llm.untrusted('progress', progress)}\n\n"
+                  f"What each player privately said they wanted, never to be quoted or attributed:\n{briefs}\n\n"
                   "Read bible/theme.md and bible/phases.yaml, then choose the next features. "
                   "If the current phase's needs are all covered, move to the next phase.")
         result = await llm.ask(self.governor, "director", prompt, schema=DIRECTOR_SCHEMA, tools=["Read", "Glob", "Grep"],

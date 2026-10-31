@@ -5,14 +5,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 set -a; . ./.env; set +a
 
-workspace="$RUNTIME_DIR/agent-workspace"
-# The agent runs as a different user in the same group, so both need to be able to write here. Its repo
-# isn't made here, because git refuses to work in a folder another user owns.
-mkdir -p "$workspace"/{requests,responses,reports,state} "$RUNTIME_DIR/control"
-chmod 2775 "$workspace" "$workspace"/{requests,responses,reports,state}
+./scripts/prepare-workspace.sh
 
 if [[ "${1:-}" != "--no-build" ]]; then
-  ./scripts/stack.sh --profile agent build agent >/dev/null </dev/null
+  ./scripts/stack.sh --profile agent build agent egress >/dev/null </dev/null
 fi
 
 pid_file="$RUNTIME_DIR/broker/daemon.pid"

@@ -1,17 +1,22 @@
 # Living Mod
 
-A Minecraft Java server where an AI agent builds and evolves a mod while friends play. The world starts blank, players choose a theme, and the agent builds from there.
+A Minecraft Java server where an AI agent builds and evolves a mod while friends play. The world starts blank. The agent talks privately with each player, chooses one direction and stays in character from then on, building outward from the early game while people play.
 
-Status: M0, foundation. No agent yet.
+`RUNBOOK.md` covers running it for real and moving to a rented server.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
 | `versions.env`, `infra/mods.lock` | Every pinned version and checksum |
-| `infra/` | Docker Compose stack: Velocity proxy, prod and shadow servers |
-| `mods/conduit/` | Stable server infrastructure |
-| `assetkit/` | Asset generation |
+| `infra/` | Docker Compose stack: Velocity proxy, prod and shadow servers, agent, egress proxy |
+| `mods/conduit/` | Stable server infrastructure: slots, patches, knowledge, mobs, bridge, kill switch |
+| `mods/companion/` | The client mod friends install once, which loads signed modules |
+| `broker/` | Plain code that gates, signs, deploys and rolls back. No AI |
+| `orchestrator/` | The agent: interviews, direction, chat, watcher, builder, reviewer |
+| `assetkit/` | Makes textures, mob models and sounds |
+| `docs/` | What the agent's builders read about the content format |
+| `spikes/`, `broker/tests/` | Tests against the real stack |
 | `scripts/` | Host setup, builds, checks |
 
 ## Development on Windows
@@ -50,10 +55,32 @@ Connect a Minecraft 26.3 client to `localhost`. Inside the distro, run a server 
 ./scripts/mc.sh list
 ```
 
-To test the whole join path without a game (login, resource pack, entering the world), run this inside the distro. It needs `PROXY_ONLINE_MODE=false` in `.env`, which is only acceptable while the port is reachable from this PC alone:
+## Playing with the agent, locally
+
+Inside the distro, say who to wait for, then start the agent. It greets each new player with a private conversation:
 
 ```bash
-python3 scripts/smoketest_join.py
+printf 'YourName\n' > /srv/livingmod/runtime/control/roster.txt
 ```
 
-The rented server must keep `PROXY_ONLINE_MODE=true`.
+```bash
+./scripts/agent-up.sh
+```
+
+Watch it with `docker logs -f livingmod-agent-1`, and stop it with `./scripts/agent-down.sh`. It uses your Claude plan while it's running. To start over from a blank world, run `./scripts/reset-dev-world.sh --yes`.
+
+## Tests
+
+Inside the distro:
+
+| Command | What it proves |
+|---|---|
+| `python3 -m unittest broker.tests.test_balance broker.tests.test_bytecode broker.tests.test_sign` | The gates' rules, with no servers |
+| `python3 -m broker.tests.m2_test` | Bad releases are stopped at the right gate, and a crash rolls back |
+| `python3 -m broker.tests.m3_test` | Records survive a restart, modules hot-swap, and a crash holds players |
+| `python3 -m broker.tests.m7_test` | Signed modules run on a real client, and unsigned or unsafe ones are refused |
+| `python3 -m broker.tests.m8_test` | A real client learns recipes, uses a machine, reads the codex and sees mobs |
+| `./spikes/m4_e2e.sh` | The whole agent, from a blank world to a shipped feature. Uses your plan |
+| `python3 scripts/smoketest_join.py` | Login, resource pack and joining, with no game |
+
+These tests need `PROXY_ONLINE_MODE=false` in `.env`, which is only acceptable while the port is reachable from this PC alone. The rented server must keep `PROXY_ONLINE_MODE=true`.

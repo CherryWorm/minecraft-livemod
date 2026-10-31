@@ -29,11 +29,12 @@ fi
 for server in prod shadow; do
   rm -rf "${RUNTIME_DIR:?}/$server"/{world,live-assets,modules,polymer,config/conduit}
 done
-rm -rf "${RUNTIME_DIR:?}/broker"/{state.json,last.json,assembled,work,reports}
+rm -rf "${RUNTIME_DIR:?}/broker"/{state.json,last.json,passed_gates.json,assembled,work,reports}
 rm -rf "${RUNTIME_DIR:?}/releases/history"
 rm -f "${RUNTIME_DIR:?}/timeline.jsonl" "$RUNTIME_DIR/control/decide_now" "$RUNTIME_DIR/control/agent_disabled"
 # The agent's container runs as another user, so some of these files aren't ours to remove directly.
 docker run --rm -v "$RUNTIME_DIR:/runtime" alpine:3.22 rm -rf /runtime/agent-workspace </dev/null
+./scripts/prepare-workspace.sh
 mkdir -p "$RUNTIME_DIR/releases/history" "$RUNTIME_DIR/broker"
 
 ./scripts/build-mods.sh current >/dev/null

@@ -32,6 +32,8 @@ Aim for about 8 fast cores and 32 GB of RAM, on Ubuntu 24.04. That's an estimate
     ./scripts/agent-up.sh
     ```
 
+**Known gap:** the prod server can reach the internet, because Polymer serves the resource pack from it and that needs a public network. Agent-written server code runs in there, so on the rented server add a firewall rule that blocks new outbound connections from the prod container, or move the pack to a standalone host. The agent itself is already limited to Anthropic by its egress proxy.
+
 ## Before friends install anything
 
 Each friend has to agree to two things, knowing what they mean:

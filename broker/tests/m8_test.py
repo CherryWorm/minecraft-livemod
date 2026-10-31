@@ -24,7 +24,7 @@ FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "lore"
 CONTAINER = "livingmod-m8-client"
 PLAYER = "Player0"
 SPOT = (40, 120, 40)
-TEXTURES = ("rune_crucible", "moss_cap", "rune_dust", "rune_gem", "rune_tablet", "rune_shard", "rune_salt")
+TEXTURES = ("rune_crucible", "moss_cap", "rune_ore", "rune_dust", "rune_gem", "rune_tablet", "rune_shard", "rune_salt")
 BROKER_FAILED = re.compile(r"BUILD FAILED|Game crashed|\.java:\d+: error:")
 
 
@@ -244,6 +244,30 @@ def check_mob_art(results, shots):
         results.append(report("the mobs have their art", False, error.message))
 
 
+def check_drops(results):
+    """A loot table the game can't fully read loads anyway and quietly does less, so this asks for real drops."""
+    x, y, z = SPOT
+    ore, dust = slot("rune_ore", "blocks"), slot("rune_dust")
+    spot = (str(x + 3), str(y), str(z))
+    runtime.rcon("prod", "setblock", *spot, ore)
+    counts = set()
+    for _ in range(20):
+        runtime.rcon("prod", "clear", PLAYER, check=False)
+        runtime.rcon("prod", "loot", "give", PLAYER, "mine", *spot, "minecraft:iron_pickaxe")
+        held = runtime.rcon("prod", "clear", PLAYER, dust, "0")
+        found = re.search(r"Found (\d+)", held)
+        counts.add(int(found.group(1)) if found else 0)
+    results.append(report("an ore drops what it says, in the amounts it says", counts == {2, 3}, f"saw counts {sorted(counts)}"))
+
+    silk = 'minecraft:diamond_pickaxe[minecraft:enchantments={"minecraft:silk_touch":1}]'
+    runtime.rcon("prod", "clear", PLAYER, check=False)
+    runtime.rcon("prod", "loot", "give", PLAYER, "mine", *spot, silk)
+    held = runtime.rcon("prod", "clear", PLAYER, ore, "0")
+    results.append(report("silk touch gives the ore itself", "Found 1" in held, held))
+    runtime.rcon("prod", "setblock", *spot, "minecraft:air")
+    runtime.rcon("prod", "clear", PLAYER, check=False)
+
+
 def check_plants(results):
     runtime.rcon("prod", "save-all", "flush")
     time.sleep(3)
@@ -293,6 +317,7 @@ def main():
         check_biome(results)
         check_progress(results)
         check_plants(results)
+        check_drops(results)
     finally:
         client.stop()
     shots = mods / "companion" / "build" / "run" / "clientGameTest" / "screenshots"

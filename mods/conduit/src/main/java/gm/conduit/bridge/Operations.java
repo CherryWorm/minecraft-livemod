@@ -84,6 +84,9 @@ final class Operations {
 
 	private static JsonElement border(MinecraftServer server, double size) {
 		WorldBorder border = server.overworld().getWorldBorder();
+		// Around spawn, not the world's origin: players left outside a border take damage until they die.
+		var spawn = server.overworld().getRespawnData().pos();
+		border.setCenter(spawn.getX(), spawn.getZ());
 		border.setSize(size);
 		return new JsonPrimitive(size);
 	}

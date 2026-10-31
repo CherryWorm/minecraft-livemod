@@ -4,8 +4,14 @@
   "summary": "Test fixture that uses every content type: knowledge, gated and guessable recipes, a plant, a mob and a biome.",
   "blocks": {
     "rune_crucible": {"family": "machine", "display": "Rune Crucible", "texture": "rune_crucible", "tool": "pickaxe"},
-    "moss_cap": {"family": "plant", "display": "Moss Cap", "texture": "moss_cap"}
+    "moss_cap": {"family": "plant", "display": "Moss Cap", "texture": "moss_cap"},
+    "rune_ore": {"family": "ore", "display": "Rune Ore", "texture": "rune_ore", "tool": "pickaxe", "tool_level": "stone",
+                 "drops": {"item": "rune_dust", "count": [2, 3]}}
   },
+  "ores": [
+    {"id": "rune_ore_v1", "block": "rune_ore", "replaces": ["minecraft:stone", "minecraft:deepslate"],
+     "veinsPerChunk": 3, "veinSize": 6, "minY": -40, "maxY": 50}
+  ],
   "items": {
     "rune_dust": {"display": "Rune Dust", "texture": "rune_dust"},
     "rune_gem": {"display": "Rune Gem", "texture": "rune_gem"},
@@ -88,7 +94,7 @@
   "biomes": {
     "rune_meadow": {
       "base": "minecraft:plains",
-      "effects": {"grass_color": 3050327, "foliage_color": 3050327},
+      "effects": {"grass_color": "#2e8b57", "foliage_color": "#2e8b57"},
       "proportion": 0.4
     }
   }

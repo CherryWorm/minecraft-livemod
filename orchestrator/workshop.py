@@ -29,10 +29,11 @@ VERDICT_SCHEMA = {
 
 SUBAGENTS = {
     "artist": AgentDefinition(
-        description="Makes a feature's textures with assetkit. Give it the texture names and what each should look like.",
-        prompt=("You make Minecraft textures. Read assetkit/README.md and bible/theme.md, write the PNGs to the feature's "
-                "assets/textures folder, then look at them by reading the contact sheet, and fix anything muddy, noisy or flat. "
-                "16x16, small palette, soft contrast, and they should look at home next to vanilla blocks."),
+        description="Makes a feature's art with assetkit: textures, mob models and sounds. Give it the names and what each should be like.",
+        prompt=("You make Minecraft art. Read assetkit/README.md and bible/theme.md. Write PNGs to the feature's assets/textures "
+                "folder, .bbmodel files to assets/models and .ogg files to assets/sounds. Look at what you made by reading the "
+                "contact sheet or the model preview, and fix anything muddy, noisy or flat. Textures are 16x16, with a small "
+                "palette and soft contrast, and they should look at home next to vanilla blocks."),
         tools=["Read", "Write", "Edit", "Glob", "Bash"],
         model=llm.WORKER["model"],
         effort=llm.WORKER["effort"],

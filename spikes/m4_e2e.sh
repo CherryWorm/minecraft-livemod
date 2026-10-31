@@ -2,7 +2,7 @@
 # M4's exit test: in a blank world, the agent interviews two test players privately, chooses a direction,
 # teases it in role, ships one tested feature with no human help, and speaks up once unprompted.
 # It stops after one release, so what it spends is bounded. Start with a blank world from reset-dev-world.sh.
-# Usage: m4_e2e.sh
+# Usage: m4_e2e.sh [features to ship, default 1]
 set -uo pipefail
 cd "$(dirname "$0")/.."
 set -a; . ./.env; set +a
@@ -37,7 +37,8 @@ python3 -m broker.promote --source "$(pwd)" --release-id baseline 2>&1 | tail -1
 printf 'Aria\nBram\n' >"$RUNTIME_DIR/control/roster.txt"
 
 echo "=== starting the agent ($(elapsed))"
-export AGENT_DAILY_USAGE_LIMIT=15 AGENT_STOP_AFTER_RELEASES=1 AGENT_MAX_BUILDERS=1
+wanted=${1:-1}
+export AGENT_DAILY_USAGE_LIMIT=$((wanted * 3 + 6)) AGENT_STOP_AFTER_RELEASES=$wanted AGENT_MAX_BUILDERS=$(( wanted > 1 ? 2 : 1 ))
 ./scripts/agent-up.sh --no-build
 
 python3 scripts/playtest_bot.py --name Aria --script "$work/aria.json" --log "$work/aria.jsonl" --never-see wombatmarker --seconds 7200 \
@@ -82,9 +83,23 @@ if [[ $failed == 0 ]]; then
       break
     fi
   done
-  wait_for "the first feature shipped" 3600 "[ -s '$state/features.jsonl' ] || docker logs livingmod-agent-1 2>&1 | grep -q 'giving up after'" || failed=1
+  # If a feature can't be finished the agent moves on to the next, so two of those means something is really wrong.
+  wait_for "$wanted feature(s) finished" 5400 "[ $(wc -l <'$state/features.jsonl') -ge $wanted ] || [ $(docker logs livingmod-agent-1 2>&1 | grep -c 'giving up after') -ge 3 ]" || failed=1
 fi
 sleep 60
+
+echo; echo "=== the kill switch"
+./scripts/mc.sh agentstop
+python3 -c "from broker import runtime; print('broker sees it on:', runtime.agent_disabled())"
+sleep 12
+python3 scripts/playtest_bot.py --name Cara --script "$work/bram.json" --log "$work/cara.jsonl" --seconds 25 >/dev/null 2>&1 </dev/null || true
+if grep '"heard"' "$work/cara.jsonl" 2>/dev/null | grep -qv 'multiplayer\.'; then
+  echo "FAIL: the agent spoke to a new player with the kill switch on"
+  failed=1
+else
+  echo "a new player heard nothing with the kill switch on"
+fi
+./scripts/mc.sh agentstart
 
 echo; echo "=== what the agent logged"
 docker logs livingmod-agent-1 2>&1 | grep -v 'Permission mode forced' | tail -60 | cut -c1-220
@@ -131,6 +146,7 @@ for name in aria bram; do
   grep '"heard"' "$work/$name.jsonl" | grep -q $'§d' || { echo "FAIL: $name never heard the character"; failed=1; }
 done
 [[ -s "$state/features.jsonl" ]] || { echo "FAIL: nothing shipped"; failed=1; }
+if cat "$work"/aria.jsonl "$work"/bram.jsonl | grep -q outsideBorder; then echo "FAIL: a player was killed by the opening border"; failed=1; fi
 grep -q '"role": "watcher"' "$state/llm.jsonl" || echo "note: the watcher never ran"
 echo "total time: $(elapsed)"
 [[ $failed == 0 ]] && echo "M4 PASS" || echo "M4 FAILED"

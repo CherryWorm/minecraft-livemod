@@ -18,7 +18,6 @@ from broker import bundles, deploy, runtime, sign
 from broker.gates import GateFailed, bytecode, client, shadow, static
 
 SERVER_MODS = ("conduit",)
-PASSED = runtime.BROKER / "passed_gates.json"
 
 
 class Stages:
@@ -170,8 +169,9 @@ def run_gates(tier, jars, content, old_ledger, new_ledger, old_content, mods, re
     """The slow gates. The agent runs them, has the work reviewed, then asks to release the same commit, and
     running them a second time would only make players wait, so a match with the last pass is enough."""
     proof = fingerprint(content, jars, runtime.load_state().get("current"))
-    if PASSED.exists():
-        passed = json.loads(PASSED.read_text(encoding="utf-8"))
+    passed_file = runtime.BROKER / "passed_gates.json"
+    if passed_file.exists():
+        passed = json.loads(passed_file.read_text(encoding="utf-8"))
         if passed["fingerprint"] == proof:
             print("these exact gates have already passed", flush=True)
             report["screenshots"] = passed["screenshots"]
@@ -186,7 +186,8 @@ def run_gates(tier, jars, content, old_ledger, new_ledger, old_content, mods, re
     report_dir = runtime.REPORTS / release_id
     shots = stages.run("client", lambda: client.run_gate(blocks, items, mods, report_dir, mobs, client_modules))
     report["screenshots"] = [str(path) for path in shots]
-    PASSED.write_text(json.dumps({"fingerprint": proof, "screenshots": report["screenshots"]}), encoding="utf-8")
+    passed_file.parent.mkdir(parents=True, exist_ok=True)
+    passed_file.write_text(json.dumps({"fingerprint": proof, "screenshots": report["screenshots"]}), encoding="utf-8")
 
 
 def patches_changed(content, old_content):

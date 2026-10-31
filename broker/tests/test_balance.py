@@ -83,7 +83,7 @@ class Fixture(Case):
                 (content / part).mkdir()
             (content / "recipes.json").write_text("{}", encoding="utf-8")
             ledger = {"blocks": {}, "items": {}, "patches": []}
-            pool = {"families": {}, "item_count": 10}
+            pool = {"families": {}, "item_count": 10, "mobs": {}}
             static.run({}, ledger, ledger, pool, content)
             features = {"f": feature(items={"x": {"display": "X"}})}
             with self.assertRaises(GateFailed) as caught:

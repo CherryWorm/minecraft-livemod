@@ -469,8 +469,8 @@ def _natural_sources(features):
 
 
 def _drop_of(node, things):
-    """What breaking a block gives: itself, unless it says otherwise. This mod's loot tables have no silk touch
-    branch, so an ore with its own drops is in the world but never in anyone's inventory."""
+    """What breaking a block gives: itself, unless it says otherwise. Silk touch can still get an ore itself, as in
+    vanilla, but that's too late in the game for a recipe to rely on, so it doesn't count here."""
     drops = things.get(node, {}).get("drops")
     return f"item:{_key(node.split(':')[1].split('/')[0], drops['item'])}" if drops else node
 

@@ -14,6 +14,8 @@ TOKEN = re.compile(r"\$(block|item|mob|sound):([a-z0-9_]+(?:/[a-z0-9_]+)?)")
 
 TOOL_TAGS = {"pickaxe": "pickaxe", "axe": "axe", "shovel": "shovel", "hoe": "hoe"}
 LEVEL_TAGS = {"stone": "needs_stone_tool", "iron": "needs_iron_tool", "diamond": "needs_diamond_tool"}
+ORE_FAMILIES = {"ore", "deep_ore"}
+LOOKS_ONLY_ATTRIBUTES = ("minecraft:visual/", "minecraft:audio/")
 
 
 class BundleError(Exception):
@@ -169,27 +171,35 @@ def _block_model(feature, feature_id, name, block, slot, ledger):
     return {"parent": parent, "textures": {key: f"gm:block/{slot}"}}
 
 
-def _drop_entry(drops, fallback, feature_id, ledger):
-    entry_name = fallback
-    functions = []
-    if drops:
-        entry_name = _resolve_tokens(f"$item:{drops['item']}", feature_id, ledger)
-        count = drops.get("count")
-        if isinstance(count, list):
-            functions.append({"function": "minecraft:set_count",
-                              "count": {"type": "minecraft:uniform", "min": count[0], "max": count[1]}})
-    return {"type": "minecraft:item", "name": entry_name, "functions": functions}
+def _drop_entry(drops, feature_id, ledger, *bonuses):
+    """One thing dropped, in Minecraft 26's loot format. The game ignores fields it doesn't know without saying so,
+    so the older "functions" and "conditions" look fine and do nothing."""
+    modifiers = []
+    count = drops.get("count")
+    if isinstance(count, list):
+        modifiers.append({"type": "minecraft:set_count", "count": {"type": "minecraft:uniform", "min": count[0], "max": count[1]}})
+    modifiers.extend(bonuses)
+    entry = {"type": "minecraft:item", "name": _resolve_tokens(f"$item:{drops['item']}", feature_id, ledger)}
+    if modifiers:
+        entry["modifier"] = modifiers
+    return entry
 
 
 def _loot_table(block, slot, feature_id, ledger):
-    return {
-        "type": "minecraft:block",
-        "pools": [{
-            "rolls": 1,
-            "entries": [_drop_entry(block.get("drops"), f"gm:{slot}", feature_id, ledger)],
-            "conditions": [{"condition": "minecraft:survives_explosion"}],
-        }],
-    }
+    """Like vanilla's: a block with its own drops gives itself to silk touch, and an ore's drops respect fortune."""
+    itself = {"type": "minecraft:item", "name": f"gm:{slot}"}
+    drops = block.get("drops")
+    if drops:
+        bonuses = [{"type": "minecraft:explosion_decay"}]
+        if block.get("family") in ORE_FAMILIES:
+            bonuses.insert(0, {"type": "minecraft:apply_bonus", "enchantment": "minecraft:fortune", "formula": "minecraft:ore_drops"})
+        entry = {"type": "minecraft:alternatives", "children": [
+            {**itself, "condition": "minecraft:tool/can_silk_touch"},
+            _drop_entry(drops, feature_id, ledger, *bonuses),
+        ]}
+    else:
+        entry = {**itself, "condition": {"type": "minecraft:survives_explosion"}}
+    return {"type": "minecraft:block", "pools": [{"rolls": 1, "entries": [entry]}]}
 
 
 def _render_mob(feature, feature_id, name, mob, ledger, pack_lang, datapack, config):
@@ -205,7 +215,10 @@ def _render_mob(feature, feature_id, name, mob, ledger, pack_lang, datapack, con
     if mob.get("drops"):
         _write_json(datapack / f"data/gm/loot_table/entities/{slot}.json", {
             "type": "minecraft:entity",
-            "pools": [{"rolls": 1, "entries": [_drop_entry(mob["drops"], "", feature_id, ledger)]}],
+            "pools": [{"rolls": 1, "entries": [_drop_entry(mob["drops"], feature_id, ledger, {
+                "type": "minecraft:enchanted_count_increase", "enchantment": "minecraft:looting",
+                "count": {"type": "minecraft:uniform", "min": 0.0, "max": 1.0},
+            })]}],
         })
     fields = ("behaviour", "health", "damage", "speed", "width", "height", "followRange", "armor", "spawn")
     return slot, {"model": model, **{field: mob[field] for field in fields if field in mob}}
@@ -220,10 +233,15 @@ def _render_biome(feature_id, name, biome, vanilla_biome, datapack):
     merged = json.loads(json.dumps(vanilla_biome(base)))
     merged.setdefault("effects", {}).update(biome.get("effects", {}))
     climate_changed = False
-    for field in ("temperature", "downfall", "has_precipitation", "spawners", "spawn_costs", "features", "carvers"):
+    for field in ("temperature", "downfall", "has_precipitation", "features", "carvers"):
         if field in biome and biome[field] != merged.get(field):
             merged[field] = biome[field]
             climate_changed = True
+    # Sky colour and music are attributes too, and those change nothing anyone has built. Mob spawns are gameplay.
+    for key, value in biome.get("attributes", {}).items():
+        if merged.setdefault("attributes", {}).get(key) != value:
+            merged["attributes"][key] = value
+            climate_changed = climate_changed or not key.startswith(LOOKS_ONLY_ATTRIBUTES)
     hashed = "b" + hashlib.sha256(f"{feature_id}/{name}".encode()).hexdigest()[:10]
     _write_json(datapack / f"data/gm/worldgen/biome/{hashed}.json", merged)
     return {"id": f"biome_{hashed}", "from": base, "to": f"gm:{hashed}", "proportion": biome.get("proportion", 0.2), "sibling": not climate_changed}

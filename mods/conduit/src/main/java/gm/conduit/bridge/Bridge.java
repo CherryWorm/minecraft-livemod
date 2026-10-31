@@ -2,6 +2,7 @@ package gm.conduit.bridge;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import gm.conduit.KillSwitch;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
@@ -65,6 +66,13 @@ public final class Bridge {
 		// Captured players are in a private interview, so their chat goes to the agent and nobody else.
 		ServerMessageEvents.ALLOW_CHAT_MESSAGE.register((message, sender, type) -> {
 			boolean captured = CAPTURED.contains(sender.getGameProfile().name());
+			// With nobody listening, their chat would vanish with no explanation. It may still have been meant to
+			// be private, so this one message isn't shown to anyone.
+			if (captured && (CLIENTS.isEmpty() || KillSwitch.on())) {
+				CAPTURED.remove(sender.getGameProfile().name());
+				sender.sendSystemMessage(literal("§7The private talk has ended, and that message wasn't sent. Your chat is public again."));
+				return false;
+			}
 			JsonObject chat = event("chat", sender);
 			chat.addProperty("text", message.signedContent());
 			chat.addProperty("private", captured);

@@ -6,6 +6,7 @@ Usage: python3 -m unittest broker.tests.test_sign
 import base64
 import json
 import pathlib
+import shutil
 import stat
 import tempfile
 import threading
@@ -37,7 +38,8 @@ class Case(unittest.TestCase):
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / f"{name}.jar"
         with zipfile.ZipFile(path, "w") as archive:
-            archive.writestr("module.properties", contents)
+            # A fixed date, so the same contents always make the same bytes.
+            archive.writestr(zipfile.ZipInfo("module.properties", (2026, 1, 1, 0, 0, 0)), contents)
         return path
 
 
@@ -225,6 +227,43 @@ class Release(Case):
         self.assertFalse((content / "modules" / "server" / "feature.json").exists())
         self.assertFalse(self.signing.exists())
 
+    def signed_pair(self, contents=b"entry=x\n"):
+        """An already signed release, and a new one with this jar in it."""
+        old, new = self.root / "old", self.root / "new"
+        old_jar = self.make_jar("feature", old / "modules" / "client")
+        sign.sign_release(old)
+        self.make_jar("feature", new / "modules" / "client", contents)
+        record = json.loads((old_jar.parent / "feature.json").read_text(encoding="utf-8"))
+        return old, new, record
+
+    def record_in(self, content):
+        return json.loads((content / "modules" / "client" / "feature.json").read_text(encoding="utf-8"))
+
+    def test_an_unchanged_jar_keeps_its_record(self):
+        # Otherwise every release would make every player reload every module for no reason.
+        old, new, record = self.signed_pair()
+        sign.sign_release(new, old)
+        self.assertEqual(self.record_in(new), record)
+
+    def test_a_changed_jar_gets_a_new_generation(self):
+        old, new, record = self.signed_pair(b"entry=y\n")
+        sign.sign_release(new, old)
+        self.assertGreater(self.record_in(new)["generation"], record["generation"])
+
+    def test_with_no_previous_release_it_signs_again(self):
+        # What a rollback does: old code has to go out newer than what players have already run.
+        _, new, record = self.signed_pair()
+        sign.sign_release(new)
+        self.assertGreater(self.record_in(new)["generation"], record["generation"])
+
+    def test_marked_for_testing_is_not_a_signature(self):
+        content = self.root / "content"
+        jar = self.make_jar("feature", content / "modules" / "client")
+        sign.mark_for_testing(content)
+        record = self.record_in(content)
+        self.assertEqual(record["signature"], "")
+        self.assertFalse(sign.verify_signature(jar, "feature", record["generation"], record["signature"], base64.b64encode(bytes(32)).decode()))
+
 
 class Promote(Case):
     def setUp(self):
@@ -316,10 +355,26 @@ class Promote(Case):
             self.run_promote()
         self.assertFalse(self.signing.exists())
 
+    def test_a_release_doesnt_repeat_gates_that_just_passed(self):
+        _, first = self.run_promote(deploy_to_prod=False)
+        self.assertIn("shadow", first)
+        # A real run renders the content afresh each time. compile_content is replaced here, so do what it would.
+        shutil.rmtree(self.content)
+        _, second = self.run_promote()
+        self.assertNotIn("shadow", second)
+        self.assertNotIn("client", second)
+        self.assertEqual(second[-1], "deploy")
+
+    def test_different_content_runs_the_gates_again(self):
+        self.run_promote(deploy_to_prod=False)
+        with unittest.mock.patch.object(promote, "fingerprint", return_value="something else"):
+            _, steps = self.run_promote(deploy_to_prod=False)
+        self.assertIn("shadow", steps)
+
     def test_signing_failure_is_a_gate_failure(self):
         with unittest.mock.patch.object(sign, "sign_release", side_effect=sign.SigningError("no")):
             with self.assertRaises(GateFailed) as caught:
-                promote.sign_modules(self.content)
+                promote.sign_modules(self.content, None)
         self.assertEqual(caught.exception.gate, "sign")
 
     def test_signatures_dont_make_a_release_look_changed(self):

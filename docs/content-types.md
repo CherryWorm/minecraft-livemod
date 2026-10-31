@@ -132,6 +132,20 @@ A small built thing that turns up in land nobody has been to yet. It has to fit 
 
 `x` and `z` run from 0 to 15, and `y` from the ground up. A ruin is placed whole or not at all. `chance` is per chunk: 0.02 is about one in fifty. On the surface it sits on the sea floor if there's water. Underground it's placed at a random height, which is only right for something meant to be found while digging.
 
+## Loot tables
+
+Minecraft 26 changed this format, and the game ignores fields it doesn't know without saying so. Use `modifier`, not `functions`, and `condition`, not `conditions`:
+
+```json
+{"type": "minecraft:chest", "pools": [{"rolls": 3, "entries": [
+  {"type": "minecraft:item", "name": "$item:rune_shard", "weight": 3,
+   "modifier": [{"type": "minecraft:set_count", "count": {"type": "minecraft:uniform", "min": 1, "max": 2}}]},
+  {"type": "minecraft:item", "name": "minecraft:iron_nugget", "weight": 8}
+]}]}
+```
+
+A block's `drops` handles the rest for you: silk touch gives the block itself, and fortune works on `ore` and `deep_ore`. A mob's `drops` respect looting.
+
 ## Ores by biome
 
 Add `"biomes": ["minecraft:beach", "minecraft:ocean"]` to an ore to limit where it forms.
@@ -144,13 +158,14 @@ Needs a restart, which players are held through, so these go out in batches.
 "biomes": {
   "rune_meadow": {
     "base": "minecraft:plains",
-    "effects": {"grass_color": 3050327, "foliage_color": 3050327, "water_color": 3050327, "sky_color": 7907327, "fog_color": 12638463},
+    "effects": {"grass_color": "#2e8b57", "foliage_color": "#2e8b57", "water_color": "#2e8b8b"},
+    "attributes": {"minecraft:visual/sky_color": "#78a7ff"},
     "proportion": 0.25
   }
 }
 ```
 
-It starts as an exact copy of `base`, and replaces `proportion` of it. If you change only `effects`, it's a sibling and spreads into land that already exists, because it's safe there. If you change `temperature`, `downfall`, `has_precipitation`, `spawners`, `features` or `carvers`, it only appears in land generated from then on, because changing those in existing land could freeze water or break a mob farm.
+It starts as an exact copy of `base`, and replaces `proportion` of it. If you change only `effects` and the `minecraft:visual/` or `minecraft:audio/` attributes, it's a sibling and spreads into land that already exists, because it's safe there. If you change `temperature`, `downfall`, `has_precipitation`, `features`, `carvers` or any other attribute, such as `minecraft:gameplay/natural_mob_spawns`, it only appears in land generated from then on, because changing those in existing land could freeze water or break a mob farm.
 
 ## Sounds
 
