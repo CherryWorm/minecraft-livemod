@@ -16,7 +16,6 @@ PROGRESSION = workshop.REPO / workshop.PROGRESSION
 FEATURES = workshop.REPO / "mods/genesis/features"
 STATE = pathlib.Path("/workspace/state")
 OPENING = STATE / "opening.json"
-DECIDE_AFTER_SECONDS = 20 * 60
 AGENT_LABEL = "§b[Agent]§r "
 HOW_TO_ANSWER = ("§7Please answer me with a private message: type §f/dm§7, a space, then your message, like §f/dm I love exploring§7. "
                  "Only I can see those. You can also click this line to start one.")
@@ -81,7 +80,7 @@ class Agent:
         self.locks = {}
         self.choosing_direction = False
         self.direction_problems = []
-        self.state = {"direction_chosen": False, "briefs": {}, "first_finished_at": 0, "released": [], "border_open": False,
+        self.state = {"direction_chosen": False, "briefs": {}, "released": [], "border_open": False,
                       "intents": {}, "intent_count": 0, "tuner_saw": 0, "handled_intents": [], "interviews": {}}
         if OPENING.exists():
             self.state.update(json.loads(OPENING.read_text(encoding="utf-8")))
@@ -150,11 +149,9 @@ class Agent:
         if interview.finished:
             await self.tell(player, "§7That's all I needed, thanks. If you ever want to tell me anything else privately, §f/dm§7 still works.")
             self.state["briefs"][player] = interview.brief
-            self.state["first_finished_at"] = self.state["first_finished_at"] or time.time()
             del self.interviews[player]
             self.save()
             self._store_brief(player, interview.brief)
-            await self.maybe_choose_direction()
 
     def _store_brief(self, player, brief):
         folder = STATE / "briefs"  # Outside the agent's repo, so no builder ever reads one directly.
@@ -162,19 +159,14 @@ class Agent:
         (folder / f"{player}.json").write_text(json.dumps(brief, indent=1), encoding="utf-8")
 
     async def maybe_choose_direction(self):
-        # A timer and a finished interview can both get here while the first call is still thinking.
-        if self.state["direction_chosen"] or self.choosing_direction:
+        """Only ever on the owner's go-ahead. Until then, everyone who joins just gets asked what they'd like."""
+        if self.state["direction_chosen"] or self.choosing_direction or not (CONTROL / "decide_now").exists():
             return
-        roster = self.roster()
-        everyone_done = bool(roster) and roster.issubset(self.state["briefs"])
-        waited = self.state["first_finished_at"] and time.time() - self.state["first_finished_at"] > DECIDE_AFTER_SECONDS
-        called = (CONTROL / "decide_now").exists()
-        if everyone_done or waited or called:
-            self.choosing_direction = True
-            try:
-                await self.choose_direction()
-            finally:
-                self.choosing_direction = False
+        self.choosing_direction = True
+        try:
+            await self.choose_direction()
+        finally:
+            self.choosing_direction = False
 
     async def choose_direction(self):
         print("choosing the direction", flush=True)
@@ -461,7 +453,7 @@ class Agent:
                 pass
 
     async def opening_loop(self):
-        """Notices when the interview timer has run out, and that the opening is due to end."""
+        """Notices the owner's go-ahead, and that the opening is due to end."""
         while True:
             if not self.state["direction_chosen"]:
                 await self.maybe_choose_direction()
