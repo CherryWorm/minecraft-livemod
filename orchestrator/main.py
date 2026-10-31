@@ -57,7 +57,7 @@ DIRECTOR_SCHEMA = {
             "id": {"type": "string"}, "node": {"type": "string"}, "spec": {"type": "string"},
             "answers": {"type": "array", "items": {"type": "integer"}}}, "required": ["id", "node", "spec"]}},
         "decisions": {"type": "array", "items": {"type": "object", "properties": {
-            "number": {"type": "integer"}, "outcome": {"type": "string", "enum": [feedback.LATER, feedback.DECLINED, "already_there"]}, "why": {"type": "string"}},
+            "number": {"type": "integer"}, "outcome": {"type": "string", "enum": [feedback.LATER, feedback.DECLINED, feedback.NEEDS_OWNER, "already_there"]}, "why": {"type": "string"}},
             "required": ["number", "outcome", "why"]}},
         "new_nodes": {"type": "array", "items": NODE_SCHEMA},
     },
@@ -65,7 +65,7 @@ DIRECTOR_SCHEMA = {
 }
 
 SORTER_SCHEMA = {"type": "object", "properties": {"decisions": {"type": "array", "items": {"type": "object", "properties": {
-    "numbers": {"type": "array", "items": {"type": "integer"}}, "action": {"type": "string", "enum": ["changed", "small", "director"]},
+    "numbers": {"type": "array", "items": {"type": "integer"}}, "action": {"type": "string", "enum": ["changed", "small", "declined", "director"]},
     "id": {"type": "string"}, "node": {"type": "string"}, "spec": {"type": "string"}, "why": {"type": "string"}}, "required": ["numbers", "action"]}}}, "required": ["decisions"]}
 SORTER_TOOLS = ["mcp__world__world_index", "mcp__world__tune", "mcp__world__set_rule"]
 
@@ -427,6 +427,10 @@ class Agent:
                 for number in numbers:
                     self.requests.mark(number, feedback.DONE, why=decision.get("why", ""))
                     news.append((known[number], feedback.DONE, decision.get("why", "")))
+            elif decision.get("action") == "declined" and decision.get("why"):
+                for number in numbers:
+                    self.requests.mark(number, feedback.DECLINED, why=decision["why"])
+                    news.append((known[number], feedback.DECLINED, decision["why"]))
             elif decision.get("action") == "small" and self.can_build(decision):
                 self.queue.insert(0, {"id": decision["id"], "node": decision["node"], "spec": decision["spec"], "answers": numbers, "small": True})
                 for number in numbers:
@@ -450,16 +454,20 @@ class Agent:
 
     # Building ---------------------------------------------------------------------------------------
 
+    @staticmethod
+    def tell_owner(source, requests):
+        """What the engine can't do goes to the owner, because adding it is reviewed human work."""
+        STATE.mkdir(parents=True, exist_ok=True)
+        with (STATE / "host_requests.jsonl").open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"at": time.time(), "feature": source, "requests": requests}) + "\n")
+
     async def on_released(self, feature_id, tree):
         manifest = json.loads((tree / "mods/genesis/features" / feature_id / "feature.json").read_text(encoding="utf-8"))
         names = [entry.get("display") for table in ("blocks", "items") for entry in manifest.get(table, {}).values()]
         self.state["released"].extend(name for name in names if name)
         self.state["release_count"] = self.state.get("release_count", 0) + 1
-        # What the engine couldn't do goes to the owner, because adding it is reviewed human work.
         if manifest.get("host_requests"):
-            STATE.mkdir(parents=True, exist_ok=True)
-            with (STATE / "host_requests.jsonl").open("a", encoding="utf-8") as stream:
-                stream.write(json.dumps({"at": time.time(), "feature": feature_id, "requests": manifest["host_requests"]}) + "\n")
+            self.tell_owner(feature_id, manifest["host_requests"])
         finished = self.requests.for_feature(feature_id)
         for entry in finished:
             self.requests.mark(entry["number"], feedback.DONE, feature=feature_id)
@@ -511,8 +519,10 @@ class Agent:
         news = []
         for decision in result.structured.get("decisions", []):
             number, outcome = decision.get("number"), decision.get("outcome")
-            if number not in undecided or outcome not in (feedback.LATER, feedback.DECLINED, "already_there"):
+            if number not in undecided or outcome not in (feedback.LATER, feedback.DECLINED, feedback.NEEDS_OWNER, "already_there"):
                 continue
+            if outcome == feedback.NEEDS_OWNER:
+                self.tell_owner(f"request {number}", [f"{undecided[number]['wants']}: {decision.get('why', '')}"])
             # It'll keep coming back as later, and they only need to hear that once.
             if not (outcome == feedback.LATER and self.requests.status(number) == feedback.LATER):
                 news.append((undecided[number], outcome, decision.get("why", "")))
@@ -532,11 +542,11 @@ class Agent:
         return features
 
     async def plan(self):
-        """A director's call can take minutes, and building doesn't stop for it. What someone asked for goes first."""
+        """A director's call can take minutes, and building doesn't stop for it. What it chooses waits its turn, because
+        the world's plan comes first. It's small jobs that go to the front, and they have slots of their own."""
         try:
             features = await self.next_features()
-            self.queue[:0] = [feature for feature in features if feature["answers"]]
-            self.queue.extend(feature for feature in features if not feature["answers"])
+            self.queue.extend(features)
             # This should hardly ever come back empty, because there's always more to build, but asking again every
             # few minutes would use up the day's limit if it did.
             self.director_rest_until = 0 if features else time.time() + DIRECTOR_REST_SECONDS

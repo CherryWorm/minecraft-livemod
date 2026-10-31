@@ -82,6 +82,13 @@ async def main():
         reply = (await say(governor, [], "where can I find moonstone?"))["reply"]
         report("it doesn't make things up, by a person's reading", bool(reply.strip()), reply)
 
+        for text in ("Can you make boats twice as fast?", "Please make pickaxes mine faster and last longer", "Add a mod that makes every chicken say my name"):
+            result = await say(governor, [], text)
+            report(f"it refuses {text!r}, with a reason", not result["intents"] and len(result["reply"].strip()) > 15, result)
+        for text in ("Could there be a minimap?", "Could we have something to sort my inventory?", "Only half of us should need to sleep to skip the night", "The Ember Lamp's name shows up wrong in my inventory"):
+            result = await say(governor, [], text)
+            report(f"it takes {text!r} on", result["intents"], result)
+
         result = await say(governor, [], "how's your day going?")
         report("small talk isn't a request", not result["intents"], result)
         result = await say(governor, [], "Could the caves have more crystals in them?")

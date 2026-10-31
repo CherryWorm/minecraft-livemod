@@ -110,6 +110,29 @@ class Sorting(Base):
         self.assertEqual((self.status(1), self.status(2)), (feedback.BUILDING, feedback.BUILDING))
         self.assertEqual(len(self.told()), 1, "one message for both")
 
+    async def test_a_request_it_refuses_gets_a_reason_and_goes_no_further(self):
+        self.asked("faster boats")
+        seen = []
+
+        async def respond(governor, name, prompt, **options):
+            if name == "sorter":
+                return result({"decisions": [{"numbers": [1], "action": "declined", "why": "Boats stay as they are."}]})
+            seen.append(prompt)
+            return result({"reply": "the news"})
+        self.ask.side_effect = respond
+        await self.agent.sort_requests()
+        self.assertEqual(self.status(1), feedback.DECLINED)
+        self.assertEqual(self.agent.queue, [])
+        self.assertEqual(self.agent.requests.undecided(), [], "the director doesn't see it")
+        self.assertIn("Boats stay as they are.", seen[0])
+        self.assertEqual(self.told(), ["§dKeeper§r: the news"])
+
+    async def test_a_refusal_with_no_reason_goes_to_the_director(self):
+        self.asked("faster boats")
+        self.answers("sorter", {"decisions": [{"numbers": [1], "action": "declined"}]})
+        await self.agent.sort_requests()
+        self.assertIsNone(self.status(1))
+
     async def test_a_small_job_with_a_bad_id_or_node_goes_to_the_director(self):
         self.asked("one", "two")
         self.answers("sorter", {"decisions": [{"numbers": [1], "action": "small", "id": "../../etc", "node": "e_one", "spec": "x"},
@@ -158,12 +181,12 @@ class Directing(Base):
         self.assertIn("request 1\"", prompt)
         self.assertIn("request 60\"", prompt)
 
-    async def test_what_someone_asked_for_goes_first(self):
+    async def test_a_big_feature_from_a_request_waits_its_turn(self):
         self.agent.queue.append({"id": "already_queued", "node": "e_one", "spec": "x"})
         self.asked("a map")
         self.plan_answer([{"id": "plain", "node": "e_one", "spec": "x"}, {"id": "map", "node": "e_one", "spec": "x", "answers": [1]}])
         await self.agent.plan()
-        self.assertEqual([feature["id"] for feature in self.agent.queue], ["map", "already_queued", "plain"])
+        self.assertEqual([feature["id"] for feature in self.agent.queue], ["already_queued", "plain", "map"])
         self.assertEqual(self.status(1), feedback.BUILDING)
         self.assertFalse(self.agent.planning)
         self.assertTrue(self.agent.wake_director.is_set())
@@ -191,6 +214,17 @@ class Directing(Base):
         for word in ("Too much.", "Vanilla.", "After the kiln."):
             self.assertIn(word, seen[0])
         self.assertEqual([entry["number"] for entry in self.agent.requests.undecided()], [3], "later comes back, and the others don't")
+
+    async def test_something_only_the_owner_can_fix_really_reaches_them(self):
+        self.asked("the codex text is unreadable")
+        self.plan_answer(decisions=[{"number": 1, "outcome": "needs_owner", "why": "It's in the engine."}])
+        await self.agent.next_features()
+        self.assertEqual(self.status(1), feedback.NEEDS_OWNER)
+        self.assertEqual(self.agent.requests.undecided(), [])
+        owner = [json.loads(line) for line in (self.folder / "host_requests.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(owner[0]["feature"], "request 1")
+        self.assertIn("the codex text is unreadable", owner[0]["requests"][0])
+        self.assertEqual(len(self.told()), 1)
 
     async def test_they_only_hear_later_once(self):
         self.asked("a map")

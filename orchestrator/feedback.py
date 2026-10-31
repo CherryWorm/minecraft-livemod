@@ -1,7 +1,7 @@
 """What players have asked for and what became of each request. Plain code keeps this, so that nothing's lost because a
 model forgot it, and so everyone can hear back.
 
-A request with no status hasn't been decided yet. After that it's building, later, done or declined.
+A request with no status hasn't been decided yet. After that it's building, later, done, declined or waiting on the owner.
 """
 import json
 
@@ -9,6 +9,7 @@ BUILDING = "building"
 LATER = "later"
 DONE = "done"
 DECLINED = "declined"
+NEEDS_OWNER = "needs_owner"  # Only a person can change the engine, so the director passes these on instead of pretending.
 
 
 class Requests:
