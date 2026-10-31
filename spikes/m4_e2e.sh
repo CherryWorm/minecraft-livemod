@@ -83,8 +83,8 @@ if [[ $failed == 0 ]]; then
       break
     fi
   done
-  # If a feature can't be finished the agent moves on to the next, so two of those means something is really wrong.
-  wait_for "$wanted feature(s) finished" 5400 "[ $(wc -l <'$state/features.jsonl') -ge $wanted ] || [ $(docker logs livingmod-agent-1 2>&1 | grep -c 'giving up after') -ge 3 ]" || failed=1
+  # If a feature can't be finished the agent moves on to the next, so three of those means something is really wrong.
+  wait_for "$wanted feature(s) finished" 5400 "[ \$(cat '$state/features.jsonl' 2>/dev/null | wc -l) -ge $wanted ] || [ \$(docker logs livingmod-agent-1 2>&1 | grep -c 'giving up after') -ge 3 ]" || failed=1
 fi
 sleep 60
 
