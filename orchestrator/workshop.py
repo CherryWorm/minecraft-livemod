@@ -24,7 +24,7 @@ REPORTS = pathlib.Path("/workspace/reports")
 REFERENCE_TEXTURES = pathlib.Path("/workspace/reference-textures")
 FEATURE_RESEARCH = 4
 TUNES_PER_HOUR = 6
-REQUEST_TIMEOUT = {"lint": 60, "check": 300, "gates": 900, "release": 900, "javap": 60, "server_icon": 60}
+REQUEST_TIMEOUT = {"lint": 300, "check": 300, "gates": 1800, "release": 1800, "javap": 300, "server_icon": 300}  # Generous, because they queue behind whatever's running.
 # Turns and usage for one attempt, and how many attempts. The later a stage is, the bigger its features can be, and
 # nobody's waiting on them, because they're built in the background while people play.
 STAGE_LIMITS = {"early": (60, 8.0, 3), "mid": (120, 16.0, 4), "end": (200, 30.0, 5)}

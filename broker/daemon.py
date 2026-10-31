@@ -28,6 +28,7 @@ CACHE_JAR = "/cache/gradle/caches/fabric-loom/26.3/minecraft-client.jar"
 AGENT_ICON = WORKSPACE / "icon" / "server-icon.png"
 PROXY_DATA = runtime.RUNTIME / "velocity"
 ICON_SIZE = 64
+QUICK = ("lint", "check", "javap", "server_icon")  # None of these touch the shadow server, and a builder is waiting on each one.
 
 
 def assemble(commit):
@@ -136,6 +137,12 @@ def handle(request):
     return {"result": "blocked", "gate": "broker", "reason": f"Unknown request {kind}"}
 
 
+def next_request(pending):
+    """Still one at a time, because there's one shadow server and releases must not overlap. But with several builders
+    working, a quick check shouldn't wait behind everyone else's full test run."""
+    return min(pending, key=lambda path: (json.loads(path.read_text(encoding="utf-8"))["kind"] not in QUICK, path.stat().st_mtime))
+
+
 def main():
     for folder in (REQUESTS, RESPONSES, REPORTS_FOR_AGENT):
         folder.mkdir(parents=True, exist_ok=True)
@@ -145,12 +152,11 @@ def main():
         reference_textures.extract(client_jar, WORKSPACE / "reference-textures")
     print("broker waiting for requests", flush=True)
     while True:
-        # One at a time, oldest first: there's one shadow server, and releases must not overlap.
-        pending = sorted(REQUESTS.glob("*.json"), key=lambda path: path.stat().st_mtime)
+        pending = list(REQUESTS.glob("*.json"))
         if not pending:
             time.sleep(0.5)
             continue
-        path = pending[0]
+        path = next_request(pending)
         request = json.loads(path.read_text(encoding="utf-8"))
         started = time.monotonic()
         try:
