@@ -16,6 +16,8 @@ minimum_length=100
 claude='"$(python3 -c "import claude_agent_sdk, pathlib; print(pathlib.Path(claude_agent_sdk.__file__).parent / \"_bundled\" / \"claude\")")"'
 
 ./scripts/stack.sh --profile agent build agent >/dev/null
+# The agent's container reaches Anthropic only through this, for signing in as much as for anything else.
+./scripts/stack.sh --profile agent up -d egress </dev/null >/dev/null 2>&1
 
 read -r -p "Is your token still on screen from an earlier run? Type y to skip signing in, or press Enter: " skip
 if [[ "$skip" != "y" ]]; then
@@ -26,7 +28,9 @@ A link will appear below. WSL can't open your browser from here, so copy it into
 access, then paste the code back here if asked. Your token is then printed in this window.
 
 EOF
-  ./scripts/stack.sh --profile agent run --rm --no-deps --entrypoint bash agent -c \
+  # Signing in needs Anthropic's login hosts, which the agent is never allowed to reach, so this runs in a throwaway
+  # container outside the agent's network, with none of its files or secrets.
+  docker run --rm -it --network livingmod_public --entrypoint bash "livingmod/agent:$CLAUDE_AGENT_SDK_VERSION" -c \
     "exec setpriv --reuid=1000 --regid=1000 --clear-groups env HOME=/tmp $claude setup-token"
 fi
 
