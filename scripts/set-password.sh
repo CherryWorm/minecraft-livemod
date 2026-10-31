@@ -18,7 +18,7 @@ fi
 
 umask 077
 mkdir -p "$RUNTIME_DIR/secrets" "$RUNTIME_DIR/site-auth"
-hash=$(printf '%s' "$password" | docker run --rm -i "caddy:$CADDY_VERSION" caddy hash-password --bcrypt-cost 10)
+hash=$(printf '%s\n' "$password" | docker run --rm -i "caddy:$CADDY_VERSION" caddy hash-password --bcrypt-cost 10)
 # The site's container reads this as a different user.
 umask 022
 cat >"$RUNTIME_DIR/site-auth/auth.caddy" <<EOF
