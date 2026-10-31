@@ -6,8 +6,8 @@ set -euo pipefail
 export MSYS_NO_PATHCONV=1
 
 powershell.exe -NoProfile -Command '
-  $held = Get-CimInstance Win32_Process -Filter "Name=''wsl.exe''" |
-    Where-Object { $_.CommandLine -match "livingmod.*sleep infinity" }
+  $held = Get-CimInstance Win32_Process |
+    Where-Object { $_.Name -eq "wsl.exe" -and $_.CommandLine -match "livingmod.*sleep infinity" }
   if (-not $held) {
     Start-Process wsl.exe -ArgumentList "-d","livingmod","--","sleep","infinity" -WindowStyle Hidden
   }
