@@ -57,14 +57,14 @@ Connect a Minecraft 26.3 client to `localhost`. Inside the distro, run a server 
 
 ## Playing with the agent, locally
 
-Inside the distro, say who to wait for, then start the agent. It greets each new player with a private conversation:
-
-```bash
-printf 'YourName\n' > /srv/livingmod/runtime/control/roster.txt
-```
+Inside the distro, start the agent. It greets each new player with a private conversation, then waits for your go-ahead before it chooses a theme and starts building:
 
 ```bash
 ./scripts/agent-up.sh
+```
+
+```bash
+touch /srv/livingmod/runtime/control/decide_now
 ```
 
 Watch it with `docker logs -f livingmod-agent-1`, and stop it with `./scripts/agent-down.sh`. It uses your Claude plan while it's running. To start over from a blank world, run `./scripts/reset-dev-world.sh --yes`.

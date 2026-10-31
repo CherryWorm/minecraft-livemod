@@ -29,6 +29,7 @@ HOST, PORT = "127.0.0.1", 25565
 OPENING = 128
 CAMERA_ABOVE_GROUND = 14
 MINING_TICKS = 60
+GO_AHEAD_WAIT_SECONDS = 35
 OUT = runtime.REPORTS / "m14"
 STATE = runtime.RUNTIME / "agent-workspace" / "state"
 results = []
@@ -323,6 +324,15 @@ def test_interview():
     report("the talk can end", (STATE / "briefs" / "Dana.json").exists(), attempt)
     state = json.loads((STATE / "opening.json").read_text(encoding="utf-8"))
     report("and nothing of it is left waiting", "Dana" not in state["interviews"] and "Eli" in state["interviews"], list(state["interviews"]))
+
+    # A named player has finished, and nothing should come of it: only the owner's go-ahead starts anything.
+    roster = runtime.RUNTIME / "control" / "roster.txt"
+    roster.write_text("Dana\n", encoding="utf-8")
+    time.sleep(GO_AHEAD_WAIT_SECONDS)
+    roster.unlink()
+    log = (STATE / "llm.jsonl").read_text(encoding="utf-8")
+    state = json.loads((STATE / "opening.json").read_text(encoding="utf-8"))
+    report("without the go-ahead, it doesn't choose a theme", '"role": "direction"' not in log and not state["direction_chosen"])
 
     start = len(dana.heard)
     dana.dm("Could the caves have more crystals in them?")

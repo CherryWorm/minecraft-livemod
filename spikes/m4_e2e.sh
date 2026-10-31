@@ -67,7 +67,11 @@ wait_for() {
 }
 
 failed=0
-wait_for "the direction was chosen" 1500 "grep -q '\"direction_chosen\": true' '$state/opening.json'" || failed=1
+both_done="python3 -c \"import json, sys; sys.exit(0 if {'Aria', 'Bram'} <= set(json.load(open('$state/opening.json'))['briefs']) else 1)\""
+wait_for "both interviews finished" 900 "$both_done" || failed=1
+# It would wait for this forever, whoever has finished.
+touch "$RUNTIME_DIR/control/decide_now"
+wait_for "the direction was chosen" 1500"grep -q '\"direction_chosen\": true' '$state/opening.json'" || failed=1
 
 if [[ $failed == 0 ]]; then
   # Silence is an allowed answer for the watcher, so give it a few chances to speak up.

@@ -36,11 +36,7 @@ Aim for about 8 fast cores and 32 GB of RAM. That's an estimate: prod 8 to 10 GB
    ./scripts/stack.sh --profile agent run --rm -T agent python3 /spikes/s6_agent_smoke.py
    ```
 9. **Set up off-box backups.** World backups land in `runtime/backups`. Copy them somewhere the agent can't reach, and copy `runtime/broker/signing` to somewhere safer still, because losing it means every friend has to reinstall.
-10. **Start the agent:**
-    ```bash
-    printf 'Name1\nName2\n' > ../runtime/control/roster.txt
-    ./scripts/agent-up.sh
-    ```
+10. **Start the agent** with `./scripts/agent-up.sh`. It asks whoever joins what they'd like, and waits for your go-ahead before it does anything else. See "The opening".
 
 To update the code later: `git pull` as `livingmod`, then `./scripts/stack.sh build`, `python3 -m broker.promote --source "$(pwd)" --release-id update-$(date +%s)`, `./scripts/stack.sh up -d`, and as root `systemctl restart livingmod-broker`. A changed `infra/site/Caddyfile` also needs `./scripts/stack.sh up -d --force-recreate site`, because the container keeps the old file until then.
 
@@ -59,6 +55,8 @@ Mojang's login check still runs first, so people need a real Minecraft account a
 ## The opening
 
 Until the first release reaches players, the world is small and safe: a border `OPENING_BORDER` blocks wide around spawn, marked by a tall glowing wall, with Peaceful difficulty, so there are no hostile mobs and no hunger, and players can't break blocks. The first release ends it once and for all: the wall and border go, players can break things, the difficulty in `server.properties` comes back, and it becomes morning. The game runs this itself, so it holds from the first boot, even with no agent running. To end it by hand, run `./scripts/mc.sh conduit open`.
+
+**The agent waits for you.** Until you give the go-ahead, it only asks whoever joins what they'd like. When you've heard from enough people, run `touch ../runtime/control/decide_now` from the repo folder. It then chooses the theme from the answers it has so far and starts building. Anyone still partway through their interview can finish it, and their answers steer what comes later, as do those of anyone who joins afterwards.
 
 The wall exists only on players' screens, so no blocks are placed in the world.
 
@@ -95,7 +93,7 @@ Once anyone runs a client module, everyone needs the companion. Turn that on wit
 | Turn minds off, or back on | `touch runtime/control/no_minds`, or `rm` the same file. `AGENT_MIND_USAGE_LIMIT` in `.env` sets their daily share, a tenth of the daily limit by default |
 | See what it's looked up | `ls runtime/agent-workspace/research`, and `docker logs livingmod-web-1 \| grep CONNECT` for every site |
 | Turn its research off, or back on | `touch runtime/control/no_research`, or `rm` the same file |
-| Make it decide now, without waiting for everyone | `touch runtime/control/decide_now` |
+| Give the go-ahead to choose the theme and start building | `touch runtime/control/decide_now` |
 | End the opening by hand | `./scripts/mc.sh conduit open` |
 | Stop the agent, from the host | `touch runtime/control/agent_disabled` |
 | Stop the agent, in game (owner only) | `/agentstop`, then `/agentstart` |
