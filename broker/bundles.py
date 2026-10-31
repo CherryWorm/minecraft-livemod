@@ -166,7 +166,7 @@ def _block_model(feature, feature_id, name, block, slot, ledger):
     if custom.exists():
         model = json.loads(custom.read_text(encoding="utf-8"))
         return _resolve_tokens(model, feature_id, ledger)
-    parent = "minecraft:block/cross" if block["family"] in ("plant", "tinted_plant") else "minecraft:block/cube_all"
+    parent = "minecraft:block/cross" if block["family"] in ("plant", "glow_plant", "tinted_plant") else "minecraft:block/cube_all"
     key = "cross" if "cross" in parent else "all"
     return {"parent": parent, "textures": {key: f"gm:block/{slot}"}}
 
@@ -295,6 +295,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
     surface_patches = []
     biome_patches = []
     ruin_patches = []
+    item_defaults = {}
     bindings = {}
     recipe_modes = {}
     entries = {}
@@ -332,8 +333,12 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
             names[f"gm:{slot}"] = item["display"]
             lang[f"item.gm.{slot}"] = item["display"]
             _copy_texture(feature, "item", slot, item.get("texture", name), pack)
-            _write_json(pack / f"assets/gm/models/item/{slot}.json",
-                        {"parent": "minecraft:item/generated", "textures": {"layer0": f"gm:item/{slot}"}})
+            # Handheld is how vanilla's tools sit in the hand.
+            parent = "minecraft:item/handheld" if item.get("handheld") else "minecraft:item/generated"
+            _write_json(pack / f"assets/gm/models/item/{slot}.json", {"parent": parent, "textures": {"layer0": f"gm:item/{slot}"}})
+            defaults = {key: item[key] for key in ("components", "places") if key in item}
+            if defaults:
+                item_defaults[f"gm:{slot}"] = _resolve_tokens(defaults, feature_id, ledger)
         for name, recipe in manifest.get("recipes", {}).items():
             source = f"{feature_id}/{name}"
             # Named by hash, so the recipe's file name can't give away what it makes.
@@ -401,6 +406,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
     _write_json(config / "biome_patches.json", biome_patches)
     _write_json(config / "ruin_patches.json", ruin_patches)
     _write_json(config / "bindings.json", bindings)
+    _write_json(config / "item_defaults.json", item_defaults)
     _write_json(config / "mobs.json", mobs)
     _write_json(config / "knowledge.json", {"scope": scope, "entries": entries, "gated": gated, "open": sorted(open_recipes),
                                             "machines": machines, "names": names})

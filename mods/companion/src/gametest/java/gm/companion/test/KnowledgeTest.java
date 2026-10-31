@@ -12,6 +12,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
@@ -91,6 +92,12 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				context.takeScreenshot("m8_codex");
 				LOGGER.info("[M8] the codex opened");
 				context.runOnClient(client -> client.gui.setScreen(null));
+			}
+			case "eat" -> context.getInput().holdKeyFor(options -> options.keyUse, 40);
+			case "light" -> {
+				BlockPos pos = new BlockPos(Integer.parseInt(words[1]), Integer.parseInt(words[2]), Integer.parseInt(words[3]));
+				int light = context.computeOnClient(client -> client.level.getBrightness(LightLayer.BLOCK, pos));
+				LOGGER.info("[M8] block light: {}", light);
 			}
 			case "shot" -> {
 				context.waitTicks(40);

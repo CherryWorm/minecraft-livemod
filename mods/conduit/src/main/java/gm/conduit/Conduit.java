@@ -12,6 +12,7 @@ import gm.conduit.pack.PackStatus;
 import gm.conduit.provenance.Provenance;
 import gm.conduit.retrogen.BiomePatch;
 import gm.conduit.retrogen.OrePatchQueue;
+import gm.conduit.slots.ItemDefaults;
 import gm.conduit.slots.NeutralSlots;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
@@ -27,6 +28,7 @@ public final class Conduit implements ModInitializer {
 		PolymerResourcePackUtils.markAsRequired();
 		Provenance.init();
 		NeutralSlots.register();
+		ItemDefaults.register();
 		SlotMobs.register();
 		LiveAssets.register();
 		PackStatus.register();

@@ -25,6 +25,7 @@ public enum SlotFamily {
 	MACHINE(1900, 80, BlockModelType.FULL_BLOCK, () -> base(3.5f, 6.0f, SoundType.METAL).requiresCorrectToolForDrops()),
 	CUTOUT(2000, 40, BlockModelType.LEAVES, () -> base(0.3f, 0.3f, SoundType.GRASS).noOcclusion()),
 	PLANT(2100, 5, BlockModelType.PLANT, () -> base(0.0f, 0.0f, SoundType.GRASS).noCollision().randomTicks()),
+	GLOW_PLANT(2110, 2, BlockModelType.PLANT, () -> base(0.0f, 0.0f, SoundType.GRASS).noCollision().randomTicks().lightLevel(state -> 10)),
 	TINTED_PLANT(2150, 12, BlockModelType.BIOME_PLANT, () -> base(0.0f, 0.0f, SoundType.GRASS).noCollision().randomTicks());
 
 	private final int firstId;

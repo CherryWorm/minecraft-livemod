@@ -9,4 +9,8 @@ Reject only for real problems:
 - Java that could hurt the server: heavy work every tick, unbounded loops or storage, or anything touching files or the network.
 - It doesn't do what the spec asks.
 
+Judge it against what the engine can do, which is in `docs/content-types.md`. Anything the spec asks for that the engine can't do yet belongs in `host_requests`, and that isn't the builder's fault, so don't reject for it. If the spec's details are slightly different but the feature works and fits the world, approve it.
+
 Say what's wrong specifically enough for the builder to fix it. Don't reject over taste or small polish. Getting new things to players quickly matters too.
+
+Set `serious` to true only if shipping this as it is would do harm: it could hurt the server, it's unfair or overpowered, it's broken for players, or it spoils something. Looks and small mismatches with the spec aren't serious. When you approve, `serious` is false.

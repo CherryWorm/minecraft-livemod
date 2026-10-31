@@ -273,9 +273,12 @@ class Agent:
             progress = "(not available right now)"
         # Includes anyone who joined after the direction was chosen, whose answers can still steer what comes next.
         briefs = "\n".join(llm.untrusted("brief", json.dumps(brief)) for brief in self.briefs())
+        unfinished_file = STATE / "unfinished.jsonl"
+        unfinished = "\n".join(unfinished_file.read_text(encoding="utf-8").splitlines()[-10:]) if unfinished_file.exists() else "(none)"
         prompt = (f"Current phase: {self.state['phase']}. Released so far: {', '.join(self.state['released']) or 'nothing'}.\n\n"
                   f"Player requests:\n{body}\n\nWhat players have found and learned:\n{llm.untrusted('progress', progress)}\n\n"
                   f"What each player privately said they wanted, never to be quoted or attributed:\n{briefs}\n\n"
+                  f"Features that couldn't be finished, and why. Ask for these differently, or not at all:\n{unfinished}\n\n"
                   "Read bible/theme.md and bible/phases.yaml, then choose the next features. "
                   "If the current phase's needs are all covered, move to the next phase.")
         result = await llm.ask(self.governor, "director", prompt, schema=DIRECTOR_SCHEMA, tools=["Read", "Glob", "Grep"],

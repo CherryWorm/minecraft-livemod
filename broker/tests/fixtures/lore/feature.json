@@ -5,6 +5,8 @@
   "blocks": {
     "rune_crucible": {"family": "machine", "display": "Rune Crucible", "texture": "rune_crucible", "tool": "pickaxe"},
     "moss_cap": {"family": "plant", "display": "Moss Cap", "texture": "moss_cap"},
+    "glow_cap": {"family": "glow_plant", "display": "Glow Cap", "texture": "glow_cap", "retired": true},
+    "rune_stone": {"family": "stone", "display": "Rune Stone", "texture": "rune_stone", "tool": "pickaxe"},
     "rune_ore": {"family": "ore", "display": "Rune Ore", "texture": "rune_ore", "tool": "pickaxe", "tool_level": "stone",
                  "drops": {"item": "rune_dust", "count": [2, 3]}}
   },
@@ -14,6 +16,10 @@
   ],
   "items": {
     "rune_dust": {"display": "Rune Dust", "texture": "rune_dust"},
+    "rune_berry": {"display": "Rune Berry", "texture": "rune_berry", "retired": true,
+                   "components": {"minecraft:food": {"nutrition": 4, "saturation": 2.4}, "minecraft:consumable": {"consume_seconds": 1.2}}},
+    "moss_seed": {"display": "Moss Seed", "texture": "moss_seed", "retired": true,
+                  "places": {"block": "$block:moss_cap", "on": ["minecraft:smooth_stone"]}},
     "rune_gem": {"display": "Rune Gem", "texture": "rune_gem"},
     "rune_tablet": {"display": "Rune Tablet", "texture": "rune_tablet"},
     "rune_shard": {"display": "Rune Shard", "texture": "rune_shard"},
@@ -91,6 +97,24 @@
   "plants": [
     {"id": "moss_cap_v1", "block": "moss_cap", "on": ["minecraft:grass_block"], "perChunk": 1.5, "minY": 40, "maxY": 200, "underground": false, "biomes": []}
   ],
+  "ruins": {
+    "rune_shrine": {
+      "id": "rune_shrine_v1",
+      "parts": [
+        {"x": 7, "y": 0, "z": 7, "block": "$block:rune_stone"},
+        {"x": 8, "y": 0, "z": 7, "block": "minecraft:chest"},
+        {"x": 7, "y": 1, "z": 7, "block": "$block:rune_stone"}
+      ],
+      "on": ["minecraft:grass_block", "minecraft:dirt", "minecraft:stone", "minecraft:sand", "minecraft:gravel"],
+      "replaces": ["minecraft:air", "minecraft:short_grass", "minecraft:water"],
+      "chance": 0.6,
+      "minY": 20,
+      "maxY": 200,
+      "underground": false,
+      "biomes": [],
+      "loot": {"type": "minecraft:chest", "pools": [{"rolls": 1, "entries": [{"type": "minecraft:item", "name": "$item:rune_shard"}]}]}
+    }
+  },
   "biomes": {
     "rune_meadow": {
       "base": "minecraft:plains",

@@ -53,7 +53,7 @@ class Governor:
     def record_gate_result(self, passed):
         self.state["failures"] = 0 if passed else self.state["failures"] + 1
         if self.state["failures"] >= FAILURE_LIMIT:
-            self.state["paused_until"] = int(time.time()) + FAILURE_PAUSE_SECONDS
+            self.state["building_paused_until"] = int(time.time()) + FAILURE_PAUSE_SECONDS
             self.state["failures"] = 0
         self._save()
 
@@ -78,6 +78,9 @@ class Governor:
         reason = self.why_not_speak()
         if reason:
             return reason
+        # A run of failed builds shouldn't silence the character, so this only stops building.
+        if time.time() < self.state.get("building_paused_until", 0):
+            return "too many failed attempts in a row"
         if self.state["usage"] >= DAILY_USAGE_LIMIT:
             return f"daily usage estimate reached ({self.state['usage']:.2f})"
         seen = self.state["last_player_seen"]

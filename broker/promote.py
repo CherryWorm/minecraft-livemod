@@ -200,6 +200,12 @@ def patches_changed(content, old_content):
         if plants.exists():
             # A plant grows into open air, so that's all it's allowed to replace.
             found.extend({**plant, "replaces": ["minecraft:air"]} for plant in json.loads(plants.read_text(encoding="utf-8")))
+        ruins = folder / "config" / "ruin_patches.json"
+        if ruins.exists():
+            # Each block in a ruin can only overwrite what the ruin says it may, and only a ruin may add a chest.
+            for ruin in json.loads(ruins.read_text(encoding="utf-8")):
+                found.extend({"id": ruin["id"], "block": block, "replaces": ruin["replaces"], "adds_block_entities": True}
+                             for block in {part["block"] for part in ruin["parts"]})
         return found
 
     old_ids = {patch["id"] for patch in read(old_content)}

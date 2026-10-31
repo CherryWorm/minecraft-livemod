@@ -74,6 +74,7 @@ A family fixes what can't change on a live block. `stone`, `ore`, `deep_ore`, `m
 | `machine` | Blocks that hold data and run every tick |
 | `cutout` | Leaves-like blocks with see-through pixels |
 | `plant` | Small plants, cross-shaped, no collision. Only 5 exist, so use them sparingly |
+| `glow_plant` | The same, giving light at level 10. Only 2 exist |
 | `tinted_plant` | The same, tinted by biome |
 
 Families are limited, and a name stays assigned to its slot forever, so don't create blocks casually. A block's family can never change once it's been released.

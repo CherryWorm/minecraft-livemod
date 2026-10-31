@@ -125,10 +125,11 @@ def snapshot_regions():
     return before
 
 
-def run_diff(before, after, ore_blocks, allowed):
+def run_diff(before, after, ore_blocks, allowed, new_block_entities=False):
     for ore in ore_blocks:
         result = runtime.run(
-            [sys.executable, "broker/gates/world_diff.py", str(before), str(after), "--ore", ore, "--allow", *allowed],
+            [sys.executable, "broker/gates/world_diff.py", str(before), str(after), "--ore", ore, "--allow", *allowed,
+             *(["--allow-new-block-entities"] if new_block_entities else [])],
             check=False, timeout=600,
         )
         if result.returncode != 0:
@@ -189,8 +190,9 @@ def run_gate(tier, jars, content, patches):
         allowed = {}
         for patch in patches:
             allowed.setdefault(patch["block"], set()).update(patch["replaces"])
+        new_block_entities = any(patch.get("adds_block_entities") for patch in patches)
         for block, replaces in sorted(allowed.items()):
-            run_diff(before, after, [block], sorted(replaces))
+            run_diff(before, after, [block], sorted(replaces), new_block_entities)
         timings["world_diff"] = round(time.monotonic() - started, 1)
     return timings
 

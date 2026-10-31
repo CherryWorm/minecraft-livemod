@@ -23,8 +23,9 @@ REQUEST_TIMEOUT = {"check": 300, "gates": 900, "release": 900, "javap": 60}
 
 VERDICT_SCHEMA = {
     "type": "object",
-    "properties": {"approve": {"type": "boolean"}, "problems": {"type": "array", "items": {"type": "string"}}},
-    "required": ["approve", "problems"],
+    "properties": {"approve": {"type": "boolean"}, "serious": {"type": "boolean"},
+                   "problems": {"type": "array", "items": {"type": "string"}}},
+    "required": ["approve", "serious", "problems"],
 }
 
 SUBAGENTS = {
@@ -79,6 +80,18 @@ def commit_all(message, cwd=REPO):
     return _git("rev-parse", "HEAD", cwd=cwd)
 
 
+def ready_commit(message, tree):
+    """Commits the work on top of whatever has shipped since it began. Without those, releasing it would look like
+    removing them, so the broker would refuse. Features live in their own folders, so this doesn't normally conflict."""
+    commit_all(message, cwd=tree)
+    try:
+        _git("merge", "-q", "--no-edit", "main", cwd=tree)
+    except subprocess.CalledProcessError:
+        subprocess.run(["git", "merge", "--abort"], cwd=tree, check=False)
+        raise
+    return _git("rev-parse", "HEAD", cwd=tree)
+
+
 async def request(kind, **fields):
     """Asks the broker, which runs outside this container, and waits for its answer."""
     request_id = uuid.uuid4().hex[:12]
@@ -98,7 +111,7 @@ async def request(kind, **fields):
 def _tools_for(feature_id, tree):
     @tool("check_feature", "Compiles this feature and runs the static checks. Takes about 15 seconds.", {})
     async def check_feature(args):
-        commit = commit_all(f"{feature_id}: work in progress", cwd=tree)
+        commit = ready_commit(f"{feature_id}: work in progress", tree)
         answer = await request("check", commit=commit)
         text = "All checks passed." if answer.get("result") in ("passed_gates", "nothing_to_release") \
             else f"Failed at {answer.get('gate')}: {answer.get('reason')}"
@@ -151,6 +164,7 @@ class Workshop:
         (tree / "mods/genesis/features" / feature_id).mkdir(parents=True, exist_ok=True)
         session = None
         feedback = None
+        last_problem = ""
         timings = {}
         for attempt in range(1, MAX_ATTEMPTS + 1):
             reason = self.governor.why_not_build()
@@ -169,15 +183,17 @@ class Workshop:
             if result.is_error:
                 print(f"{feature_id}: builder failed: {result.stop_reason} {result.text[:200]}", flush=True)
                 self.governor.record_gate_result(False)
+                last_problem = f"The builder stopped: {result.stop_reason}"
                 continue
 
-            commit = commit_all(f"{feature_id}: attempt {attempt}", cwd=tree)
+            commit = ready_commit(f"{feature_id}: attempt {attempt}", tree)
             began = time.monotonic()
             gates = await request("gates", commit=commit, release_id=f"{feature_id}-{attempt}")
             timings[f"gates_{attempt}"] = round(time.monotonic() - began, 1)
             if gates.get("result") not in ("passed_gates", "nothing_to_release"):
                 self.governor.record_gate_result(False)
                 feedback = f"The automated gates stopped this at {gates.get('gate')}:\n{gates.get('reason')}\n\nFix it."
+                last_problem = f"Gate {gates.get('gate')}: {str(gates.get('reason'))[:300]}"
                 print(f"{feature_id}: blocked at {gates.get('gate')}", flush=True)
                 continue
 
@@ -185,17 +201,23 @@ class Workshop:
             verdict = await self._review(spec, feature_id, tree, gates.get("screenshots", []))
             timings[f"review_{attempt}"] = round(time.monotonic() - began, 1)
             if not verdict.get("approve"):
-                self.governor.record_gate_result(False)
-                feedback = "A reviewer found problems:\n- " + "\n- ".join(verdict.get("problems", [])) + "\n\nFix them."
+                # Not a failure of the machinery, so this doesn't count towards the breaker. Every automated gate has
+                # passed, so on the last try anything short of harmful ships: something real today beats perfect later.
                 print(f"{feature_id}: review rejected it: {verdict.get('problems')}", flush=True)
-                continue
+                last_problem = "Review: " + "; ".join(verdict.get("problems", []))[:300]
+                if verdict.get("serious", True) or attempt < MAX_ATTEMPTS:
+                    feedback = "A reviewer found problems:\n- " + "\n- ".join(verdict.get("problems", [])) + "\n\nFix them."
+                    continue
+                print(f"{feature_id}: shipping anyway: the problems aren't serious and the gates passed", flush=True)
 
             began = time.monotonic()
+            commit = ready_commit(f"{feature_id}: ready to release", tree)
             released = await request("release", commit=commit, release_id=f"{feature_id}-{int(time.time())}")
             timings["release"] = round(time.monotonic() - began, 1)
             if released.get("result") not in ("released", "nothing_to_release"):
                 self.governor.record_gate_result(False)
                 feedback = f"Release failed at {released.get('gate')}: {released.get('reason')}\n\nFix it."
+                last_problem = f"Release: {str(released.get('reason'))[:300]}"
                 print(f"{feature_id}: release failed: {released.get('reason')}", flush=True)
                 continue
 
@@ -208,6 +230,9 @@ class Workshop:
             await self.on_released(feature_id, tree)
             return True
         print(f"{feature_id}: giving up after {MAX_ATTEMPTS} attempts", flush=True)
+        # So the director knows, instead of asking for the same thing in the same way.
+        with pathlib.Path("/workspace/state/unfinished.jsonl").open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"at": time.time(), "feature": feature_id, "problem": last_problem}) + "\n")
         return False
 
     @staticmethod

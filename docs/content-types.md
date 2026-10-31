@@ -107,6 +107,40 @@ A `plant` or `tinted_plant` block placed in the world, old and new, but not in a
 
 `underground` true means cave floors rather than the open surface. An `id` is permanent, like an ore's: chunks remember which ids they've had.
 
+A `glow_plant` block is a plant that gives light at level 10. There are only 2, so spend them on something that matters.
+
+## What an item is
+
+An item can say what it is, so every stack of it has these from the start, including ones from drops and loot:
+
+```json
+"items": {
+  "tide_berry": {
+    "display": "Tide Berry",
+    "components": {
+      "minecraft:food": {"nutrition": 4, "saturation": 2.4},
+      "minecraft:consumable": {"consume_seconds": 1.6}
+    }
+  },
+  "brine_seed": {
+    "display": "Brine Seed",
+    "places": {"block": "$block:brinewort", "on": ["minecraft:sand", "minecraft:gravel"]}
+  },
+  "tin_pick": {
+    "display": "Tin Pickaxe",
+    "handheld": true,
+    "tier": "stone",
+    "components": {"minecraft:max_damage": 180, "minecraft:max_stack_size": 1}
+  }
+}
+```
+
+- `components` are the game's own item components, and a tool or weapon's numbers here answer to the same tier curve as anywhere else. Prefer this to setting them on a recipe's result, which only covers what's crafted.
+- `places` makes it a seed, or anything like one: using it on the top of a block puts that block above and uses one up. Leave out `on` to allow anything solid.
+- `handheld` holds it the way vanilla holds a tool.
+
+A release that changes these reaches stacks in inventories the next time that player joins.
+
 ## Ruins
 
 A small built thing that turns up in land nobody has been to yet. It has to fit in one chunk.

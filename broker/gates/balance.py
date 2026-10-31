@@ -339,6 +339,15 @@ def check_power(features, recipes):
                 problems.append(f"{label} has stats but no tier. Add \"tier\": one of {', '.join(TIERS)}.")
         else:
             problems += _over_budget(label, tier, claim)
+        # An item's own components are what every stack of it starts with, so they answer to the same curve.
+        if isinstance(thing.get("components"), dict):
+            defaults, found = _from_components(f"{label}, by default,", thing["components"])
+            problems += found
+            if any(stat != "slot" for stat in defaults):
+                if tier is None:
+                    problems.append(f"{label} sets {', '.join(sorted(defaults))} but has no tier. Add \"tier\": one of {', '.join(TIERS)}.")
+                else:
+                    problems += _over_budget(label, tier, defaults)
     for recipe in recipes:
         for node, _, components in recipe["outputs"]:
             label = f"Recipe {recipe['source']} makes {node.split(':', 1)[-1] if node in things else node}, which"

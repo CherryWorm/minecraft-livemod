@@ -24,7 +24,7 @@ FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "lore"
 CONTAINER = "livingmod-m8-client"
 PLAYER = "Player0"
 SPOT = (40, 120, 40)
-TEXTURES = ("rune_crucible", "moss_cap", "rune_ore", "rune_dust", "rune_gem", "rune_tablet", "rune_shard", "rune_salt")
+TEXTURES = ("rune_crucible", "moss_cap", "glow_cap", "rune_berry", "moss_seed", "rune_stone", "rune_ore", "rune_dust", "rune_gem", "rune_tablet", "rune_shard", "rune_salt")
 BROKER_FAILED = re.compile(r"BUILD FAILED|Game crashed|\.java:\d+: error:")
 
 
@@ -158,6 +158,11 @@ def slot(name, table="items"):
     return "gm:" + ledger[table][f"lore/{name}"]["slot"]
 
 
+def food_level():
+    reply = runtime.rcon("prod", "data", "get", "entity", PLAYER, "foodLevel")
+    return int(re.search(r"(\d+)\s*$", reply).group(1))
+
+
 def last_result(client):
     return re.findall(r"\[M8\] crafting result: (\S+)", client.text())[-1]
 
@@ -220,6 +225,37 @@ def play(client):
     client.ask("codex", 90)
     results.append(report("the codex opens", "[M8] the codex opened" in client.text()))
 
+    # An item that's food only because its definition says so. Hunger first, because you can't eat when full.
+    berry = slot("rune_berry")
+    runtime.rcon("prod", "clear", PLAYER)
+    runtime.rcon("prod", "give", PLAYER, berry, "2")
+    runtime.rcon("prod", "difficulty", "easy")
+    # Long enough to burn through the full saturation bar a player builds up on peaceful.
+    runtime.rcon("prod", "effect", "give", PLAYER, "minecraft:hunger", "6", "255")
+    time.sleep(7)
+    before = food_level()
+    client.ask("eat")
+    after = food_level()
+    left = runtime.rcon("prod", "clear", PLAYER, berry, "0")
+    runtime.rcon("prod", "difficulty", "peaceful")
+    results.append(report("an item defined as food can be eaten", after > before and "Found 1" in left, f"food {before} to {after}, {left}"))
+
+    # A seed plants what it says, on what it says.
+    moss = slot("moss_cap", "blocks")
+    runtime.rcon("prod", "clear", PLAYER)
+    runtime.rcon("prod", "give", PLAYER, slot("moss_seed"), "1")
+    time.sleep(1)
+    client.ask(f"useblock {x + 1} {y - 1} {z + 1}")
+    planted = runtime.rcon("prod", "execute", "if", "block", str(x + 1), str(y), str(z + 1), moss)
+    results.append(report("a seed plants its block", "passed" in planted, planted))
+
+    # A plant that gives light. Only the block light layer counts, so daylight doesn't confuse it.
+    runtime.rcon("prod", "setblock", str(x - 3), str(y), str(z + 1), slot("glow_cap", "blocks"))
+    time.sleep(2)
+    client.ask(f"light {x - 3} {y + 1} {z + 1}")
+    light = int(re.findall(r"\[M8\] block light: (\d+)", client.text())[-1])
+    results.append(report("a glowing plant lights its surroundings on the client", light >= 8, f"block light {light}"))
+
     # A mob with a real model, walking around.
     runtime.rcon("prod", "setblock", str(x), str(y), str(z + 3), "minecraft:air")
     runtime.rcon("prod", "summon", slot("rune_crab", "mobs"), str(x - 1), str(y), str(z + 4), "{NoAI:1b}")
@@ -276,6 +312,22 @@ def check_plants(results):
     results.append(report("plants grew on land that already existed", count > 0, f"{count} of {moss}"))
 
 
+def check_ruins(results):
+    stone = slot("rune_stone", "blocks")
+    count = count_block(stone)
+    results.append(report("ruins appeared in land nobody has visited", count > 0, f"{count} blocks of {stone}"))
+
+    sys.path.insert(0, str(runtime.REPO / "broker" / "gates"))
+    from world_diff import read_chunks
+
+    chests = 0
+    for regions in (runtime.RUNTIME / "prod" / "world").rglob("region"):
+        for path in regions.glob("*.mca"):
+            for _, _, chunk in read_chunks(path):
+                chests += sum(1 for entity in chunk.get("block_entities", []) if str(entity.get("LootTable", "")).startswith("gm:"))
+    results.append(report("their chests hold this feature's loot", chests > 0, f"{chests} chests"))
+
+
 def check_biome(results):
     biome = json.loads((runtime.RUNTIME / "prod" / "config" / "conduit" / "biome_patches.json").read_text(encoding="utf-8"))[0]
     found = runtime.rcon("prod", "locate", "biome", biome["to"], check=False)
@@ -317,6 +369,7 @@ def main():
         check_biome(results)
         check_progress(results)
         check_plants(results)
+        check_ruins(results)
         check_drops(results)
     finally:
         client.stop()

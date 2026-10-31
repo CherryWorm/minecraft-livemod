@@ -167,6 +167,14 @@ def canonical(entities):
     return json.dumps(sorted(cleaned, key=lambda e: (e.get("x"), e.get("y"), e.get("z"))), sort_keys=True)
 
 
+def entities_kept(old, new, allow_added):
+    """Whether what was there is untouched. A ruin adds a chest of its own, and that's the only reason to allow one."""
+    if not allow_added:
+        return canonical(old) == canonical(new)
+    positions = {(entity.get("x"), entity.get("y"), entity.get("z")) for entity in old}
+    return canonical(old) == canonical([entity for entity in new if (entity.get("x"), entity.get("y"), entity.get("z")) in positions])
+
+
 def touched_blocks(chunk):
     """How many blocks the mod has recorded as changed in this chunk."""
     sections = chunk.get("fabric:attachments", {}).get("gm:touched", [])
@@ -181,6 +189,7 @@ def main():
     parser.add_argument("--allow", nargs="+", required=True)
     parser.add_argument("--protect", nargs=6, type=int, action="append", default=[])
     parser.add_argument("--report-limit", type=int, default=8)
+    parser.add_argument("--allow-new-block-entities", action="store_true", help="existing ones must still be unchanged")
     args = parser.parse_args()
 
     before = load_world(args.before)
@@ -211,7 +220,7 @@ def main():
         if old.get("Status") != "minecraft:full":
             unfinished += 1
             continue
-        if canonical(old.get("block_entities", [])) != canonical(new.get("block_entities", [])):
+        if not entities_kept(old.get("block_entities", []), new.get("block_entities", []), args.allow_new_block_entities):
             bad_entities.append(pos)
         # Touched records can only ever grow. Shrinking means the mod forgot what players did.
         if touched_blocks(new) < touched_blocks(old):
