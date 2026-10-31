@@ -22,20 +22,20 @@ import net.minecraft.world.level.block.state.BlockState;
 /** A blank item. Tool and weapon stats come from components on the stack, set by the recipe that makes it. */
 public final class SlotItem extends SimplePolymerItem {
 	private final String slotId;
-	private DataComponentMap releaseComponents;
+	private DataComponentMap baseComponents;
 
 	public SlotItem(Properties properties, String slotId) {
 		super(properties);
 		this.slotId = slotId;
 	}
 
+	/** New stacks read their defaults from the registry holder, so that's what has to change. */
 	void setReleaseComponents(DataComponentMap components) {
-		this.releaseComponents = components == null ? null : DataComponentMap.composite(super.components(), components);
-	}
-
-	@Override
-	public DataComponentMap components() {
-		return this.releaseComponents != null ? this.releaseComponents : super.components();
+		var holder = builtInRegistryHolder();
+		if (this.baseComponents == null) {
+			this.baseComponents = holder.components();
+		}
+		holder.bindComponents(components == null ? this.baseComponents : DataComponentMap.composite(this.baseComponents, components));
 	}
 
 	@Override

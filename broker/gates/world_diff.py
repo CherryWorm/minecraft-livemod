@@ -148,8 +148,12 @@ def sections_by_y(chunk):
 # any other change to a block entity still fails the check.
 VOLATILE_FIELDS = {
     "minecraft:vault": {"server_data"},
-    "minecraft:mob_spawner": {"Delay"},
-    "minecraft:trial_spawner": {"cooldown_ends_at", "next_mob_spawns_at", "total_mobs_spawned"},
+    "minecraft:mob_spawner": {"Delay", "SpawnData"},
+    "minecraft:trial_spawner": {"cooldown_ends_at", "next_mob_spawns_at", "total_mobs_spawned", "spawn_data"},
+    "minecraft:hopper": {"TransferCooldown"},
+    "minecraft:campfire": {"CookingTimes", "CookingTotalTimes"},
+    "minecraft:soul_campfire": {"CookingTimes", "CookingTotalTimes"},
+    "minecraft:comparator": {"OutputSignal"},
     "minecraft:sculk_catalyst": {"cursors"},
     "minecraft:beehive": {"bees", "flower_pos"},
     "minecraft:sculk_shrieker": {"warning_level", "listener"},

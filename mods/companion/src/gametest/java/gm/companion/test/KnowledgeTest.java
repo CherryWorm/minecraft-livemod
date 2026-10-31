@@ -10,6 +10,7 @@ import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.level.LightLayer;
@@ -93,7 +94,11 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				LOGGER.info("[M8] the codex opened");
 				context.runOnClient(client -> client.gui.setScreen(null));
 			}
-			case "eat" -> context.getInput().holdKeyFor(options -> options.keyUse, 40);
+			case "eat" -> {
+				boolean food = context.computeOnClient(client -> client.player.getMainHandItem().has(DataComponents.CONSUMABLE));
+				LOGGER.info("[M8] the client sees it as food: {}", food);
+				context.getInput().holdKeyFor(options -> options.keyUse, 40);
+			}
 			case "light" -> {
 				BlockPos pos = new BlockPos(Integer.parseInt(words[1]), Integer.parseInt(words[2]), Integer.parseInt(words[3]));
 				int light = context.computeOnClient(client -> client.level.getBrightness(LightLayer.BLOCK, pos));

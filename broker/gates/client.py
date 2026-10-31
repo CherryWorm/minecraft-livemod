@@ -62,11 +62,12 @@ def build_scene(blocks, items, mobs=()):
         x = (index % 5) * 2 - 4
         y = 120 + (index // 5) * 2
         runtime.rcon("shadow", "setblock", str(x), str(y), "0", f"gm:{slot}", check=False)
-    # Items float in the air, at eye level and in front of the blocks, where they can't be picked up.
+    # Items hang in the air at eye level, in front of the blocks. A dropped item spins and can be caught edge-on, which
+    # shows nothing, so these always face the camera.
     shown = items[:9]
     for index, slot in enumerate(shown):
-        data = '{Item:{id:"gm:%s",count:1},NoGravity:1b,PickupDelay:32767,Age:-32768}' % slot
-        runtime.rcon("shadow", "summon", "minecraft:item", str(index - (len(shown) - 1) / 2), "121.3", "-2", data, check=False)
+        data = '{item:{id:"gm:%s",count:1},billboard:"center"}' % slot
+        runtime.rcon("shadow", "summon", "minecraft:item_display", str(index - (len(shown) - 1) / 2), "122", "-2", data, check=False)
     for index, slot in enumerate(mobs[:5]):
         runtime.rcon("shadow", "summon", f"gm:{slot}", str(index * 2 - 4), "120", "-1", "{NoAI:1b,PersistenceRequired:1b}", check=False)
 

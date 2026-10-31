@@ -225,7 +225,9 @@ def play(client):
     client.ask("codex", 90)
     results.append(report("the codex opens", "[M8] the codex opened" in client.text()))
 
-    # An item that's food only because its definition says so. Hunger first, because you can't eat when full.
+    # An item that's food only because its definition says so. Hunger first, because you can't eat when full. The
+    # crucible has to go, because the player is looking at it, and using an item would use the machine instead.
+    runtime.rcon("prod", "setblock", str(x), str(y), str(z + 3), "minecraft:air")
     berry = slot("rune_berry")
     runtime.rcon("prod", "clear", PLAYER)
     runtime.rcon("prod", "give", PLAYER, berry, "2")
@@ -239,6 +241,9 @@ def play(client):
     left = runtime.rcon("prod", "clear", PLAYER, berry, "0")
     runtime.rcon("prod", "difficulty", "peaceful")
     results.append(report("an item defined as food can be eaten", after > before and "Found 1" in left, f"food {before} to {after}, {left}"))
+    # Without this the food still works, but the player sees no eating animation.
+    seen = re.findall(r"\[M8\] the client sees it as food: (\w+)", client.text())
+    results.append(report("the client knows it's food, so eating looks right", seen[-1:] == ["true"], str(seen[-1:])))
 
     # A seed plants what it says, on what it says.
     moss = slot("moss_cap", "blocks")

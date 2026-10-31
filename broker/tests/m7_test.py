@@ -53,7 +53,9 @@ def prepare():
     shutil.copy(jar, forbidden)
     with zipfile.ZipFile(forbidden, "a") as archive:
         archive.writestr("gm/sample/Bad.class", class_using_files())
-    (MODULES / "m7_forbidden.sig").write_text(sign.sign_module(forbidden, "m7_forbidden")["signature"], encoding="ascii")
+    # A real signature and its real generation, so the only thing wrong with this jar is what's in it.
+    signed = sign.sign_module(forbidden, "m7_forbidden")
+    (MODULES / "m7_forbidden.sig").write_text(signed["signature"], encoding="ascii")
     forbidden.with_name("m7_forbidden.jar.sig").unlink()
 
     # Two signatures of the same module, so the older one can be replayed after the newer has run.
@@ -65,7 +67,7 @@ def prepare():
     (MODULES / "m7_good.sig").write_text(newer["signature"], encoding="ascii")
     shutil.copy(good, MODULES / "m7_older.jar")
     (MODULES / "m7_older.sig").write_text(older["signature"], encoding="ascii")
-    return older["generation"], newer["generation"]
+    return signed["generation"], older["generation"], newer["generation"]
 
 
 def wait_log(log, process, pattern, seconds):
@@ -84,7 +86,7 @@ def wait_log(log, process, pattern, seconds):
 def main():
     with sign._locked():
         sign._load_key()
-    older, newer = prepare()
+    forbidden, older, newer = prepare()
     public = sign.public_key_text()
     base64.b64decode(public, validate=True)
 
@@ -108,7 +110,7 @@ def main():
         found = wait_log(log, process, r"\[M7\] refused unsigned refused=(\d+) active=(\w+)", 60)
         results.append(report("a jar with no signature is refused", found.group(2) == "false", found.group(0)))
 
-        runtime.rcon("prod", "conduit", "module", "push", "m7_forbidden", "m7_forbidden", "1")
+        runtime.rcon("prod", "conduit", "module", "push", "m7_forbidden", "m7_forbidden", str(forbidden))
         found = wait_log(log, process, r"\[M7\] refused forbidden refused=(\d+) active=(\w+)", 60)
         results.append(report("a signed jar that uses file APIs is refused", found.group(2) == "false", found.group(0)))
         text = log.read_text(encoding="utf-8", errors="replace")
