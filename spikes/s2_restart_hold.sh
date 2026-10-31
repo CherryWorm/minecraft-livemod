@@ -7,7 +7,7 @@ set -a; . ./.env; set +a
 
 rounds=${1:-20}
 mode=${2:-}
-base_slots=8
+base_slots=1000
 log=$(mktemp)
 failures=0
 slowest=0
@@ -28,7 +28,6 @@ echo "baseline inventory: $baseline"
 for round in $(seq 1 "$rounds"); do
   slots=$((base_slots + round))
   mkdir -p "$RUNTIME_DIR/prod/config/conduit"
-  echo "$slots" >"$RUNTIME_DIR/prod/config/conduit/slots"
   python3 spikes/make_biome_pack.py "$RUNTIME_DIR/prod" "$round"
 
   joins_before=$(grep -c JOINED "$log")

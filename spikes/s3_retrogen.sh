@@ -75,7 +75,7 @@ echo "snapshot taken: $(ls "$work/before" | wc -l) region files"
 
 echo "=== adding the ore"
 cat >"$dir/config/conduit/ore_patches.json" <<'EOF'
-[{"id": "s3_test_ore", "block": "gm:s0001",
+[{"id": "s3_test_ore", "block": "gm:s1001",
   "replaces": ["minecraft:stone", "minecraft:deepslate", "minecraft:tuff", "minecraft:granite", "minecraft:diorite", "minecraft:andesite"],
   "veinsPerChunk": 8, "veinSize": 9, "minY": -60, "maxY": 80}]
 EOF
@@ -112,7 +112,7 @@ cp -r "$regions" "$work/after1"
 
 echo "=== checking the raw files against the snapshot"
 protect=(--protect 8 40 8 24 50 24 --protect 23 44 16 60 45 17 --protect -40 30 -40 -30 34 -30 --protect -60 55 -60 -50 60 -50)
-python3 spikes/world_diff.py "$work/before" "$work/after1" --ore gm:s0001 \
+python3 broker/gates/world_diff.py "$work/before" "$work/after1" --ore gm:s1001 \
   --allow minecraft:stone minecraft:deepslate minecraft:tuff minecraft:granite minecraft:diorite minecraft:andesite "${protect[@]}"
 first=$?
 
@@ -126,7 +126,7 @@ mc save-all flush
 sleep 6
 stack stop shadow >/dev/null 2>&1
 cp -r "$regions" "$work/after2"
-python3 spikes/world_diff.py "$work/after1" "$work/after2" --ore gm:s0001 --allow none
+python3 broker/gates/world_diff.py "$work/after1" "$work/after2" --ore gm:s1001 --allow none
 second=$?
 [[ "${reprocessed:-1}" -eq 0 ]] || second=1
 

@@ -26,8 +26,8 @@ bytes-per-second = -1
 decompressed-bytes-per-second = 5242880
 
 [servers]
-prod = "prod:25565"
-try = ["prod"]
+backend = "@BACKEND@"
+try = ["backend"]
 
 [forced-hosts]
 

@@ -14,8 +14,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * One ore added to the world. Patches are data, so a new ore needs no code and no restart once the
- * block exists. The id must never be reused, because chunks remember which ids they've already had.
+ * One ore added to the world. Patches are data, so a new ore needs no code and no restart. The id must
+ * never be reused, because chunks remember which ids they've already had.
  */
 public record OrePatch(String id, Block ore, Set<Block> replaces, int veinsPerChunk, int veinSize, int minY, int maxY) {
 	private static final Path FILE = Path.of("config", "conduit", "ore_patches.json");

@@ -16,26 +16,31 @@ x-server: &server
   secrets:
     - forwarding
     - rcon
+    - bridge
+
+x-velocity: &velocity
+  image: livingmod/velocity:${VELOCITY_VERSION}-${VELOCITY_BUILD}
+  build:
+    context: .
+    dockerfile: velocity/Dockerfile
+    args:
+      VELOCITY_URL: ${VELOCITY_URL}
+      VELOCITY_SHA256: ${VELOCITY_SHA256}
+  user: "1000:1000"
+  restart: unless-stopped
+  secrets:
+    - forwarding
 
 services:
   velocity:
-    image: livingmod/velocity:${VELOCITY_VERSION}-${VELOCITY_BUILD}
-    build:
-      context: .
-      dockerfile: velocity/Dockerfile
-      args:
-        VELOCITY_URL: ${VELOCITY_URL}
-        VELOCITY_SHA256: ${VELOCITY_SHA256}
-    user: "1000:1000"
-    restart: unless-stopped
+    <<: *velocity
     environment:
       PROXY_ONLINE_MODE: ${PROXY_ONLINE_MODE:-true}
+      BACKEND: prod:25565
     ports:
       - "${GAME_PORT:-25565}:25565"
     volumes:
       - ${RUNTIME_DIR}/velocity:/data
-    secrets:
-      - forwarding
     networks:
       - public
       - backend
@@ -51,7 +56,7 @@ services:
       PACK_PUBLIC_URL: ${PACK_PUBLIC_URL}
     ports:
       # Polymer serves the resource pack here until the standalone pack host arrives.
-      # This is also why prod is on the public network for now. M2 removes its outbound access.
+      # This is also why prod is on the public network for now.
       - "${PACK_PORT:-25567}:25567"
     volumes:
       - ${RUNTIME_DIR}/prod:/data
@@ -63,6 +68,7 @@ services:
   shadow:
     <<: *server
     profiles: [shadow]
+    # Limited so tests can't starve the live server.
     cpus: 4
     environment:
       SERVER_ROLE: shadow
@@ -70,11 +76,30 @@ services:
       JAVA_MEMORY: ${SHADOW_MEMORY:-6G}
       WHITE_LIST: "false"
       LEVEL_SEED: ${LEVEL_SEED:-}
-      PACK_PUBLIC_URL: http://shadow:25567/
+      PACK_PUBLIC_URL: http://localhost:25568/
+    ports:
+      - "127.0.0.1:25568:25567"
     volumes:
       - ${RUNTIME_DIR}/shadow:/data
       - ${RUNTIME_DIR}/releases/candidate:/opt/release:ro
     networks:
+      - public
+      - backend
+
+  # In front of the shadow server only, for test clients. Login checks are off, so it's bound to this
+  # machine alone and must never be published anywhere else.
+  shadow-proxy:
+    <<: *velocity
+    profiles: [shadow]
+    environment:
+      PROXY_ONLINE_MODE: "false"
+      BACKEND: shadow:25565
+    ports:
+      - "127.0.0.1:25566:25565"
+    volumes:
+      - ${RUNTIME_DIR}/shadow-proxy:/data
+    networks:
+      - public
       - backend
 
   builder:
@@ -86,7 +111,7 @@ services:
       GRADLE_USER_HOME: /cache/gradle
       HOME: /cache/home
     volumes:
-      - ../mods:/work
+      - ${MODS_DIR:-../mods}:/work
       - ${RUNTIME_DIR}/cache:/cache
     networks:
       - public
@@ -109,10 +134,11 @@ services:
       SDL_VIDEO_DRIVER: offscreen
       EGL_PLATFORM: surfaceless
       ALSOFT_DRIVERS: "null"
-      LIVINGMOD_SERVER: localhost:${GAME_PORT:-25565}
+      LIVINGMOD_SERVER: ${TEST_SERVER:-localhost:25566}
+      CLIENT_TEST: ${CLIENT_TEST:-}
       S4_CYCLES: ${S4_CYCLES:-100}
     volumes:
-      - ../mods:/work
+      - ${MODS_DIR:-../mods}:/work
       - ${RUNTIME_DIR}/cache:/cache
 
   agent:
@@ -159,5 +185,7 @@ secrets:
     file: ${RUNTIME_DIR}/secrets/forwarding.secret
   rcon:
     file: ${RUNTIME_DIR}/secrets/rcon.secret
+  bridge:
+    file: ${RUNTIME_DIR}/secrets/bridge.secret
   claude_token:
     file: ${RUNTIME_DIR}/secrets/claude_token.secret

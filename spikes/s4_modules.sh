@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 set -a; . ./.env; set +a
 
 cycles=${1:-100}
-export S4_CYCLES=$cycles
+export S4_CYCLES=$cycles CLIENT_TEST=modules TEST_SERVER=localhost:25565
 work="$RUNTIME_DIR/s4"
 log="$work/client.log"
 modules="$RUNTIME_DIR/prod/modules"

@@ -25,6 +25,16 @@ subprojects {
 		}
 	}
 
+	// Feature modules are loaded at runtime by the host, so they only compile against its API.
+	if (project.name.startsWith('feature-')) {
+		dependencies {
+			compileOnly project(project.name.endsWith('-server') ? ':conduit' : ':companion')
+			if (project.name.endsWith('-server')) {
+				compileOnly "eu.pb4:polymer-bundled:${project.polymer_version}"
+			}
+		}
+	}
+
 	tasks.withType(JavaCompile).configureEach {
 		it.options.release = 25
 	}

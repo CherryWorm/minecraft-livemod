@@ -24,6 +24,9 @@ public final class ModuleCycleTest implements FabricClientGameTest {
 
 	@Override
 	public void runTest(ClientGameTestContext context) {
+		if (!"modules".equals(System.getenv("CLIENT_TEST"))) {
+			return;
+		}
 		String address = System.getenv().getOrDefault("LIVINGMOD_SERVER", "localhost:25565");
 		int cycles = Integer.parseInt(System.getenv().getOrDefault("S4_CYCLES", "100"));
 		ModuleHost host = Companion.host();

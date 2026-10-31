@@ -1,0 +1,47 @@
+{
+  "id": "ember",
+  "phase": 1,
+  "summary": "Test fixture: an ore, a refined block and a drop, with a server module.",
+  "blocks": {
+    "ember_ore": {
+      "family": "ore",
+      "display": "Ember Ore",
+      "texture": "ember_ore",
+      "tool": "pickaxe",
+      "tool_level": "stone",
+      "drops": {"item": "ember", "count": [1, 2]}
+    },
+    "ember_block": {
+      "family": "metal",
+      "display": "Block of Ember",
+      "texture": "ember_block",
+      "tool": "pickaxe",
+      "tool_level": "stone"
+    }
+  },
+  "items": {
+    "ember": {"display": "Ember", "texture": "ember"}
+  },
+  "ores": [
+    {
+      "id": "ember_ore_v1",
+      "block": "ember_ore",
+      "replaces": ["minecraft:stone", "minecraft:deepslate"],
+      "veinsPerChunk": 3,
+      "veinSize": 7,
+      "minY": -40,
+      "maxY": 48
+    }
+  ],
+  "recipes": {
+    "ember_block": {
+      "mode": "open",
+      "json": {
+        "type": "minecraft:crafting_shaped",
+        "pattern": ["XX", "XX"],
+        "key": {"X": "$item:ember"},
+        "result": {"id": "$block:ember_block", "count": 1}
+      }
+    }
+  }
+}

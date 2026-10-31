@@ -45,7 +45,9 @@ public final class OrePatchQueue {
 	/** A vein is a walk of at most veinSize steps, so this keeps it within the neighbouring chunks. */
 	private static final int MAX_VEIN_SIZE = 16;
 
-	private final List<OrePatch> patches;
+	private static final OrePatchQueue INSTANCE = new OrePatchQueue();
+
+	private List<OrePatch> patches = List.of();
 	private final Deque<ChunkPos> queue = new ArrayDeque<>();
 	private final Set<Long> queued = new HashSet<>();
 	private final long budgetNanos = readBudgetMicros() * 1_000;
@@ -54,14 +56,7 @@ public final class OrePatchQueue {
 	private long chunksPatched;
 	private long oresPlaced;
 
-	private OrePatchQueue(List<OrePatch> patches) {
-		this.patches = patches;
-		for (OrePatch patch : patches) {
-			if (patch.veinSize() > MAX_VEIN_SIZE) {
-				throw new IllegalStateException("Vein too large to stay in neighbouring chunks: " + patch.id());
-			}
-		}
-	}
+	private OrePatchQueue() {}
 
 	private static long readBudgetMicros() {
 		try {
@@ -72,19 +67,26 @@ public final class OrePatchQueue {
 	}
 
 	public static void register() {
-		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
-			List<OrePatch> patches = OrePatch.load();
-			if (patches.isEmpty()) {
-				return;
+		ServerLifecycleEvents.SERVER_STARTED.register(OrePatchQueue::reload);
+		ServerChunkEvents.CHUNK_LOAD.register((level, chunk, generated) -> INSTANCE.onLoad(level, chunk));
+		ServerChunkEvents.CHUNK_UNLOAD.register(INSTANCE::onUnload);
+		ServerTickEvents.END_SERVER_TICK.register(INSTANCE::tick);
+	}
+
+	/** Reads the patch list again and starts on any loaded chunks that need something new. */
+	public static int reload(MinecraftServer server) {
+		List<OrePatch> patches = OrePatch.load();
+		for (OrePatch patch : patches) {
+			if (patch.veinSize() > MAX_VEIN_SIZE) {
+				throw new IllegalStateException("Vein too large to stay in neighbouring chunks: " + patch.id());
 			}
+		}
+		INSTANCE.patches = patches;
+		if (!patches.isEmpty()) {
 			LOGGER.info("retrogen: {} ore patches active", patches.size());
-			OrePatchQueue queue = new OrePatchQueue(patches);
-			ServerChunkEvents.CHUNK_LOAD.register((level, chunk, generated) -> queue.onLoad(level, chunk));
-			ServerChunkEvents.CHUNK_UNLOAD.register(queue::onUnload);
-			ServerTickEvents.END_SERVER_TICK.register(queue::tick);
-			ServerLevel overworld = server.overworld();
-			queue.scanLoadedChunks(overworld);
-		});
+			INSTANCE.scanLoadedChunks(server.overworld());
+		}
+		return patches.size();
 	}
 
 	private void scanLoadedChunks(ServerLevel level) {
@@ -112,6 +114,9 @@ public final class OrePatchQueue {
 	}
 
 	private void tick(MinecraftServer server) {
+		if (this.patches.isEmpty()) {
+			return;
+		}
 		long started = System.nanoTime();
 		ServerLevel level = server.overworld();
 		int attempts = this.queue.size();

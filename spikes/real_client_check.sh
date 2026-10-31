@@ -13,18 +13,18 @@ online() { ./scripts/mc.sh list 2>/dev/null | grep -q "$player"; }
 online || { echo "FAIL: $player isn't online"; exit 1; }
 
 echo "=== placing the test block next to $player"
-./scripts/mc.sh give "$player" gm:s0001 4
-./scripts/mc.sh execute at "$player" run setblock '~2' '~1' '~' gm:s0001
+./scripts/mc.sh give "$player" gm:s1001 4
+./scripts/mc.sh execute at "$player" run setblock '~2' '~1' '~' gm:s1001
 
 mkdir -p "$assets/models/block" "$assets/textures/block"
-cat >"$assets/models/block/s0001.json" <<'EOF'
-{"parent":"minecraft:block/cube_all","textures":{"all":"gm:block/s0001"}}
+cat >"$assets/models/block/s1001.json" <<'EOF'
+{"parent":"minecraft:block/cube_all","textures":{"all":"gm:block/s1001"}}
 EOF
 
 echo "=== S1: three live texture changes, 15 seconds apart"
 for variant in 0 2 1; do
   mark=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  python3 assetkit/proof_texture.py "$variant" >"$assets/textures/block/s0001.png"
+  python3 assetkit/proof_texture.py "$variant" >"$assets/textures/block/s1001.png"
   ./scripts/mc.sh polymer generate-pack reload >/dev/null
   result=""
   for _ in $(seq 1 120); do
@@ -39,7 +39,6 @@ done
 
 echo "=== S2: restarting with a new block and biome"
 mkdir -p "$RUNTIME_DIR/prod/config/conduit"
-echo 9 >"$RUNTIME_DIR/prod/config/conduit/slots"
 python3 spikes/make_biome_pack.py "$RUNTIME_DIR/prod" 1
 mark=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 started=$(date +%s.%N)
@@ -55,6 +54,6 @@ if logs "$mark" velocity | grep -q "$player.*has disconnected:\|$player (.*) has
   exit 1
 fi
 online || { echo "FAIL: $player never came back"; exit 1; }
-./scripts/mc.sh execute at "$player" run setblock '~-2' '~1' '~' gm:s0009
+./scripts/mc.sh execute at "$player" run setblock '~-2' '~1' '~' gm:s1009
 ./scripts/mc.sh execute at "$player" run fillbiome '~-16' '~-8' '~-16' '~16' '~8' '~16' s2:b01
 echo "PASS: $player stayed connected through the restart"

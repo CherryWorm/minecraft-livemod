@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 set -a; . ./.env; set +a
 
 variant=${1:-1}
-slot=${2:-s0001}
+slot=${2:-s1001}
 assets="$RUNTIME_DIR/prod/live-assets/assets/gm"
 log=$(mktemp)
 

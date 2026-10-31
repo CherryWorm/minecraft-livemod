@@ -15,20 +15,28 @@ import java.nio.file.Path;
 public final class LiveAssets {
 	private static final Path ROOT = Path.of("live-assets");
 	private static final String PLACEHOLDER_MODEL = "{\"parent\":\"minecraft:block/stone\"}";
+	private static final String PLACEHOLDER_ITEM_MODEL = "{\"parent\":\"minecraft:item/generated\",\"textures\":{\"layer0\":\"minecraft:item/barrier\"}}";
 
 	private LiveAssets() {}
 
 	public static void register() {
 		PolymerResourcePackUtils.RESOURCE_PACK_AFTER_INITIAL_CREATION_EVENT.register(builder -> {
-			for (String id : NeutralSlots.ids()) {
+			for (String id : NeutralSlots.blockIds()) {
 				builder.addData("assets/gm/models/block/" + id + ".json", bytes(PLACEHOLDER_MODEL));
-				builder.addData("assets/gm/items/" + id + ".json", bytes(
-						"{\"model\":{\"type\":\"minecraft:model\",\"model\":\"gm:block/" + id + "\"}}"));
+				builder.addData("assets/gm/items/" + id + ".json", itemDefinition("gm:block/" + id));
+			}
+			for (String id : NeutralSlots.itemIds()) {
+				builder.addData("assets/gm/models/item/" + id + ".json", bytes(PLACEHOLDER_ITEM_MODEL));
+				builder.addData("assets/gm/items/" + id + ".json", itemDefinition("gm:item/" + id));
 			}
 			if (Files.isDirectory(ROOT)) {
 				builder.copyFromPath(ROOT);
 			}
 		});
+	}
+
+	private static byte[] itemDefinition(String model) {
+		return bytes("{\"model\":{\"type\":\"minecraft:model\",\"model\":\"" + model + "\"}}");
 	}
 
 	private static byte[] bytes(String text) {

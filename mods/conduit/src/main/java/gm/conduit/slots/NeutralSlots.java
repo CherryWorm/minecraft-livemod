@@ -1,12 +1,9 @@
 package gm.conduit.slots;
 
-import eu.pb4.polymer.blocks.api.BlockModelType;
-import eu.pb4.polymer.blocks.api.PolymerBlockModel;
-import eu.pb4.polymer.blocks.api.PolymerBlockResourceUtils;
-import eu.pb4.polymer.blocks.api.PolymerTexturedBlock;
+import eu.pb4.polymer.core.api.block.PolymerBlockUtils;
 import eu.pb4.polymer.core.api.item.PolymerBlockItem;
 import gm.conduit.Conduit;
-import net.fabricmc.fabric.api.networking.v1.context.PacketContext;
+import net.fabricmc.fabric.api.object.builder.v1.block.entity.FabricBlockEntityTypeBuilder;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
@@ -14,79 +11,80 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.state.BlockBehaviour;
-import net.minecraft.world.level.block.state.BlockState;
-import org.jspecify.annotations.Nullable;
+import net.minecraft.world.level.block.entity.BlockEntityType;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Blocks registered at boot with meaningless IDs and no content. What each one looks like comes from
- * the resource pack, so new art needs no restart and F3 gives nothing away.
+ * Registers the whole pool at boot, with meaningless IDs and no content. A world with nothing bound
+ * looks and plays like vanilla. What a slot looks like comes from the resource pack and what it does
+ * comes from a module, so new content needs no restart, and F3 gives nothing away.
  */
 public final class NeutralSlots {
-	private static final Path COUNT_FILE = Path.of("config", "conduit", "slots");
-	private static final int DEFAULT_COUNT = 8;
-	private static final List<String> IDS = new ArrayList<>();
+	public static final int FIRST_ITEM_ID = 1;
+	public static final int ITEM_COUNT = 400;
+
+	private static final List<String> BLOCK_IDS = new ArrayList<>();
+	private static final List<String> ITEM_IDS = new ArrayList<>();
+	private static BlockEntityType<SlotBlockEntity> machineEntityType;
 
 	private NeutralSlots() {}
 
-	public static List<String> ids() {
-		return List.copyOf(IDS);
+	public static List<String> blockIds() {
+		return List.copyOf(BLOCK_IDS);
+	}
+
+	public static List<String> itemIds() {
+		return List.copyOf(ITEM_IDS);
+	}
+
+	public static BlockEntityType<SlotBlockEntity> machineEntityType() {
+		return machineEntityType;
 	}
 
 	public static void register() {
-		int count = readCount();
-		for (int i = 1; i <= count; i++) {
-			registerSlot("s%04d".formatted(i));
-		}
-	}
-
-	private static void registerSlot(String path) {
-		Identifier id = Identifier.fromNamespaceAndPath(Conduit.NAMESPACE, path);
-		Identifier model = Identifier.fromNamespaceAndPath(Conduit.NAMESPACE, "block/" + path);
-
-		Block block = Registry.register(BuiltInRegistries.BLOCK, id, new SlotBlock(
-				BlockBehaviour.Properties.of()
-						.strength(1.0f)
-						.setId(ResourceKey.create(Registries.BLOCK, id)),
-				model));
-
-		Registry.register(BuiltInRegistries.ITEM, id, new PolymerBlockItem(
-				block,
-				new Item.Properties()
-						.useBlockDescriptionPrefix()
-						.setId(ResourceKey.create(Registries.ITEM, id))));
-
-		IDS.add(path);
-	}
-
-	private static int readCount() {
-		try {
-			return Files.exists(COUNT_FILE) ? Integer.parseInt(Files.readString(COUNT_FILE).trim()) : DEFAULT_COUNT;
-		} catch (IOException | NumberFormatException error) {
-			throw new IllegalStateException("Can't read " + COUNT_FILE, error);
-		}
-	}
-
-	private static final class SlotBlock extends Block implements PolymerTexturedBlock {
-		private final BlockState polymerState;
-
-		SlotBlock(Properties properties, Identifier model) {
-			super(properties);
-			this.polymerState = PolymerBlockResourceUtils.requestBlock(BlockModelType.FULL_BLOCK, PolymerBlockModel.of(model));
-			if (this.polymerState == null) {
-				throw new IllegalStateException("No free FULL_BLOCK slots for " + model);
+		List<Block> machines = new ArrayList<>();
+		for (SlotFamily family : SlotFamily.values()) {
+			for (int i = 0; i < family.count(); i++) {
+				Block block = registerBlock("s%04d".formatted(family.firstId() + i), family);
+				if (family == SlotFamily.MACHINE) {
+					machines.add(block);
+				}
 			}
 		}
+		machineEntityType = Registry.register(BuiltInRegistries.BLOCK_ENTITY_TYPE, id("machine"),
+				FabricBlockEntityTypeBuilder.create(SlotBlockEntity::new, machines.toArray(Block[]::new)).build());
+		PolymerBlockUtils.registerBlockEntity(machineEntityType);
 
-		@Override
-		public BlockState getPolymerBlockState(BlockState state, @Nullable PacketContext context) {
-			return this.polymerState;
+		for (int i = 0; i < ITEM_COUNT; i++) {
+			registerItem("i%04d".formatted(FIRST_ITEM_ID + i));
 		}
+	}
+
+	private static Block registerBlock(String path, SlotFamily family) {
+		Identifier id = id(path);
+		Identifier model = id("block/" + path);
+		var properties = family.properties().setId(ResourceKey.create(Registries.BLOCK, id));
+		Block block = family == SlotFamily.MACHINE
+				? new MachineSlotBlock(properties, family, model, path)
+				: new SlotBlock(properties, family, model, path);
+		Registry.register(BuiltInRegistries.BLOCK, id, block);
+		Registry.register(BuiltInRegistries.ITEM, id, new PolymerBlockItem(
+				block,
+				new Item.Properties().useBlockDescriptionPrefix().setId(ResourceKey.create(Registries.ITEM, id))));
+		BLOCK_IDS.add(path);
+		return block;
+	}
+
+	private static void registerItem(String path) {
+		Identifier id = id(path);
+		Registry.register(BuiltInRegistries.ITEM, id,
+				new SlotItem(new Item.Properties().setId(ResourceKey.create(Registries.ITEM, id)), path));
+		ITEM_IDS.add(path);
+	}
+
+	private static Identifier id(String path) {
+		return Identifier.fromNamespaceAndPath(Conduit.NAMESPACE, path);
 	}
 }

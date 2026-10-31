@@ -14,3 +14,17 @@ rootProject.name = 'living-mod'
 include 'conduit'
 include 'companion'
 include 'sample-module'
+
+// Each feature bundle's Java modules are their own project, so they compile separately and in parallel.
+def features = file('genesis/features')
+if (features.isDirectory()) {
+	features.eachDir { feature ->
+		['server', 'client'].each { side ->
+			if (new File(feature, "${side}/src").isDirectory()) {
+				def name = ":feature-${feature.name}-${side}"
+				include name
+				project(name).projectDir = new File(feature, side)
+			}
+		}
+	}
+}

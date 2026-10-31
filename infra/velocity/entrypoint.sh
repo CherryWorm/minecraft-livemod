@@ -4,7 +4,9 @@ cd /data
 
 mkdir -p plugins/bStats plugins/velocityreconnect
 cp /opt/velocity/velocityreconnect.yml plugins/velocityreconnect/config.yml
-sed -e "s|@PROXY_ONLINE_MODE@|${PROXY_ONLINE_MODE:-true}|g" /opt/velocity/velocity.toml >velocity.toml
+sed -e "s|@PROXY_ONLINE_MODE@|${PROXY_ONLINE_MODE:-true}|g" \
+    -e "s|@BACKEND@|${BACKEND:-prod:25565}|g" \
+    /opt/velocity/velocity.toml >velocity.toml
 cp /opt/velocity/plugins/*.jar plugins/
 
 # Velocity reports usage to bStats by default. This is a private server, so that's turned off.

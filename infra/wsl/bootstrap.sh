@@ -8,7 +8,7 @@ SERVICE_USER=livingmod
 ROOT_DIR=/srv/livingmod
 
 apt-get update -qq
-apt-get install -y -qq ca-certificates curl gnupg git jq python3 rsync zstd
+apt-get install -y -qq ca-certificates curl gnupg git jq python3 python3-pil rsync zstd
 
 if ! command -v docker >/dev/null; then
   install -m 0755 -d /etc/apt/keyrings

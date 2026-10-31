@@ -4,10 +4,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 runtime="$(pwd)/../runtime"
-mkdir -p "$runtime"/{secrets,velocity,prod,shadow,cache/gradle,cache/home,releases/current,releases/candidate}
+mkdir -p "$runtime"/{secrets,velocity,prod,shadow,shadow-proxy,cache/gradle,cache/home,releases/current,releases/candidate,releases/history,broker,backups}
 runtime=$(cd "$runtime" && pwd)
 
-for name in forwarding rcon; do
+for name in forwarding rcon bridge; do
   file="$runtime/secrets/$name.secret"
   if [[ ! -f "$file" ]]; then
     (umask 077 && head -c 32 /dev/urandom | base64 | tr -d '/+=\n' >"$file")
