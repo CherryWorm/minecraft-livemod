@@ -32,8 +32,9 @@ CREATURES = {"mouse": 5, "toad": 5, "dragon": 8, "snake": 7, "jelly": 6}
 ZOO_SIZE = 150
 CROWD = 60
 MAX_BOOT_SECONDS = 45
+MOVED_PIXELS = 100
 
-WORLD = {"goal": "See how far the models go", "nodes": {
+WORLD ={"goal": "See how far the models go", "nodes": {
     "first_steps": {"stage": "early", "name": "First steps", "requires": [], "opens_with": "", "holds": "Creatures"},
     "machines": {"stage": "mid", "name": "Machines", "requires": ["first_steps"], "opens_with": "fluff", "holds": "The press"},
     "the_end": {"stage": "end", "name": "The end", "requires": ["machines"], "opens_with": "the press", "holds": "The colossus"},
@@ -54,6 +55,22 @@ def report(results, name, passed, detail=""):
     print(f"{'PASS' if passed else 'FAIL'}  {name}  {detail}", flush=True)
     results.append(passed)
     return passed
+
+
+def still_rows(sheet_path):
+    """Which rows of a motion sheet show nothing moving. A pose that doesn't reach the client looks just like this."""
+    with Image.open(sheet_path) as image:
+        sheet = image.convert("L")
+    phases = len(gate_client.FILMED_PHASES)
+    tile = sheet.width // phases
+    still = []
+    for row in range(sheet.height // (tile + 16)):
+        top = row * (tile + 16) + 16
+        frames = [sheet.crop((column * tile, top, (column + 1) * tile, top + tile)) for column in range(phases)]
+        changed = max(sum(ImageChops.difference(frames[0], frame).point(lambda value: 255 if value > 40 else 0).histogram()[255:]) for frame in frames[1:])
+        if changed < MOVED_PIXELS:
+            still.append(row)
+    return still
 
 
 def in_agent(*command):
@@ -317,7 +334,10 @@ def main():
         return results
     print("gate screenshots:", answer.get("screenshots"), flush=True)
     motion = [shot for shot in answer.get("screenshots", []) if "motion_" in shot]
-    report(results, "the gates filmed the new mobs moving on a real client", len(motion) >= 2, str([shot.rsplit("/", 1)[-1] for shot in motion]))
+    report(results, "the gates filmed the new mobs on a real client", len(motion) >= 2, str([shot.rsplit("/", 1)[-1] for shot in motion]))
+    for shot in motion:
+        still = still_rows(pathlib.Path(shot))
+        report(results, f"and they really move in {shot.rsplit('/', 1)[-1]}", not still, f"rows with no movement: {still}")
 
     runtime.REPORTS.mkdir(parents=True, exist_ok=True)
     client = Client(runtime.WORK / "mods", runtime.REPORTS / "m11-client.log")

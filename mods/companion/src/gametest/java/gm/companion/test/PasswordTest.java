@@ -14,6 +14,7 @@ import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.dialog.DialogScreen;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
+import net.minecraft.network.chat.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,6 +28,7 @@ public final class PasswordTest implements FabricClientGameTest {
 	private static final Logger LOGGER = LoggerFactory.getLogger("CompanionTest");
 	private static final int TICKS_PER_MINUTE = 20 * 60;
 	private static final int SETTLE_TICKS = 20;
+	private static final int LOGIN_RATE_LIMIT_TICKS = 100;
 
 	@Override
 	public void runTest(ClientGameTestContext context) {
@@ -55,6 +57,7 @@ public final class PasswordTest implements FabricClientGameTest {
 		LOGGER.info("[M13] joined");
 		leave(context);
 
+		context.waitTicks(LOGIN_RATE_LIMIT_TICKS);
 		connect(context);
 		context.waitFor(client -> client.level != null || client.gui.screen() instanceof DialogScreen, 5 * TICKS_PER_MINUTE);
 		boolean asked = context.computeOnClient(client -> client.gui.screen() instanceof DialogScreen);
@@ -74,7 +77,11 @@ public final class PasswordTest implements FabricClientGameTest {
 	}
 
 	private static void leave(ClientGameTestContext context) {
-		context.runOnClient(client -> client.disconnect(new TitleScreen(), false));
+		// Closing the screens alone leaves the connection open, and the proxy then turns the next join away as a duplicate.
+		context.runOnClient(client -> {
+			client.getConnection().getConnection().disconnect(Component.literal("Leaving"));
+			client.disconnect(new TitleScreen(), false);
+		});
 		context.waitFor(client -> client.level == null && client.gui.screen() instanceof TitleScreen, TICKS_PER_MINUTE);
 	}
 

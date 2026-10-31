@@ -251,6 +251,9 @@ services:
       # read-only. This relaxes that, so the lines below offset it: the agent is non-root with no
       # capabilities, so it can't change anything outside its own namespace.
       - systempaths=unconfined
+      # On a host with AppArmor, Docker's default profile refuses the mounts bubblewrap makes, which leaves the agent
+      # with no working shell. The same reasoning covers this, and bubblewrap then confines each command it runs.
+      - apparmor=unconfined
       - no-new-privileges:true
     cap_drop:
       - ALL

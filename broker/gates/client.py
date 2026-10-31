@@ -100,6 +100,8 @@ def film(mobs, log, process):
         # Close enough that it fills the frame, whatever its size, with the camera level with the middle of it.
         height = max(0.5, min(float(definitions.get(f"gm:{slot}", {}).get("height", 1)), 8))
         back = 1 - max(2.2, height * 1.5 + 0.8)
+        # A mob with a death animation stays around while it plays, so it's moved out of shot first.
+        runtime.rcon("shadow", "tp", "@e[type=!player]", "0", "-100", "0", check=False)
         runtime.rcon("shadow", "kill", "@e[type=!player]", check=False)
         runtime.rcon("shadow", "tp", PLAYER, "0", str(round(120 + height / 2 - EYE_HEIGHT, 2)), str(round(back, 2)), "0", "0", check=False)
         runtime.rcon("shadow", "summon", f"gm:{slot}", "0", "120", "1", "{NoAI:1b,PersistenceRequired:1b,Rotation:[150f,0f]}", check=False)

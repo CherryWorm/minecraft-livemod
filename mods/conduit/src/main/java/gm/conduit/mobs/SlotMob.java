@@ -76,6 +76,7 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 	private MobDefinition applied;
 	/** The animation being held still for a photograph, if any. Nothing else plays while it's set. */
 	private String posed;
+	private int posedFrame;
 	private int animatedDeathTicks;
 	/** What its mind decided to do, whose sake it's for, and until when. Null for nothing in particular. */
 	private String mindAction;
@@ -174,7 +175,9 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 		if (current != this.applied && !current.equals(this.applied)) {
 			apply(current);
 		}
-		if (this.tickCount % 2 == 0) {
+		if (this.posed != null) {
+			holdPose();
+		} else if (this.tickCount % 2 == 0) {
 			updateAnimation();
 		}
 		tickMind();
@@ -376,10 +379,19 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 			animator.stopAnimation(this.posed);
 		}
 		this.posed = name;
-		animator.playAnimation(name, 100, true);
-		animator.setAnimationFrame(name, Mth.clamp((int) (fraction * animation.frames().length), 0, animation.frames().length - 1));
-		animator.pauseAnimation(name);
+		this.posedFrame = Mth.clamp((int) (fraction * animation.frames().length), 0, animation.frames().length - 1);
+		holdPose();
 		return true;
+	}
+
+	private void holdPose() {
+		// A paused animation shows nothing at all, only the resting pose, so this one keeps playing and gets put back
+		// at the same frame every tick.
+		Animator animator = animator();
+		if (animator != null) {
+			animator.playAnimation(this.posed, 100);
+			animator.setAnimationFrame(this.posed, this.posedFrame);
+		}
 	}
 
 	@Override
