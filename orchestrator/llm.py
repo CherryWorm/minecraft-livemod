@@ -16,6 +16,7 @@ ROLES = {
     "interviewer": {"model": "claude-opus-5-5", "effort": "low"},
     "direction": {"model": "claude-opus-5-5", "effort": "high"},
     "triage": {"model": "claude-haiku-5-5", "effort": "low"},
+    "dm": {"model": "claude-haiku-5-5", "effort": "low"},
     "watcher": {"model": "claude-haiku-5-5", "effort": "low"},
     "director": {"model": "claude-opus-5-5", "effort": "medium"},
     "builder": {"model": "claude-opus-5-5", "effort": "medium"},

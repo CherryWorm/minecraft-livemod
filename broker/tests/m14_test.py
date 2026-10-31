@@ -335,10 +335,22 @@ def test_interview():
     report("without the go-ahead, it doesn't choose a theme", '"role": "direction"' not in log and not state["direction_chosen"])
 
     start = len(dana.heard)
-    dana.dm("Could the caves have more crystals in them?")
-    report("/dm is still a private line afterwards", dana.wait_for("I've got that", 60, start), dana.heard[start:])
+    dana.dm("Could the caves have more crystals in them? I'd call them Glimmerquartz.")
+    answer = dana.wait_for(r"\[Agent\]", 60, start)
+    report("/dm gets a real answer after the interview too", answer, dana.heard[start:])
     time.sleep(2)
-    report("that's private too", b"crystals" not in bytes(eli.raw))
+    report("that's private too", b"crystals" not in bytes(eli.raw) and b"Glimmerquartz" not in bytes(eli.raw))
+    intents = STATE / "intents.jsonl"
+    report("and the suggestion in it is passed on", intents.exists() and '"player": "Dana"' in intents.read_text(encoding="utf-8"), intents.exists())
+
+    # Again, only what it saved can carry the chat on after this.
+    agent_up()
+    start = len(dana.heard)
+    dana.dm("What did I say I'd call those crystals? Please name it in your reply.")
+    answer = dana.wait_for(r"\[Agent\]", 60, start)
+    report("it follows the conversation, even after a restart", answer and "glimmerquartz" in answer.lower(), answer)
+    time.sleep(2)
+    report("nobody else hears about that either", b"Glimmerquartz" not in bytes(eli.raw))
     dana.leave()
     start = len(eli.heard)
     return eli, start

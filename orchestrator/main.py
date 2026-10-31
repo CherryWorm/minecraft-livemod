@@ -23,6 +23,7 @@ OPENING_NOTE = ("§7Until the first new things arrive, the world is small and sa
                 "with no monsters and no hunger, and nothing can be broken yet.")
 CHAT_BATCH_SECONDS = 20
 WEEKLY_INTENTS_PER_PLAYER = 20
+CHAT_MEMORY = 12  # Enough of a private chat to follow the conversation, without each reply getting more expensive.
 WATCH_SECONDS = 5 * 60
 FEATURE_ID = r"[a-z][a-z0-9_]{1,40}"
 DIRECTION_RESEARCH = 6
@@ -81,7 +82,7 @@ class Agent:
         self.choosing_direction = False
         self.direction_problems = []
         self.state = {"direction_chosen": False, "briefs": {}, "released": [], "border_open": False,
-                      "intents": {}, "intent_count": 0, "tuner_saw": 0, "handled_intents": [], "interviews": {}}
+                      "intents": {}, "intent_count": 0, "tuner_saw": 0, "handled_intents": [], "interviews": {}, "private_chats": {}}
         if OPENING.exists():
             self.state.update(json.loads(OPENING.read_text(encoding="utf-8")))
         self.interviews = {player: voice.Interview(self.governor, player, saved) for player, saved in self.state["interviews"].items()}
@@ -137,9 +138,30 @@ class Agent:
         if interview is not None:
             await self.interview_turn(player, interview, text)
         elif player in self.state["briefs"]:
-            await self.apply_triage(await voice.triage(self.governor, [{"player": player, "text": text}]), only_to=player)
+            await self.private_turn(player, text)
         else:
             await self.start_interview(player)
+
+    async def private_turn(self, player, text):
+        chat = self.state["private_chats"].setdefault(player, [])
+        chat.append({"from": "player", "text": text})
+        del chat[:-CHAT_MEMORY]
+        in_character = self.state["direction_chosen"]
+        try:
+            result = await voice.private_reply(self.governor, chat, self.state["released"], in_character)
+        except Exception as error:  # noqa: BLE001 - they're waiting for an answer, so even a failed call needs one
+            print(f"a private reply failed: {error}", flush=True)
+            result = None
+        reply = voice.guard(result.get("reply"), self.briefs()) if result else None
+        if reply:
+            chat.append({"from": "you", "text": reply})
+        self.save()
+        if result:
+            self.record_intents([{**intent, "player": player} for intent in result.get("intents", [])])
+        if not reply:
+            await self.tell(player, "§7Sorry, I couldn't answer that just now. Please try again.", reply_click=True)
+        else:
+            await self.tell(player, voice.styled(reply) if in_character else AGENT_LABEL + reply, reply_click=True)
 
     async def interview_turn(self, player, interview, text):
         reply = await interview.turn(text)
@@ -284,11 +306,18 @@ class Agent:
             except Exception as error:  # noqa: BLE001
                 print(f"triage failed: {error}", flush=True)
 
-    async def apply_triage(self, result, only_to=None):
+    async def apply_triage(self, result):
+        self.record_intents(result.get("intents", []))
+        # Nobody's met the character until the direction exists, so before then there's no one to answer.
+        reply = voice.guard(result.get("reply"), self.briefs()) if self.state["direction_chosen"] else None
+        if reply:
+            await self.bridge.broadcast(voice.styled(reply))
+
+    def record_intents(self, intents):
         week = time.strftime("%Y-%W", time.gmtime())
         counts = self.state["intents"].setdefault(week, {})
         accepted = []
-        for intent in result.get("intents", []):
+        for intent in intents:
             player = intent.get("player", "")
             if intent.get("personal_advantage") or counts.get(player, 0) >= WEEKLY_INTENTS_PER_PLAYER:
                 continue
@@ -303,12 +332,6 @@ class Agent:
             self.save()
             self.tune_wanted.set()
             self.wake_director.set()
-        # Nobody's met the character until the direction exists, so before then there's no one to answer.
-        reply = voice.guard(result.get("reply"), self.briefs()) if self.state["direction_chosen"] else None
-        if only_to:
-            await self.tell(only_to, voice.styled(reply) if reply else "§7Thanks, I've got that.")
-        elif reply:
-            await self.bridge.broadcast(voice.styled(reply))
 
     # Tuning -----------------------------------------------------------------------------------------
 

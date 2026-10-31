@@ -67,6 +67,20 @@ TRIAGE_SCHEMA = {
     "required": ["intents", "reply"],
 }
 
+PRIVATE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "reply": {"type": "string"},
+        "intents": {"type": "array", "items": {"type": "object", "properties": {
+            "wants": {"type": "string"}, "personal_advantage": {"type": "boolean"}},
+            "required": ["wants", "personal_advantage"]}},
+    },
+    "required": ["reply", "intents"],
+}
+
+NO_CHARACTER_YET = ("You don't have one yet, because this world's theme hasn't been chosen. Speak plainly as the AI that's going to build it, "
+                    "be friendly, and don't make up a theme.")
+
 WATCHER_SCHEMA = {
     "type": "object",
     "properties": {
@@ -89,6 +103,10 @@ def guard(text, briefs):
                 if " ".join(words[start:start + 5]) in lowered:
                     return None
     return text[:256]
+
+
+def conversation(entries):
+    return [llm.untrusted("player_message" if entry["from"] == "player" else "you_said", entry["text"]) for entry in entries]
 
 
 class Interview:
@@ -126,8 +144,7 @@ class Interview:
         return await self._ask("This is the last exchange. Finish now." if turns >= self.LAST_TURN else "Carry on the conversation.")
 
     async def _ask(self, instruction):
-        lines = [llm.untrusted("player_message" if entry["from"] == "player" else "you_said", entry["text"]) for entry in self.transcript]
-        result = await llm.ask(self.governor, "interviewer", "\n".join([*lines, instruction]), schema=INTERVIEW_SCHEMA, max_turns=3)
+        result = await llm.ask(self.governor, "interviewer", "\n".join([*conversation(self.transcript), instruction]), schema=INTERVIEW_SCHEMA, max_turns=3)
         data = result.structured if isinstance(result.structured, dict) else None
         if result.is_error or data is None:
             return None
@@ -169,6 +186,14 @@ async def triage(governor, messages):
     body = "\n".join(llm.untrusted("player_message", f"{item['player']}: {item['text']}") for item in messages)
     result = await llm.ask(governor, "triage", body, system=llm.prompt_text("triage") + persona(), schema=TRIAGE_SCHEMA, max_turns=3)
     return result.structured if isinstance(result.structured, dict) and not result.is_error else {"intents": [], "reply": None}
+
+
+async def private_reply(governor, chat, released, in_character):
+    """Answers someone's /dm once their interview is over. Returns None if the call failed. The chat holds only that one player's messages."""
+    system = llm.prompt_text("dm") + (persona() if in_character else NO_CHARACTER_YET)
+    prompt = "\n".join(conversation(chat)) + "\n\nReleased so far: " + (", ".join(released) or "nothing yet")
+    result = await llm.ask(governor, "dm", prompt, system=system, schema=PRIVATE_SCHEMA, max_turns=3)
+    return result.structured if isinstance(result.structured, dict) and not result.is_error else None
 
 
 class Watcher:
