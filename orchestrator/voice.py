@@ -9,11 +9,13 @@ import pathlib
 import re
 import time
 
-from orchestrator import llm
+from orchestrator import llm, world_index
 from orchestrator.governor import Governor
 
 BIBLE = pathlib.Path("/workspace/repo/bible")
+FEATURES = pathlib.Path("/workspace/repo/mods/genesis/features")
 STATE = pathlib.Path("/workspace/state")
+HELP_LIMIT = 400  # A real answer needs more room than a remark, and chat wraps it.
 
 INTERVIEW_SCHEMA = {
     "type": "object",
@@ -91,7 +93,7 @@ WATCHER_SCHEMA = {
 }
 
 
-def guard(text, briefs):
+def guard(text, briefs, limit=256):
     """Blocks a message that repeats a distinctive phrase from someone's private interview answers."""
     if not text:
         return None
@@ -102,7 +104,7 @@ def guard(text, briefs):
             for start in range(0, max(0, len(words) - 4)):
                 if " ".join(words[start:start + 5]) in lowered:
                     return None
-    return text[:256]
+    return text[:limit]
 
 
 def conversation(entries):
@@ -182,16 +184,20 @@ def styled(text):
     return f"§d{persona_name()}§r: {text}"
 
 
+def guide():
+    return "\n\nThe guide to everything that's out so far:\n" + world_index.player_guide(FEATURES)
+
+
 async def triage(governor, messages):
     body = "\n".join(llm.untrusted("player_message", f"{item['player']}: {item['text']}") for item in messages)
-    result = await llm.ask(governor, "triage", body, system=llm.prompt_text("triage") + persona(), schema=TRIAGE_SCHEMA, max_turns=3)
+    result = await llm.ask(governor, "triage", body, system=llm.prompt_text("triage") + persona() + guide(), schema=TRIAGE_SCHEMA, max_turns=3)
     return result.structured if isinstance(result.structured, dict) and not result.is_error else {"intents": [], "reply": None}
 
 
-async def private_reply(governor, chat, released, in_character):
+async def private_reply(governor, chat, in_character, seen=None):
     """Answers someone's /dm once their interview is over. Returns None if the call failed. The chat holds only that one player's messages."""
-    system = llm.prompt_text("dm") + (persona() if in_character else NO_CHARACTER_YET)
-    prompt = "\n".join(conversation(chat)) + "\n\nReleased so far: " + (", ".join(released) or "nothing yet")
+    system = llm.prompt_text("dm") + (persona() if in_character else NO_CHARACTER_YET) + guide()
+    prompt = "\n".join(conversation(chat)) + "\n\nWhat this player has so far:\n" + llm.untrusted("progress", json.dumps(seen or {}))
     result = await llm.ask(governor, "dm", prompt, system=system, schema=PRIVATE_SCHEMA, max_turns=3)
     return result.structured if isinstance(result.structured, dict) and not result.is_error else None
 
@@ -201,7 +207,7 @@ class Watcher:
 
     PER_PLAYER_COOLDOWN = 10 * 60
     PER_HOUR_LIMIT = 6
-    NO_PROGRESS_SECONDS = 45 * 60
+    NO_PROGRESS_SECONDS = 20 * 60
 
     def __init__(self, governor):
         self.governor = governor
@@ -256,14 +262,15 @@ class Watcher:
                 return f"{player} has died {len(recent)} times in the last few minutes, most recently from {event.get('cause')}"
             return None
         if kind == "stuck":
-            return f"{player} hasn't found anything new for a while. Not yet worked out by anyone: {', '.join(event.get('undiscovered', [])) or 'nothing'}"
+            return (f"{player} hasn't found anything new for a while. They have: {', '.join(event.get('found', [])) or 'nothing from the guide yet'}. "
+                    f"Not yet worked out by anyone: {', '.join(event.get('undiscovered', [])) or 'nothing'}")
         if kind == "discovery":
             return f"{player} just found something for the first time: {event.get('what')}"
         if kind == "milestone":
             return f"The players reached a milestone: {event.get('what')}"
         return None
 
-    def check_stuck(self, player, known_count, undiscovered):
+    def check_stuck(self, player, known_count, undiscovered, found=()):
         """Returns an event if this player has gone a long time without finding anything new."""
         now = time.time()
         count, since = self.progress.get(player, (-1, now))
@@ -273,7 +280,7 @@ class Watcher:
         if now - since < self.NO_PROGRESS_SECONDS:
             return None
         self.progress[player] = (known_count, now)
-        return {"event": "stuck", "player": player, "undiscovered": undiscovered[:5]}
+        return {"event": "stuck", "player": player, "undiscovered": undiscovered[:5], "found": list(found)}
 
     def allowed(self, player):
         now = time.time()
@@ -284,14 +291,13 @@ class Watcher:
             return False
         return now - self.last_spoke.get(player, 0) >= self.PER_PLAYER_COOLDOWN
 
-    async def consider(self, event, released, briefs):
+    async def consider(self, event, briefs):
         """Returns (text, audience) if the character should speak, otherwise None."""
         reason = self.trigger_for(event)
         player = event.get("player", "")
         if reason is None or not self.allowed(player):
             return None
-        prompt = llm.untrusted("event", reason) + "\n\nReleased so far: " + (", ".join(released) or "nothing yet")
-        result = await llm.ask(self.governor, "watcher", prompt, system=llm.prompt_text("watcher") + persona(),
+        result = await llm.ask(self.governor, "watcher", llm.untrusted("event", reason), system=llm.prompt_text("watcher") + persona() + guide(),
                                schema=WATCHER_SCHEMA, max_turns=3)
         data = result.structured if isinstance(result.structured, dict) and not result.is_error else None
         if not data or not data.get("say"):

@@ -22,8 +22,11 @@ class PrivateChat(unittest.IsolatedAsyncioTestCase):
         self.folder = pathlib.Path(folder.name)
         (self.folder / "persona.md").write_text("A very old lighthouse keeper.", encoding="utf-8")
         (self.folder / "persona_name.txt").write_text("Keeper", encoding="utf-8")
+        feature = self.folder / "features" / "glow_moss"
+        feature.mkdir(parents=True)
+        (feature / "feature.json").write_text(json.dumps({"summary": "Moss that glows.", "items": {"moss": {"display": "Glow Moss"}}}), encoding="utf-8")
         for patcher in (mock.patch.object(main, "STATE", self.folder), mock.patch.object(main, "OPENING", self.folder / "opening.json"),
-                        mock.patch.object(voice, "BIBLE", self.folder)):
+                        mock.patch.object(voice, "BIBLE", self.folder), mock.patch.object(voice, "FEATURES", self.folder / "features")):
             patcher.start()
             self.addCleanup(patcher.stop)
         self.ask = mock.AsyncMock(return_value=answer())
@@ -35,6 +38,9 @@ class PrivateChat(unittest.IsolatedAsyncioTestCase):
         self.agent.governor = mock.Mock()
         self.agent.interviews = {}
         self.agent.tell = mock.AsyncMock()
+        self.agent.bridge = mock.Mock()
+        self.agent.bridge.call = mock.AsyncMock(return_value={"online": {"Dana": {"found": ["Iron Dust"], "known": ["Dusting"]}, "Eli": {"found": ["Eli's Thing"], "known": []}},
+                                                              "undiscovered": ["Deep Lore"]})
         self.agent.tune_wanted = asyncio.Event()
         self.agent.wake_director = asyncio.Event()
         self.agent.state = {"direction_chosen": True, "briefs": {"Dana": BRIEF, "Eli": BRIEF}, "released": ["Glow Moss"],
@@ -54,8 +60,25 @@ class PrivateChat(unittest.IsolatedAsyncioTestCase):
         await self.agent.on_dm("Dana", "hello?")
         self.assertEqual(self.told(), ["§dKeeper§r: Hello, traveller."])
         self.assertIn("lighthouse keeper", self.ask.await_args.kwargs["system"])
-        self.assertIn("Glow Moss", self.prompt())
         self.assertEqual(self.ask.await_args.args[1], "dm")
+
+    async def test_it_knows_what_is_out_and_what_they_have(self):
+        await self.agent.on_dm("Dana", "what should I do?")
+        self.assertIn("Moss that glows.", self.ask.await_args.kwargs["system"])
+        self.assertIn("Iron Dust", self.prompt())
+        self.assertIn("Deep Lore", self.prompt())
+        self.assertNotIn("Eli's Thing", self.prompt())
+
+    async def test_it_still_answers_if_the_game_cannot_say_what_they_have(self):
+        self.agent.bridge.call.side_effect = ConnectionError("no")
+        await self.agent.on_dm("Dana", "hello?")
+        self.assertEqual(self.told(), ["§dKeeper§r: Hello, traveller."])
+
+    async def test_a_real_answer_has_room(self):
+        self.ask.return_value = answer("word " * 70)
+        await self.agent.on_dm("Dana", "tell me about moss")
+        self.assertGreater(len(self.told()[0]), 300)
+        self.assertLessEqual(len(self.agent.state["private_chats"]["Dana"][-1]["text"]), voice.HELP_LIMIT)
 
     async def test_before_there_is_a_character_it_speaks_plainly(self):
         self.agent.state["direction_chosen"] = False

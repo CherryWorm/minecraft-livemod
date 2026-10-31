@@ -22,7 +22,7 @@ Rules that keep this world fair and fun:
 - Every recipe must declare how it's found, following the discovery plan.
 - Match vanilla's power curve for the tier it belongs to. Before the endgame, things should feel exciting because they're new and interesting, not because they're overpowered.
 - What players already have is left alone unless there's a clear reason or feedback, which you state in `changes_reached`. `world_index` marks what they have.
-- Players discover things themselves, so no display name or text should explain more than it needs to.
+- Players discover things themselves, so display names shouldn't give away more than they need to. Once someone has found or learned something, though, its text should say plainly what it's for, how to use it and where to get more, with real depths and biomes, so nobody's left guessing.
 - Minecraft here is 26.3, and many APIs were renamed recently. Use the `java_api` tool to check real signatures rather than trusting memory.
 
 You can look things up with the `research` tool when the answer would change what you make, such as how something real works or how another mod handled an idea. Each new question can take a minute, so skip it when you already know enough, and use `docs/`, `/reference` and `java_api` for anything about this engine. Answers from earlier questions are in `/workspace/research`.

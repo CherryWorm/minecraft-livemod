@@ -148,11 +148,11 @@ class Agent:
         del chat[:-CHAT_MEMORY]
         in_character = self.state["direction_chosen"]
         try:
-            result = await voice.private_reply(self.governor, chat, self.state["released"], in_character)
+            result = await voice.private_reply(self.governor, chat, in_character, await self.what_they_have(player))
         except Exception as error:  # noqa: BLE001 - they're waiting for an answer, so even a failed call needs one
             print(f"a private reply failed: {error}", flush=True)
             result = None
-        reply = voice.guard(result.get("reply"), self.briefs()) if result else None
+        reply = voice.guard(result.get("reply"), self.briefs(), voice.HELP_LIMIT) if result else None
         if reply:
             chat.append({"from": "you", "text": reply})
         self.save()
@@ -163,13 +163,21 @@ class Agent:
         else:
             await self.tell(player, voice.styled(reply) if in_character else AGENT_LABEL + reply, reply_click=True)
 
+    async def what_they_have(self, player):
+        """So advice can be about their next step. An answer without it still beats no answer."""
+        try:
+            progress = await self.bridge.call("progress")
+        except (RuntimeError, ConnectionError, TimeoutError):
+            return {}
+        return {**progress.get("online", {}).get(player, {}), "nobody_has_worked_out": progress.get("undiscovered", [])}
+
     async def interview_turn(self, player, interview, text):
         reply = await interview.turn(text)
         self.save()
         # They're waiting for an answer, so even a failed call needs one.
         await self.tell(player, AGENT_LABEL + (reply or "§7Sorry, I didn't catch that. Could you say it again?"), reply_click=True)
         if interview.finished:
-            await self.tell(player, "§7That's all I needed, thanks. If you ever want to tell me anything else privately, §f/dm§7 still works.")
+            await self.tell(player, "§7That's all I needed, thanks. If you get stuck or want to tell me anything else, §f/dm§7 still works, and I'll answer.")
             self.state["briefs"][player] = interview.brief
             del self.interviews[player]
             self.save()
@@ -263,7 +271,7 @@ class Agent:
         # Nobody's met the character until the direction exists, so before then there's no one to speak.
         if not self.state["direction_chosen"]:
             return
-        said = await self.watcher.consider(event, self.state["released"], self.briefs())
+        said = await self.watcher.consider(event, self.briefs())
         if said:
             text, audience = said
             if audience == "broadcast":
@@ -309,7 +317,7 @@ class Agent:
     async def apply_triage(self, result):
         self.record_intents(result.get("intents", []))
         # Nobody's met the character until the direction exists, so before then there's no one to answer.
-        reply = voice.guard(result.get("reply"), self.briefs()) if self.state["direction_chosen"] else None
+        reply = voice.guard(result.get("reply"), self.briefs(), voice.HELP_LIMIT) if self.state["direction_chosen"] else None
         if reply:
             await self.bridge.broadcast(voice.styled(reply))
 
@@ -504,7 +512,7 @@ class Agent:
             except (RuntimeError, ConnectionError, TimeoutError):
                 continue
             for player, seen in progress.get("online", {}).items():
-                event = self.watcher.check_stuck(player, len(seen["found"]) + len(seen["known"]), progress.get("undiscovered", []))
+                event = self.watcher.check_stuck(player, len(seen["found"]) + len(seen["known"]), progress.get("undiscovered", []), seen["found"])
                 if event:
                     await self.speak_if_worthwhile(event, player)
 
