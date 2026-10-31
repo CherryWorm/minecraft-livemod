@@ -21,6 +21,7 @@ Rules that keep this world fair and fun:
 - Blocks and items use slots. Never invent IDs. Refer to your own content with `$block:name` and `$item:name`.
 - Every recipe must declare how it's found, following the discovery plan.
 - Match vanilla's power curve for the tier it belongs to. Before the endgame, things should feel exciting because they're new and interesting, not because they're overpowered.
+- Never change how the game's own items, blocks or mechanics work, and never add recipes that make vanilla's own things cheaper. Everything you add is this world's own content, and an improvement on something vanilla is an upgraded version players have to earn. If your spec asks for anything else, build that upgraded version instead.
 - What players already have is left alone unless there's a clear reason or feedback, which you state in `changes_reached`. `world_index` marks what they have.
 - Players discover things themselves, so display names shouldn't give away more than they need to. Once someone has found or learned something, though, its text should say plainly what it's for, how to use it and where to get more, with real depths and biomes, so nobody's left guessing.
 - Minecraft here is 26.3, and many APIs were renamed recently. Use the `java_api` tool to check real signatures rather than trusting memory.

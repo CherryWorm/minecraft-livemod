@@ -9,7 +9,7 @@ import pathlib
 import re
 import time
 
-from orchestrator import llm, world_index
+from orchestrator import feedback, llm, world_index
 from orchestrator.governor import Governor
 
 BIBLE = pathlib.Path("/workspace/repo/bible")
@@ -53,7 +53,8 @@ DIRECTION_SCHEMA = {
             "requires": {"type": "array", "items": {"type": "string"}}, "opens_with": {"type": "string"}, "holds": {"type": "string"}},
             "required": ["id", "stage", "name", "requires", "opens_with", "holds"]}},
         "first_features": {"type": "array", "items": {"type": "object", "properties": {
-            "id": {"type": "string"}, "node": {"type": "string"}, "spec": {"type": "string"}}, "required": ["id", "node", "spec"]}},
+            "id": {"type": "string"}, "node": {"type": "string"}, "spec": {"type": "string"}, "category": {"type": "string", "enum": feedback.CATEGORIES}},
+            "required": ["id", "node", "spec", "category"]}},
     },
     "required": ["theme_md", "persona_name", "persona_md", "discovery_md", "discovery_scope", "tease", "goal", "progression", "first_features"],
 }

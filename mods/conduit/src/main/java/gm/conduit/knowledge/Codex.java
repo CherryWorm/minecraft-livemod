@@ -2,9 +2,11 @@ package gm.conduit.knowledge;
 
 import com.mojang.brigadier.Command;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.minecraft.ChatFormatting;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.protocol.game.ClientboundOpenBookPacket;
 import net.minecraft.network.protocol.game.ClientboundSetPlayerInventoryPacket;
 import net.minecraft.server.level.ServerPlayer;
@@ -45,8 +47,12 @@ public final class Codex {
 		for (KnowledgePlan.Entry entry : known) {
 			List<String> parts = split(entry.text());
 			for (int index = 0; index < parts.size(); index++) {
-				String heading = index == 0 ? "§l" + entry.title() + "§r\n\n" : "";
-				pages.add(Filterable.passThrough(Component.literal(heading + parts.get(index))));
+				// A real style, because a §r here resets to white, which can't be read on a book's page.
+				MutableComponent page = Component.empty();
+				if (index == 0) {
+					page.append(Component.literal(entry.title()).withStyle(ChatFormatting.BOLD)).append("\n\n");
+				}
+				pages.add(Filterable.passThrough(page.append(parts.get(index))));
 			}
 		}
 		ItemStack book = new ItemStack(Items.WRITTEN_BOOK);

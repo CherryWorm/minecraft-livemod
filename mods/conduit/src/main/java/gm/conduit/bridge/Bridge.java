@@ -84,6 +84,16 @@ public final class Bridge {
 					return Command.SINGLE_SUCCESS;
 				}))));
 
+		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> dispatcher.register(Commands.literal("plan").executes(context -> {
+			ServerPlayer player = context.getSource().getPlayerOrException();
+			if (CLIENTS.isEmpty() || KillSwitch.on()) {
+				player.sendSystemMessage(literal("§7The agent isn't listening right now. Try again later."));
+			} else {
+				emit(event("plan", player));
+			}
+			return Command.SINGLE_SUCCESS;
+		})));
+
 		ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
 			if (entity instanceof ServerPlayer player) {
 				JsonObject death = event("death", player);

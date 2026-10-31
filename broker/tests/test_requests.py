@@ -82,7 +82,7 @@ class Base(unittest.IsolatedAsyncioTestCase):
 class Sorting(Base):
     async def test_a_change_only_counts_if_something_really_changed(self):
         self.asked("copper is too rare")
-        self.answers("sorter", {"decisions": [{"numbers": [1], "action": "changed"}]})
+        self.answers("director_quick", {"decisions": [{"numbers": [1], "action": "changed"}]})
         await self.agent.sort_requests()
         self.assertIsNone(self.status(1))
         self.assertEqual(self.told(), [])
@@ -91,7 +91,7 @@ class Sorting(Base):
         self.asked("skip the night with half the players")
 
         async def respond(governor, name, prompt, **options):
-            if name == "sorter":
+            if name == "director_quick":
                 self.agent.workshop.changes += 1
                 return result({"decisions": [{"numbers": [1], "action": "changed"}]})
             self.assertIn('"outcome": "done"', prompt)
@@ -104,9 +104,9 @@ class Sorting(Base):
     async def test_a_small_ask_goes_to_the_front_for_a_small_builder(self):
         self.agent.queue.append({"id": "big_thing", "node": "e_one", "spec": "big"})
         self.asked("use for core samples", "core samples are useless")
-        self.answers("sorter", {"decisions": [{"numbers": [1, 2], "action": "small", "id": "sample_use", "node": "e_one", "spec": "Give them a use."}]})
+        self.answers("director_quick", {"decisions": [{"numbers": [1, 2], "action": "small", "id": "sample_use", "node": "e_one", "spec": "Give them a use.", "title": "a use for core samples"}]})
         await self.agent.sort_requests()
-        self.assertEqual(self.agent.queue[0], {"id": "sample_use", "node": "e_one", "spec": "Give them a use.", "answers": [1, 2], "small": True})
+        self.assertEqual(self.agent.queue[0], {"id": "sample_use", "node": "e_one", "spec": "Give them a use.", "title": "a use for core samples", "answers": [1, 2], "small": True})
         self.assertEqual((self.status(1), self.status(2)), (feedback.BUILDING, feedback.BUILDING))
         self.assertEqual(len(self.told()), 1, "one message for both")
 
@@ -115,7 +115,7 @@ class Sorting(Base):
         seen = []
 
         async def respond(governor, name, prompt, **options):
-            if name == "sorter":
+            if name == "director_quick":
                 return result({"decisions": [{"numbers": [1], "action": "declined", "why": "Boats stay as they are."}]})
             seen.append(prompt)
             return result({"reply": "the news"})
@@ -129,13 +129,13 @@ class Sorting(Base):
 
     async def test_a_refusal_with_no_reason_goes_to_the_director(self):
         self.asked("faster boats")
-        self.answers("sorter", {"decisions": [{"numbers": [1], "action": "declined"}]})
+        self.answers("director_quick", {"decisions": [{"numbers": [1], "action": "declined"}]})
         await self.agent.sort_requests()
         self.assertIsNone(self.status(1))
 
     async def test_a_small_job_with_a_bad_id_or_node_goes_to_the_director(self):
         self.asked("one", "two")
-        self.answers("sorter", {"decisions": [{"numbers": [1], "action": "small", "id": "../../etc", "node": "e_one", "spec": "x"},
+        self.answers("director_quick", {"decisions": [{"numbers": [1], "action": "small", "id": "../../etc", "node": "e_one", "spec": "x"},
                                               {"numbers": [2], "action": "small", "id": "fine", "node": "nowhere", "spec": "x"}]})
         await self.agent.sort_requests()
         self.assertEqual(self.agent.queue, [])
@@ -143,7 +143,7 @@ class Sorting(Base):
 
     async def test_a_number_it_was_not_given_is_ignored(self):
         self.asked("one")
-        self.answers("sorter", {"decisions": [{"numbers": [99], "action": "small", "id": "fine", "node": "e_one", "spec": "x"}]})
+        self.answers("director_quick", {"decisions": [{"numbers": [99], "action": "small", "id": "fine", "node": "e_one", "spec": "x"}]})
         await self.agent.sort_requests()
         self.assertEqual(self.agent.queue, [])
 
@@ -156,7 +156,7 @@ class Sorting(Base):
 
     async def test_it_sees_each_request_once(self):
         self.asked("one")
-        self.answers("sorter", {"decisions": []})
+        self.answers("director_quick", {"decisions": []})
         await self.agent.sort_requests()
         await self.agent.sort_requests()
         self.assertEqual(self.ask.await_count, 1)
@@ -196,6 +196,31 @@ class Directing(Base):
         self.agent.building["also_same"] = {"id": "also_same"}
         self.plan_answer([{"id": "same", "node": "e_one", "spec": "y"}, {"id": "also_same", "node": "e_one", "spec": "y"}])
         self.assertEqual(await self.agent.next_features(), [])
+
+    async def test_most_of_what_gets_built_comes_from_the_plan(self):
+        self.asked("one", "two", "three")
+        self.plan_answer([{"id": "one", "node": "e_one", "spec": "x", "answers": [1]}, {"id": "own_idea", "node": "e_one", "spec": "x"}, {"id": "two", "node": "e_one", "spec": "x", "answers": [2]},
+                          {"id": "three", "node": "e_one", "spec": "x", "answers": [3]}, {"id": "another_own_idea", "node": "e_one", "spec": "x"}])
+        chosen = [feature["id"] for feature in await self.agent.next_features()]
+        self.assertEqual(chosen, ["one", "own_idea", "two", "another_own_idea"])
+        self.assertEqual((self.status(1), self.status(2), self.status(3)), (feedback.BUILDING, feedback.BUILDING, None), "the third comes back next time")
+
+    async def test_every_decision_is_made_knowing_the_others(self):
+        self.asked("faster boats", "a minimap")
+        self.agent.requests.mark(1, feedback.DECLINED, why="Boats stay as they are.")
+        self.plan_answer()
+        await self.agent.next_features()
+        director = next(call for call in self.ask.await_args_list if call.args[1] == "director")
+        self.assertIn("Boats stay as they are.", director.args[2])
+
+        self.agent.state["sorted_up_to"] = 1
+        self.answers("director_quick", {"decisions": []})
+        self.ask.reset_mock()
+        await self.agent.sort_requests()
+        quick = self.ask.await_args_list[0]
+        self.assertIn("Boats stay as they are.", quick.args[2], "the fast look sees them too")
+        self.assertIn("You direct what gets built", quick.kwargs["system"], "and it has the same rules")
+        self.assertNotIn("Dana", quick.args[2], "who asked doesn't come into it")
 
     async def test_a_decision_is_kept_and_they_hear_why(self):
         self.asked("a nuke", "a boat", "a map")
@@ -240,6 +265,36 @@ class Directing(Base):
         await self.agent.plan()
         self.assertEqual(self.agent.state["director_saw"], 0)
         self.assertEqual(self.status(1), None)
+
+
+class ThePlan(Base):
+    async def test_it_spoils_nothing_about_the_world(self):
+        self.agent.tell = mock.AsyncMock()
+        self.agent.building["grimble"] = {"id": "grimble", "node": "e_one", "category": "mob", "spec": "A creature called Grimble."}
+        self.agent.queue.extend([{"id": "secret_ship", "node": "e_one", "category": "boss fight", "spec": "A flying ship."}, {"id": "secret", "node": "e_one", "category": "a Flying Ship", "spec": "x"},
+                                 {"id": "unlabelled", "node": "nowhere", "spec": "x"}, {"id": "minimap", "node": "e_one", "small": True, "title": "a minimap", "spec": "A HUD."}])
+        await self.agent.show_plan("Dana")
+        said = "\n".join(call.args[1] for call in self.agent.tell.await_args_list)
+        self.assertIn("Being built right now: §fearly game mob", said)
+        self.assertIn("early game boss fight, early game, something new, a minimap", said)
+        for secret in ("Grimble", "grimble", "Flying", "flying", "secret"):
+            self.assertNotIn(secret, said)
+
+    async def test_a_long_queue_is_cut_short(self):
+        self.agent.tell = mock.AsyncMock()
+        self.agent.queue.extend({"id": f"thing{number}", "node": "e_one", "category": "item"} for number in range(main.PLAN_SHOWN + 3))
+        await self.agent.show_plan("Dana")
+        self.assertIn("and 3 more", self.agent.tell.await_args_list[1].args[1])
+
+    async def test_an_empty_plan_says_so(self):
+        self.agent.tell = mock.AsyncMock()
+        await self.agent.show_plan("Dana")
+        self.assertIn("Being built right now: §fnothing", self.agent.tell.await_args_list[0].args[1])
+
+    def test_every_category_reads_properly(self):
+        graph = progression.read(main.PROGRESSION)
+        for category in feedback.CATEGORIES:
+            self.assertEqual(feedback.describe({"node": "e_one", "category": category}, graph), f"early game {category}")
 
 
 class WhenToPlan(Base):

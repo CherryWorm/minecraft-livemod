@@ -30,6 +30,9 @@ DIRECTION_RESEARCH = 6
 DIRECTOR_RESEARCH = 3
 DIRECTOR_REST_SECONDS = 30 * 60
 FEEDBACK_PLAN_SECONDS = 10 * 60  # How long new requests can wait for the director, however much is being built.
+REQUEST_FEATURES_PER_PLAN = 2  # However many people ask, most of what gets built comes from the world's own plan.
+PLAN_SHOWN = 12
+DECISIONS_REMEMBERED = 150
 STOP_AFTER_RELEASES = os.environ.get("AGENT_STOP_AFTER_RELEASES")  # Lets a test spend a known amount.
 
 STAGES_TEMPLATE = """\
@@ -54,8 +57,8 @@ DIRECTOR_SCHEMA = {
     "type": "object",
     "properties": {
         "features": {"type": "array", "items": {"type": "object", "properties": {
-            "id": {"type": "string"}, "node": {"type": "string"}, "spec": {"type": "string"},
-            "answers": {"type": "array", "items": {"type": "integer"}}}, "required": ["id", "node", "spec"]}},
+            "id": {"type": "string"}, "node": {"type": "string"}, "spec": {"type": "string"}, "category": {"type": "string", "enum": feedback.CATEGORIES},
+            "answers": {"type": "array", "items": {"type": "integer"}}}, "required": ["id", "node", "spec", "category"]}},
         "decisions": {"type": "array", "items": {"type": "object", "properties": {
             "number": {"type": "integer"}, "outcome": {"type": "string", "enum": [feedback.LATER, feedback.DECLINED, feedback.NEEDS_OWNER, "already_there"]}, "why": {"type": "string"}},
             "required": ["number", "outcome", "why"]}},
@@ -65,8 +68,8 @@ DIRECTOR_SCHEMA = {
 }
 
 SORTER_SCHEMA = {"type": "object", "properties": {"decisions": {"type": "array", "items": {"type": "object", "properties": {
-    "numbers": {"type": "array", "items": {"type": "integer"}}, "action": {"type": "string", "enum": ["changed", "small", "declined", "director"]},
-    "id": {"type": "string"}, "node": {"type": "string"}, "spec": {"type": "string"}, "why": {"type": "string"}}, "required": ["numbers", "action"]}}}, "required": ["decisions"]}
+    "numbers": {"type": "array", "items": {"type": "integer"}}, "action": {"type": "string", "enum": ["changed", "small", "declined", "plan"]},
+    "id": {"type": "string"}, "node": {"type": "string"}, "spec": {"type": "string"}, "title": {"type": "string"}, "why": {"type": "string"}}, "required": ["numbers", "action"]}}}, "required": ["decisions"]}
 SORTER_TOOLS = ["mcp__world__world_index", "mcp__world__tune", "mcp__world__set_rule"]
 
 
@@ -181,7 +184,7 @@ class Agent:
 
     async def what_they_have(self, player):
         """So advice can be about their next step. An answer without the game's part still beats no answer."""
-        known = {"what_they_asked_for": self.requests.of_player(player), "being_built_now": len(self.building), "waiting_to_be_built": len(self.queue)}
+        known = {"what_they_asked_for": self.requests.of_player(player), "being_built_now": self.described(self.building.values()), "waiting_to_be_built": self.described(self.queue)}
         try:
             progress = await self.bridge.call("progress")
         except (RuntimeError, ConnectionError, TimeoutError):
@@ -189,6 +192,18 @@ class Agent:
         return {**known, **progress.get("online", {}).get(player, {}), "nobody_has_worked_out": progress.get("undiscovered", [])}
 
     # What players hear back -------------------------------------------------------------------------
+
+    def described(self, features):
+        graph = progression.read(PROGRESSION)
+        return [feedback.describe(feature, graph) for feature in features]
+
+    async def show_plan(self, player):
+        """/plan, for anyone. Plain code writes it, so that nothing can be spoiled by a model getting carried away."""
+        now, waiting = self.described(self.building.values()), self.described(self.queue)
+        shown = ", ".join(waiting[:PLAN_SHOWN]) + (f", and {len(waiting) - PLAN_SHOWN} more" if len(waiting) > PLAN_SHOWN else "")
+        await self.tell(player, f"§7Being built right now: §f{', '.join(now) or 'nothing'}")
+        await self.tell(player, f"§7Up next, in order: §f{shown or 'nothing yet'}" + (" §7(more being planned)" if self.planning else ""))
+        await self.tell(player, f"§7Out so far: §f{self.state.get('release_count', 0)} §7things. Ask about any of it with §f/dm§7.", reply_click=True)
 
     async def deliver(self, player, text):
         """They may have logged off, in which case it waits for them."""
@@ -225,7 +240,7 @@ class Agent:
         # They're waiting for an answer, so even a failed call needs one.
         await self.tell(player, AGENT_LABEL + (reply or "§7Sorry, I didn't catch that. Could you say it again?"), reply_click=True)
         if interview.finished:
-            await self.tell(player, "§7That's all I needed, thanks. If you get stuck or want to tell me anything else, §f/dm§7 still works, and I'll answer.")
+            await self.tell(player, "§7That's all I needed, thanks. If you get stuck or want to tell me anything else, §f/dm§7 still works, and I'll answer. §f/plan§7 shows what's being built.")
             self.state["briefs"][player] = interview.brief
             del self.interviews[player]
             self.save()
@@ -294,7 +309,7 @@ class Agent:
         self.governor.player_seen()
         if self.governor.why_not_speak():
             # The character has gone quiet for now, so don't leave someone talking to nobody in private.
-            if kind == "dm":
+            if kind in ("dm", "plan"):
                 await self.tell(player, "§7I can't answer right now, so I haven't read that. Please try again later.")
             return
         if kind == "join":
@@ -306,6 +321,8 @@ class Agent:
             await self.deliver_waiting(player)
         elif kind == "dm":
             await self.on_dm(player, event.get("text", ""))
+        elif kind == "plan":
+            await self.show_plan(player)
         elif kind == "chat":
             text = event.get("text", "")
             if text.strip().lower() in ("!mute", "!unmute"):
@@ -397,21 +414,29 @@ class Agent:
         work = [*self.building.values(), *self.queue]
         return "\n".join(llm.untrusted("work", f"{feature['id']}: {feature.get('spec', '')[:200]}") for feature in work) or "(nothing)"
 
+    def decided_so_far(self):
+        decided = self.requests.decided()[-DECISIONS_REMEMBERED:]
+        return "\n".join(llm.untrusted("decided", json.dumps(entry)) for entry in decided) or "(nothing yet)"
+
     def can_build(self, feature):
         # The id comes from a model and becomes a folder and a branch name.
         return (re.fullmatch(FEATURE_ID, feature.get("id") or "") and feature.get("spec")
                 and feature.get("node") in progression.read(PROGRESSION)["nodes"])
 
     async def sort_requests(self):
-        """The fast look at anything new. A number or a server rule changes on the spot, a small job gets its own small
-        builder, and the rest go on to the director."""
+        """The director's fast look at anything new, on a faster model but with the same rules and the same record of what
+        it's decided. A number or a server rule changes on the spot, a small job gets its own small builder, and anything
+        that needs the whole picture waits for the next time it plans."""
         fresh = self.requests.unanswered_after(self.state["sorted_up_to"])
         if not fresh or not self.state["direction_chosen"]:
             return
         body = "\n".join(llm.untrusted("intent", json.dumps({"number": entry["number"], "wants": entry["wants"]})) for entry in fresh)
+        theme = (BIBLE / "theme.md").read_text(encoding="utf-8") if (BIBLE / "theme.md").exists() else ""
+        prompt = (f"What players have just asked for:\n{body}\n\nThe world's theme:\n{theme}\n\nWhat's being built or waiting to be built:\n{self.work_list()}\n\n"
+                  f"What you've already decided:\n{self.decided_so_far()}")
         changes_before = self.workshop.changes
         try:
-            result = await llm.ask(self.governor, "sorter", f"{body}\n\nWhat's being built or waiting to be built:\n{self.work_list()}", schema=SORTER_SCHEMA,
+            result = await llm.ask(self.governor, "director_quick", prompt, system=llm.prompt_text("director") + "\n\n" + llm.prompt_text("director_quick"), schema=SORTER_SCHEMA,
                                    allowed_tools=SORTER_TOOLS, mcp_servers={"world": self.workshop.world_server(can_tune=True)}, max_turns=20)
             decisions = result.structured.get("decisions", []) if isinstance(result.structured, dict) and not result.is_error else []
         finally:
@@ -432,7 +457,7 @@ class Agent:
                     self.requests.mark(number, feedback.DECLINED, why=decision["why"])
                     news.append((known[number], feedback.DECLINED, decision["why"]))
             elif decision.get("action") == "small" and self.can_build(decision):
-                self.queue.insert(0, {"id": decision["id"], "node": decision["node"], "spec": decision["spec"], "answers": numbers, "small": True})
+                self.queue.insert(0, {"id": decision["id"], "node": decision["node"], "spec": decision["spec"], "title": decision.get("title"), "answers": numbers, "small": True})
                 for number in numbers:
                     self.requests.mark(number, feedback.BUILDING, feature=decision["id"])
                     news.append((known[number], feedback.BUILDING, ""))
@@ -505,6 +530,7 @@ class Agent:
         unfinished_file = STATE / "unfinished.jsonl"
         unfinished = "\n".join(unfinished_file.read_text(encoding="utf-8").splitlines()[-10:]) if unfinished_file.exists() else "(none)"
         prompt = (f"Player requests:\n{body}\n\nBeing built or waiting to be built, so don't ask for these again:\n{self.work_list()}\n\n"
+                  f"What you've already decided, so be consistent with it and don't build anything twice:\n{self.decided_so_far()}\n\n"
                   f"What players have found and learned:\n{llm.untrusted('progress', progress)}\n\n"
                   f"What each player privately said they wanted, never to be quoted or attributed:\n{briefs}\n\n"
                   f"Features that couldn't be finished, and why. Ask for these differently, or not at all:\n{unfinished}\n\n"
@@ -529,10 +555,15 @@ class Agent:
             self.requests.mark(number, feedback.DONE if outcome == "already_there" else outcome, why=decision.get("why", ""))
         taken = {feature["id"] for feature in [*self.queue, *self.building.values()]}
         features = []
+        from_requests = 0
         for feature in result.structured.get("features", []):
             if feature.get("id") in taken:
                 continue
             answers = [number for number in feature.get("answers", []) if number in undecided]
+            # The rest of its requests stay undecided, so they come back next time.
+            if answers and from_requests >= REQUEST_FEATURES_PER_PLAN:
+                continue
+            from_requests += bool(answers)
             for number in answers:
                 self.requests.mark(number, feedback.BUILDING, feature=feature["id"])
                 news.append((undecided[number], feedback.BUILDING, ""))

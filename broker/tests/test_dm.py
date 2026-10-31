@@ -138,10 +138,11 @@ class PrivateChat(unittest.IsolatedAsyncioTestCase):
     async def test_it_knows_what_became_of_their_own_requests(self):
         self.agent.requests.path.write_text(json.dumps({"number": 1, "player": "Dana", "wants": "a map"}) + "\n" + json.dumps({"number": 2, "player": "Eli", "wants": "a secret thing"}) + "\n", encoding="utf-8")
         self.agent.requests.mark(1, feedback.DECLINED, why="maps spoil the survey")
-        self.agent.building["x"] = {}
+        self.agent.building["x"] = {"id": "x", "category": "mob", "spec": "A secret creature called Grimble."}
         await self.agent.on_dm("Dana", "did you add my map?")
         self.assertIn("maps spoil the survey", self.prompt())
-        self.assertIn('"being_built_now": 1', self.prompt())
+        self.assertIn('"being_built_now": ["mob"]', self.prompt())
+        self.assertNotIn("Grimble", self.prompt())
         self.assertNotIn("a secret thing", self.prompt())
 
     async def test_a_request_for_an_advantage_is_not(self):

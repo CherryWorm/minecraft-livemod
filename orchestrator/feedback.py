@@ -10,6 +10,20 @@ LATER = "later"
 DONE = "done"
 DECLINED = "declined"
 NEEDS_OWNER = "needs_owner"  # Only a person can change the engine, so the director passes these on instead of pretending.
+# How anything that belongs to the world is shown to players before it's out. A fixed list, so a name can't slip in.
+CATEGORIES = ["mob", "boss fight", "character", "gear", "tool", "upgrade", "machine", "biome", "structure", "story", "food", "item", "building block", "world event"]
+STAGE_WORDS = {"early": "early game", "mid": "mid game", "end": "late game"}
+
+
+def describe(feature, graph):
+    """What players get to read about one piece of work. A bug fix or a small convenience is named, because there's
+    nothing to spoil. Anything else is only ever its stage and its category, like "early game mob"."""
+    if feature.get("small"):
+        return feature.get("title") or "a small fix"
+    node = (graph or {}).get("nodes", {}).get(feature.get("node"))
+    stage = STAGE_WORDS.get(node["stage"]) if node else None
+    category = feature.get("category") if feature.get("category") in CATEGORIES else None
+    return " ".join(word for word in (stage, category) if word) or "something new"
 
 
 class Requests:
@@ -30,6 +44,12 @@ class Requests:
 
     def reopen(self, number):
         self.statuses.pop(str(number), None)
+
+    def decided(self):
+        """What's been said so far about what, so that the same thing gets the same answer. Who asked doesn't come into it."""
+        return [{"wanted": entry["wants"], "decided": self.status(entry["number"]),
+                 **{key: value for key, value in self.statuses[str(entry["number"])].items() if key != "status" and value}}
+                for entry in self.all() if self.status(entry["number"]) is not None]
 
     def undecided(self):
         """Everything the director still has to think about. There's no window on this, so nothing can drop off the end."""

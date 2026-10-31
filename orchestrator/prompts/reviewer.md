@@ -11,6 +11,7 @@ Reject only for real problems:
 - It doesn't suit its stage in the world's progression, which is in `bible/progression.json` and `bible/stages.yaml`. In the early game, players should still be mining and building for themselves. Anything that runs by itself should match what's declared in `automation`, so read its Java. Mid-game mining and mob killing should be very slow, so that players still go down mines and fight. Endgame content can be as wild as it likes.
 - A mob's `mind` gives away something players should earn, or its `character` mentions anything not yet in the world or that would spoil a surprise. A mind should be interesting to meet, with reasons to come back.
 - It changes something players already have, as listed in `changes_reached`, without a clear reason or feedback behind it.
+- It changes how the game's own items, blocks or mechanics work, or makes vanilla's own things cheaper. An improvement on something vanilla has to be this world's own upgraded version, and players have to earn it.
 
 Judge it against what the engine can do, which is in `docs/content-types.md`. Anything the spec asks for that the engine can't do yet belongs in `host_requests`, and that isn't the builder's fault, so don't reject for it. If the spec's details are slightly different but the feature works and fits the world, approve it.
 

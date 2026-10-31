@@ -15,6 +15,8 @@ import subprocess
 import sys
 import time
 
+from PIL import Image
+
 from broker import runtime
 from broker.gates import GateFailed
 from broker.gates import client as gate_client
@@ -345,6 +347,16 @@ def check_progress(results):
     results.append(report("what was learned is saved with the world", "lore/gem_cutting" in json.dumps(ledger["known"])))
 
 
+def check_codex_can_be_read(results, out):
+    """Its text was once white on a pale page, in a codex that opened perfectly well. That gave no black pixels at all
+    in the body of the page, only the grey of the text's shadow, where a book's real text is black."""
+    image = Image.open(next(out.glob("*m8_codex*.png"))).convert("L")
+    width, height = image.size
+    body = list(image.crop((int(width * 0.37), int(height * 0.20), int(width * 0.62), int(height * 0.36))).getdata())
+    black = sum(pixel < 40 for pixel in body)
+    results.append(report("the codex can actually be read", black > 150, f"{black} black pixels in its text"))
+
+
 def release():
     code, promoted = promote()
     print(json.dumps({key: promoted.get(key) for key in ("result", "gate", "tier", "stages")}), flush=True)
@@ -386,6 +398,7 @@ def main():
     for path in shots.glob("*m8_*.png"):
         shutil.copy(path, out)
     check_mob_art(results, out)
+    check_codex_can_be_read(results, out)
     print("screenshots:", sorted(path.name for path in out.glob("*.png")), flush=True)
     failed = [result for result in results if not result]
     print(f"{len(results) - len(failed)} of {len(results)} checks passed", flush=True)

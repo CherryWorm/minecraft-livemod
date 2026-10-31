@@ -71,7 +71,7 @@ async def check():
         print("nothing with an ore has shipped, so the tuner has nothing to work on")
     else:
         intent = llm.untrusted("intent", json.dumps({"number": 1, "wants": f"Everyone's saying {target} is way too rare. We've found hardly any of it."}))
-        result = await llm.ask(governor, "sorter", intent, schema=main.SORTER_SCHEMA, allowed_tools=main.SORTER_TOOLS,
+        result = await llm.ask(governor, "director_quick", intent, schema=main.SORTER_SCHEMA, allowed_tools=main.SORTER_TOOLS,
                                mcp_servers={"world": shop.world_server(can_tune=True)}, max_turns=10)
         log = pathlib.Path("/workspace/state/tunes.jsonl")
         tunes = log.read_text(encoding="utf-8").strip().splitlines() if log.exists() else []
