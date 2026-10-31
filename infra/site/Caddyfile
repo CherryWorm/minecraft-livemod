@@ -3,6 +3,9 @@
 	cert_issuer acme {
 		profile shortlived
 	}
+	# Clients send no server name when connecting to a bare IP address, and from inside its container Caddy can't work
+	# out the address they used, so without this the TLS handshake fails.
+	default_sni {$GAME_ADDRESS}
 }
 
 {$SITE_ADDRESS} {

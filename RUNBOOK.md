@@ -42,7 +42,7 @@ Aim for about 8 fast cores and 32 GB of RAM. That's an estimate: prod 8 to 10 GB
     ./scripts/agent-up.sh
     ```
 
-To update the code later: `git pull` as `livingmod`, then `./scripts/stack.sh build`, `python3 -m broker.promote --source "$(pwd)" --release-id update-$(date +%s)`, `./scripts/stack.sh up -d`, and as root `systemctl restart livingmod-broker`.
+To update the code later: `git pull` as `livingmod`, then `./scripts/stack.sh build`, `python3 -m broker.promote --source "$(pwd)" --release-id update-$(date +%s)`, `./scripts/stack.sh up -d`, and as root `systemctl restart livingmod-broker`. A changed `infra/site/Caddyfile` also needs `./scripts/stack.sh up -d --force-recreate site`, because the container keeps the old file until then.
 
 **What's open to the internet:** only what's in `compose.yaml` with no `127.0.0.1` in front of it, which is 25565 for the game, plus 80 and 443 for the site. 25566, 25567, 25568 and RCON aren't published beyond this machine. Docker writes its own firewall rules, so `ufw` can't close a published port, and that's why nothing else is published.
 
