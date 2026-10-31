@@ -205,6 +205,17 @@ class Directing(Base):
         self.assertEqual(chosen, ["one", "own_idea", "two", "another_own_idea"])
         self.assertEqual((self.status(1), self.status(2), self.status(3)), (feedback.BUILDING, feedback.BUILDING, None), "the third comes back next time")
 
+    async def test_what_the_owner_asks_for_is_marked_and_not_held_back(self):
+        self.asked("one", "two", "three")
+        lines = self.agent.requests.path.read_text(encoding="utf-8").splitlines()
+        marked = {**json.loads(lines[2]), "owner_asked": True}
+        self.agent.requests.path.write_text("\n".join([lines[0], lines[1], json.dumps(marked)]) + "\n", encoding="utf-8")
+        self.plan_answer([{"id": "one", "node": "e_one", "spec": "x", "answers": [1]}, {"id": "two", "node": "e_one", "spec": "x", "answers": [2]}, {"id": "three", "node": "e_one", "spec": "x", "answers": [3]}])
+        chosen = [feature["id"] for feature in await self.agent.next_features()]
+        self.assertEqual(chosen, ["one", "two", "three"])
+        prompt = next(call.args[2] for call in self.ask.await_args_list if call.args[1] == "director")
+        self.assertEqual(prompt.count('"owner_asked": true'), 1)
+
     async def test_every_decision_is_made_knowing_the_others(self):
         self.asked("faster boats", "a minimap")
         self.agent.requests.mark(1, feedback.DECLINED, why="Boats stay as they are.")

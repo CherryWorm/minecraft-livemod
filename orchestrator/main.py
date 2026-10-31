@@ -519,7 +519,8 @@ class Agent:
         """Asks the director what's next, and what to do about everything players have asked for."""
         undecided = {entry["number"]: entry for entry in self.requests.undecided()}
         saw = self.requests.last_number()
-        body = "\n".join(llm.untrusted("intent", json.dumps({"number": number, "player": entry.get("player"), "wants": entry["wants"], "status": self.requests.status(number) or "new"}))
+        body = "\n".join(llm.untrusted("intent", json.dumps({"number": number, "player": entry.get("player"), "wants": entry["wants"], "status": self.requests.status(number) or "new",
+                                                             **({"owner_asked": True} if entry.get("owner_asked") else {})}))
                          for number, entry in undecided.items()) or "(no requests waiting)"
         try:
             found = await self.bridge.call("progress")
@@ -562,10 +563,11 @@ class Agent:
             if feature.get("id") in taken:
                 continue
             answers = [number for number in feature.get("answers", []) if number in undecided]
-            # The rest of its requests stay undecided, so they come back next time.
-            if answers and from_requests >= REQUEST_FEATURES_PER_PLAN:
+            # The rest of its requests stay undecided, so they come back next time. The owner's own don't count.
+            owners = any(undecided[number].get("owner_asked") for number in answers)
+            if answers and not owners and from_requests >= REQUEST_FEATURES_PER_PLAN:
                 continue
-            from_requests += bool(answers)
+            from_requests += bool(answers) and not owners
             for number in answers:
                 self.requests.mark(number, feedback.BUILDING, feature=feature["id"])
                 news.append((undecided[number], feedback.BUILDING, ""))
