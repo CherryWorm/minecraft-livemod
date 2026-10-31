@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 set -a; . ./.env; set +a
 
-./scripts/stack.sh --profile agent stop agent </dev/null
+./scripts/stack.sh --profile agent stop agent web egress </dev/null
 pid_file="$RUNTIME_DIR/broker/daemon.pid"
 if [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
   kill "$(cat "$pid_file")"

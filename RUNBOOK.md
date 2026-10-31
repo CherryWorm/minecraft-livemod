@@ -32,13 +32,15 @@ Aim for about 8 fast cores and 32 GB of RAM, on Ubuntu 24.04. That's an estimate
     ./scripts/agent-up.sh
     ```
 
-**Known gap:** the prod server can reach the internet, because Polymer serves the resource pack from it and that needs a public network. Agent-written server code runs in there, so on the rented server add a firewall rule that blocks new outbound connections from the prod container, or move the pack to a standalone host. The agent itself is already limited to Anthropic by its egress proxy.
+**Known gap:** the prod server can reach the internet, because Polymer serves the resource pack from it and that needs a public network. Agent-written server code runs in there, so on the rented server add a firewall rule that blocks new outbound connections from the prod container, or move the pack to a standalone host.
+
+**What the agent can reach:** builders and their shell commands only reach Anthropic, through the `egress` proxy. Research goes through a separate `web` proxy, which can reach any public HTTPS site and refuses this machine and private networks. Only the research role holds its password, and that role has no shell, no files and nothing private in its prompt. The others get its answer as text. A misleading page can still mislead a builder through that text, so every release still goes through all the gates and the review.
 
 ## Before friends install anything
 
 Each friend has to agree to two things, knowing what they mean:
 
-- Their chat and private interview answers go to Anthropic.
+- Their chat and private interview answers go to Anthropic. Their ideas can also shape what the agent looks up on the public web. A check keeps player names and long phrases from private answers out of those searches, but it can't catch a paraphrase.
 - The companion runs code an AI wrote on their PC. It's signed and checked, and it can't use files, the network or their login, but Java has no true sandbox, so this reduces risk rather than removing it. `/companion off` turns it off on their machine at any time.
 
 Then make the pack with `./scripts/make-friend-pack.sh` and send them the file. They need [Prism Launcher](https://prismlauncher.org/) and their own Minecraft account: *Add Instance → Import → choose the zip*, then add the server address. The first launch takes a few minutes.
@@ -55,6 +57,8 @@ Once anyone runs a client module, everyone needs the companion. Turn that on wit
 | See what it's released | `tail runtime/timeline.jsonl` and `cat runtime/agent-workspace/state/features.jsonl` |
 | See what it's asked the engine to add | `cat runtime/agent-workspace/state/host_requests.jsonl` |
 | See how much of your plan it's used | `cat runtime/agent-workspace/state/governor.json` |
+| See what it's looked up | `ls runtime/agent-workspace/research`, and `docker logs livingmod-web-1 \| grep CONNECT` for every site |
+| Turn its research off, or back on | `touch runtime/control/no_research`, or `rm` the same file |
 | Make it decide now, without waiting for everyone | `touch runtime/control/decide_now` |
 | Stop the agent, from the host | `touch runtime/control/agent_disabled` |
 | Stop the agent, in game (owner only) | `/agentstop`, then `/agentstart` |

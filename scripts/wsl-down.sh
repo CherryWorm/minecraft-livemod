@@ -3,7 +3,7 @@
 set -euo pipefail
 export MSYS_NO_PATHCONV=1
 
-wsl.exe -d livingmod -- /srv/livingmod/repo/scripts/stack.sh stop
+wsl.exe -d livingmod -- /srv/livingmod/repo/scripts/stack.sh --profile agent --profile shadow stop
 powershell.exe -NoProfile -Command '
   Get-CimInstance Win32_Process |
     Where-Object { $_.Name -eq "wsl.exe" -and $_.CommandLine -match "livingmod.*sleep infinity" } |

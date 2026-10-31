@@ -137,6 +137,10 @@ for role, (calls, seconds, estimate, errors) in sorted(totals.items()):
     print(f"{role}: {calls} calls, {seconds:.0f}s, estimate {estimate:.2f}, errors {errors}")
 PY
 
+echo; echo "=== research"
+ls "$RUNTIME_DIR/agent-workspace/research" 2>/dev/null | cut -c1-120
+docker logs livingmod-web-1 2>/dev/null </dev/null | grep CONNECT | awk '{print $7}' | sort | uniq -c | sort -rn | head -20
+
 echo; echo "=== checks"
 leaks=$(cat "$work"/aria.jsonl "$work"/bram.jsonl | grep -c '"kind": "leak"')
 echo "private words seen by the wrong player: $leaks"

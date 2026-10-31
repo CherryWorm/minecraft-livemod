@@ -12,13 +12,14 @@ import uuid
 
 from claude_agent_sdk import AgentDefinition, create_sdk_mcp_server, tool
 
-from orchestrator import llm
+from orchestrator import llm, research
 
 REPO = pathlib.Path("/workspace/repo")
 TREES = pathlib.Path("/workspace/trees")
 REQUESTS = pathlib.Path("/workspace/requests")
 RESPONSES = pathlib.Path("/workspace/responses")
 MAX_ATTEMPTS = 3
+FEATURE_RESEARCH = 4
 REQUEST_TIMEOUT = {"check": 300, "gates": 900, "release": 900, "javap": 60}
 
 VERDICT_SCHEMA = {
@@ -35,7 +36,7 @@ SUBAGENTS = {
                 "folder, .bbmodel files to assets/models and .ogg files to assets/sounds. Look at what you made by reading the "
                 "contact sheet or the model preview, and fix anything muddy, noisy or flat. Textures are 16x16, with a small "
                 "palette and soft contrast, and they should look at home next to vanilla blocks."),
-        tools=["Read", "Write", "Edit", "Glob", "Bash"],
+        tools=["Read", "Write", "Edit", "Glob", "Bash", research.TOOL_NAME],
         model=llm.WORKER["model"],
         effort=llm.WORKER["effort"],
     ),
@@ -44,7 +45,7 @@ SUBAGENTS = {
         prompt=("You write Java modules for a Minecraft 26.3 mod. Read docs/feature-format.md and /reference for the API. Many "
                 "Minecraft APIs were renamed recently, so check real signatures with the java_api tool. Keep tick work small, and "
                 "use no files, network or threads. Keep state where the docs say, so it survives the module being swapped."),
-        tools=["Read", "Write", "Edit", "Glob", "Grep", "mcp__broker__java_api"],
+        tools=["Read", "Write", "Edit", "Glob", "Grep", "mcp__broker__java_api", research.TOOL_NAME],
         model=llm.WORKER["model"],
         effort=llm.WORKER["effort"],
     ),
@@ -127,17 +128,19 @@ def _tools_for(feature_id, tree):
 
 
 BUILDER_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Agent", "Task",
-                 "mcp__broker__check_feature", "mcp__broker__java_api"]
-# Only Bash runs in the sandbox, so file tools need their own limits on where secrets could be found.
+                 "mcp__broker__check_feature", "mcp__broker__java_api", research.TOOL_NAME]
+# Only Bash runs in the sandbox, so file tools need their own limits on where secrets could be found. Builders can run
+# things and write code, so they never read a web page themselves: they ask the research tool.
 BUILDER_DENIED = ["Read(//proc/**)", "Read(//run/**)", "Read(//home/agent/.claude/**)", "Read(//workspace/state/**)",
                   "Grep(//proc/**)", "Grep(//run/**)", "Grep(//workspace/state/**)",
                   "Glob(//workspace/state/**)", "WebFetch", "WebSearch"]
 
 
 class Workshop:
-    def __init__(self, governor, on_released):
+    def __init__(self, governor, on_released, web_research):
         self.governor = governor
         self.on_released = on_released
+        self.web_research = web_research
 
     def _prepare_tree(self, feature_id):
         tree = TREES / feature_id
@@ -166,6 +169,7 @@ class Workshop:
         feedback = None
         last_problem = ""
         timings = {}
+        web = self.web_research.server(FEATURE_RESEARCH)
         for attempt in range(1, MAX_ATTEMPTS + 1):
             reason = self.governor.why_not_build()
             if reason:
@@ -177,7 +181,7 @@ class Workshop:
             began = time.monotonic()
             result = await llm.ask(self.governor, "builder", prompt, tools=BUILDER_TOOLS, allowed_tools=BUILDER_TOOLS,
                                    disallowed_tools=BUILDER_DENIED, agents=SUBAGENTS, cwd=str(tree), max_turns=60, resume=session,
-                                   mcp_servers={"broker": _tools_for(feature_id, tree)}, budget=8.0)
+                                   mcp_servers={"broker": _tools_for(feature_id, tree), "web": web}, budget=8.0)
             timings[f"build_{attempt}"] = round(time.monotonic() - began, 1)
             session = result.session_id or session
             if result.is_error:

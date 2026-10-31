@@ -20,6 +20,7 @@ ROLES = {
     "director": {"model": "claude-opus-5-5", "effort": "medium"},
     "builder": {"model": "claude-opus-5-5", "effort": "medium"},
     "reviewer": {"model": "claude-opus-5-5", "effort": "medium"},
+    "researcher": {"model": "claude-haiku-5-5", "effort": "low"},
 }
 WORKER = {"model": "claude-opus-5-5", "effort": "low"}
 
@@ -47,7 +48,7 @@ def untrusted(label, text):
 
 async def ask(governor: Governor, role, prompt, *, system=None, schema=None, resume=None, tools=None,
               allowed_tools=None, disallowed_tools=None, cwd=None, agents=None, max_turns=4, mcp_servers=None,
-              permission_mode="dontAsk", budget=None):
+              permission_mode="dontAsk", budget=None, env=None):
     """Runs one Claude conversation turn for a role. By default it can use no tools at all."""
     config = ROLES[role]
     options = ClaudeAgentOptions(
@@ -65,6 +66,7 @@ async def ask(governor: Governor, role, prompt, *, system=None, schema=None, res
         agents=agents,
         mcp_servers=mcp_servers or {},
         max_budget_usd=budget,
+        env=env or {},
         output_format={"type": "json_schema", "schema": schema} if schema else None,
     )
     started = time.monotonic()

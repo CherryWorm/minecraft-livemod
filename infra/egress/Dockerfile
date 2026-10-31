@@ -1,5 +1,5 @@
-# The agent's only way out to the internet. Anything not on the allowlist is refused, so even an agent that's
-# been talked into something can't send data anywhere else.
+# The way out for everything in the agent's container, except research, which has web/ and a password. Anything not
+# on the allowlist is refused, so even a builder that's been talked into something can't send data anywhere else.
 FROM alpine:3.22
 
 RUN apk add --no-cache tinyproxy

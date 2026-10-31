@@ -8,7 +8,7 @@ set -a; . ./.env; set +a
 ./scripts/prepare-workspace.sh
 
 if [[ "${1:-}" != "--no-build" ]]; then
-  ./scripts/stack.sh --profile agent build agent egress >/dev/null </dev/null
+  ./scripts/stack.sh --profile agent build agent egress web >/dev/null </dev/null
 fi
 
 pid_file="$RUNTIME_DIR/broker/daemon.pid"

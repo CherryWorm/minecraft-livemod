@@ -7,7 +7,7 @@ import pathlib
 import re
 import time
 
-from orchestrator import llm, voice, workshop
+from orchestrator import llm, research, voice, workshop
 from orchestrator.bridge import Bridge
 from orchestrator.governor import CONTROL, Governor
 
@@ -21,6 +21,8 @@ CHAT_BATCH_SECONDS = 20
 WEEKLY_INTENTS_PER_PLAYER = 20
 WATCH_SECONDS = 5 * 60
 FEATURE_ID = r"[a-z][a-z0-9_]{1,40}"
+DIRECTION_RESEARCH = 6
+DIRECTOR_RESEARCH = 3
 STOP_AFTER_RELEASES = os.environ.get("AGENT_STOP_AFTER_RELEASES")  # Lets a test spend a known amount.
 
 PHASES_TEMPLATE = """\
@@ -53,7 +55,8 @@ class Agent:
         self.governor = Governor()
         self.bridge = Bridge()
         self.watcher = voice.Watcher(self.governor)
-        self.workshop = workshop.Workshop(self.governor, self.on_released)
+        self.research = research.Research(self.governor, self.private_words)
+        self.workshop = workshop.Workshop(self.governor, self.on_released, self.research)
         self.interviews = {}
         self.chat_buffer = []
         self.queue = []
@@ -72,6 +75,9 @@ class Agent:
 
     def briefs(self):
         return list(self.state["briefs"].values())
+
+    def private_words(self):
+        return self.roster() | set(self.state["briefs"]) | set(self.interviews), self.briefs()
 
     def roster(self):
         path = CONTROL / "roster.txt"
@@ -129,7 +135,7 @@ class Agent:
 
     async def choose_direction(self):
         print("choosing the direction", flush=True)
-        direction = await voice.choose_direction(self.governor, self.briefs())
+        direction = await voice.choose_direction(self.governor, self.briefs(), self.research.server(DIRECTION_RESEARCH))
         if direction is None:
             print("the direction call failed, will try again", flush=True)
             return
@@ -282,7 +288,8 @@ class Agent:
                   "Read bible/theme.md and bible/phases.yaml, then choose the next features. "
                   "If the current phase's needs are all covered, move to the next phase.")
         result = await llm.ask(self.governor, "director", prompt, schema=DIRECTOR_SCHEMA, tools=["Read", "Glob", "Grep"],
-                               allowed_tools=["Read", "Glob", "Grep"], cwd=str(workshop.REPO), max_turns=8)
+                               allowed_tools=["Read", "Glob", "Grep", research.TOOL_NAME], cwd=str(workshop.REPO), max_turns=12,
+                               mcp_servers={"web": self.research.server(DIRECTOR_RESEARCH)})
         if result.is_error or not isinstance(result.structured, dict):
             return []
         self.state["phase"] = result.structured.get("phase", self.state["phase"])

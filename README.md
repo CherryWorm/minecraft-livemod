@@ -9,7 +9,7 @@ A Minecraft Java server where an AI agent builds and evolves a mod while friends
 | Path | What it is |
 |---|---|
 | `versions.env`, `infra/mods.lock` | Every pinned version and checksum |
-| `infra/` | Docker Compose stack: Velocity proxy, prod and shadow servers, agent, egress proxy |
+| `infra/` | Docker Compose stack: Velocity proxy, prod and shadow servers, agent, and the egress and web proxies that limit its network |
 | `mods/conduit/` | Stable server infrastructure: slots, patches, knowledge, mobs, bridge, kill switch |
 | `mods/companion/` | The client mod friends install once, which loads signed modules |
 | `broker/` | Plain code that gates, signs, deploys and rolls back. No AI |

@@ -113,11 +113,12 @@ class Interview:
         return data.get("reply")
 
 
-async def choose_direction(governor, briefs):
+async def choose_direction(governor, briefs, web):
     blocks = "\n\n".join(llm.untrusted("brief", json.dumps(brief, indent=1)) for brief in briefs)
     prompt = (blocks or "No player gave a brief. Choose a direction you think friends would enjoy.") + \
         "\n\nChoose this world's direction."
-    result = await llm.ask(governor, "direction", prompt, schema=DIRECTION_SCHEMA, max_turns=3)
+    result = await llm.ask(governor, "direction", prompt, schema=DIRECTION_SCHEMA, allowed_tools=["mcp__web__research"],
+                           mcp_servers={"web": web}, max_turns=10)
     return result.structured if isinstance(result.structured, dict) and not result.is_error else None
 
 

@@ -13,6 +13,10 @@ fi
 if [[ -s /run/secrets/bridge ]]; then
   exec 3</run/secrets/bridge
 fi
+# The same goes for the web proxy's password.
+if [[ -s /run/secrets/web_proxy ]]; then
+  exec 4</run/secrets/web_proxy
+fi
 
 # Group-writable, so the broker can read and clean up what the agent leaves in the shared workspace.
 umask 002

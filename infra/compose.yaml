@@ -164,10 +164,36 @@ services:
       - public
       - backend
 
+  # The web, for research only. See web/Dockerfile. Its password is held by the agent's research process, so
+  # shell commands and everything else in the agent's container stay limited to egress above.
+  web:
+    profiles: [agent]
+    image: livingmod/web:1
+    build:
+      context: web
+    user: "1000:1000"
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /run/squid:uid=1000,gid=1000,mode=700
+      - /var/run/squid:uid=1000,gid=1000,mode=700
+      - /var/cache/squid:uid=1000,gid=1000,mode=700
+      - /tmp:uid=1000,gid=1000,mode=700
+    secrets:
+      - web_proxy
+    networks:
+      - public
+      - backend
+
   agent:
     profiles: [agent]
     depends_on:
       - egress
+      - web
     image: livingmod/agent:${CLAUDE_AGENT_SDK_VERSION}
     build:
       context: agent
@@ -205,6 +231,7 @@ services:
     secrets:
       - claude_token
       - bridge
+      - web_proxy
     # Read-only except the workspace. The broker on the host picks up requests from there.
     volumes:
       - ../spikes:/spikes:ro
@@ -216,7 +243,7 @@ services:
       - ${RUNTIME_DIR}/agent-workspace:/workspace
       - ${RUNTIME_DIR}/control:/control:ro
     command: ["python3", "-m", "orchestrator.main"]
-    # backend is internal: it reaches the game's bridge and the egress proxy, and nothing else.
+    # backend is internal: it reaches the game's bridge and the two proxies, and nothing else.
     networks:
       - backend
 
@@ -234,3 +261,5 @@ secrets:
     file: ${RUNTIME_DIR}/secrets/bridge.secret
   claude_token:
     file: ${RUNTIME_DIR}/secrets/claude_token.secret
+  web_proxy:
+    file: ${RUNTIME_DIR}/secrets/web_proxy.secret

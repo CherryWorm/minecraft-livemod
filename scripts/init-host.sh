@@ -7,7 +7,7 @@ runtime="$(pwd)/../runtime"
 mkdir -p "$runtime"/{secrets,velocity,prod,shadow,shadow-proxy,cache/gradle,cache/home,releases/current,releases/candidate,releases/history,broker,backups,control,agent-workspace}
 runtime=$(cd "$runtime" && pwd)
 
-for name in forwarding rcon bridge; do
+for name in forwarding rcon bridge web_proxy; do
   file="$runtime/secrets/$name.secret"
   if [[ ! -f "$file" ]]; then
     (umask 077 && head -c 32 /dev/urandom | base64 | tr -d '/+=\n' >"$file")
