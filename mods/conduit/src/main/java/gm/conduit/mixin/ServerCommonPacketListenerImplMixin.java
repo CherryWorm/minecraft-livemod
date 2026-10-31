@@ -1,11 +1,14 @@
 package gm.conduit.mixin;
 
 import com.mojang.authlib.GameProfile;
+import gm.conduit.PasswordGate;
 import gm.conduit.pack.PackStatus;
+import net.minecraft.network.protocol.common.ServerboundCustomClickActionPacket;
 import net.minecraft.network.protocol.common.ServerboundResourcePackPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerCommonPacketListenerImpl;
+import net.minecraft.server.network.ServerConfigurationPacketListenerImpl;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -28,6 +31,15 @@ abstract class ServerCommonPacketListenerImplMixin {
 			Object self = this;
 			ServerPlayer player = self instanceof ServerGamePacketListenerImpl game ? game.player : null;
 			PackStatus.record(this.playerProfile().name(), player, packet.action());
+		}
+	}
+
+	@Inject(method = "handleCustomClickAction", at = @At("HEAD"), cancellable = true)
+	private void conduit$passwordAnswer(ServerboundCustomClickActionPacket packet, CallbackInfo ci) {
+		// Also runs twice, and it has to get as far as the server thread before anything's decided.
+		Object self = this;
+		if (this.server.isSameThread() && self instanceof ServerConfigurationPacketListenerImpl configuration && PasswordGate.answer(configuration, packet)) {
+			ci.cancel();
 		}
 	}
 }

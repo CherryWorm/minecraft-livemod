@@ -13,6 +13,9 @@ x-server: &server
   user: "1000:1000"
   restart: unless-stopped
   stop_grace_period: 60s
+  # Clients fetch resource packs through the site, because these servers have no route out of the backend network.
+  depends_on:
+    - site
   secrets:
     - forwarding
     - rcon
@@ -55,13 +58,49 @@ services:
       LEVEL_SEED: ${LEVEL_SEED:-}
       PACK_PUBLIC_URL: ${PACK_PUBLIC_URL}
       OWNER_UUID: ${OWNER_UUID:-}
-    ports:
-      # Polymer serves the resource pack here until the standalone pack host arrives.
-      # This is also why prod is on the public network for now.
-      - "${PACK_PORT:-25567}:25567"
+    secrets:
+      - forwarding
+      - rcon
+      - bridge
+      - game_password
     volumes:
       - ${RUNTIME_DIR}/prod:/data
       - ${RUNTIME_DIR}/releases/current:/opt/release:ro
+    # Agent-written code runs in here, so it gets no route to the internet. See the site below for the pack.
+    networks:
+      - backend
+
+  # The password-protected website, and the way in to both servers' resource packs. See site/Caddyfile.
+  site:
+    image: caddy:${CADDY_VERSION}
+    user: "1000:1000"
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    cap_add:
+      # The image's binary is marked as needing this to start, even though these ports are allowed without it.
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=700
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+      GAME_ADDRESS: ${GAME_ADDRESS:-localhost}
+      PACK_TOKEN: ${PACK_TOKEN:-none}
+    ports:
+      - "${SITE_HTTP_BIND:-127.0.0.1:8080}:80"
+      - "${SITE_HTTPS_BIND:-127.0.0.1:8443}:443"
+      - "127.0.0.1:${PACK_PORT:-25567}:25567"
+      - "127.0.0.1:25568:25568"
+    volumes:
+      - ./site/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./site/www:/srv/www:ro
+      - ${RUNTIME_DIR}/friend-pack:/srv/download:ro
+      - ${RUNTIME_DIR}/site-auth:/etc/caddy/auth:ro
+      - ${RUNTIME_DIR}/caddy/data:/data
+      - ${RUNTIME_DIR}/caddy/config:/config
     networks:
       - public
       - backend
@@ -78,13 +117,11 @@ services:
       WHITE_LIST: "false"
       LEVEL_SEED: ${LEVEL_SEED:-}
       PACK_PUBLIC_URL: http://localhost:25568/
-    ports:
-      - "127.0.0.1:25568:25567"
     volumes:
       - ${RUNTIME_DIR}/shadow:/data
       - ${RUNTIME_DIR}/releases/candidate:/opt/release:ro
+    # It runs code that hasn't passed its gates yet, so like prod it has no route to the internet.
     networks:
-      - public
       - backend
 
   # In front of the shadow server only, for test clients. Login checks are off, so it's bound to this
@@ -107,6 +144,8 @@ services:
     profiles: [tools]
     image: eclipse-temurin:25-jdk
     user: "1000:1000"
+    # 0 means no limit. On a shared host this stops a build from taking cores away from the live server.
+    cpus: ${TOOLS_CPUS:-0}
     working_dir: /work
     environment:
       GRADLE_USER_HOME: /cache/gradle
@@ -124,6 +163,8 @@ services:
       context: testclient
     init: true
     user: "1000:1000"
+    # It renders in software on every core it can get, so on a shared host it needs a limit too.
+    cpus: ${TOOLS_CPUS:-0}
     working_dir: /work
     # Uses the host's network so the pack URL means the same thing here as for a real player.
     network_mode: host
@@ -138,6 +179,7 @@ services:
       LIVINGMOD_SERVER: ${TEST_SERVER:-localhost:25566}
       CLIENT_TEST: ${CLIENT_TEST:-}
       S4_CYCLES: ${S4_CYCLES:-100}
+      LIVINGMOD_TEST_PASSWORD: ${LIVINGMOD_TEST_PASSWORD:-}
       # Only ever set by tests. A friend's game has neither, and no server can set them.
       COMPANION_ALLOW_UNSIGNED: ${COMPANION_ALLOW_UNSIGNED:-false}
       COMPANION_TEST_KEY: ${COMPANION_TEST_KEY:-}
@@ -199,6 +241,8 @@ services:
       context: agent
       args:
         CLAUDE_AGENT_SDK_VERSION: ${CLAUDE_AGENT_SDK_VERSION}
+    # Tests end the agent on purpose, so only a real server asks for it to come back.
+    restart: ${AGENT_RESTART:-no}
     init: true
     security_opt:
       # Docker's defaults plus the namespace calls bubblewrap needs. See agent/make_seccomp.py.
@@ -223,10 +267,12 @@ services:
       HTTPS_PROXY: http://egress:8888
       HTTP_PROXY: http://egress:8888
       NO_PROXY: prod,localhost,127.0.0.1
-      PYTHONPATH: /app
+      PYTHONPATH: /app:/reference
       PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
       AGENT_DAILY_USAGE_LIMIT: ${AGENT_DAILY_USAGE_LIMIT:-25}
       AGENT_MAX_BUILDERS: ${AGENT_MAX_BUILDERS:-2}
+      AGENT_MIND_USAGE_LIMIT: ${AGENT_MIND_USAGE_LIMIT:-2.5}
       AGENT_STOP_AFTER_RELEASES: ${AGENT_STOP_AFTER_RELEASES:-}
     secrets:
       - claude_token
@@ -263,3 +309,6 @@ secrets:
     file: ${RUNTIME_DIR}/secrets/claude_token.secret
   web_proxy:
     file: ${RUNTIME_DIR}/secrets/web_proxy.secret
+  # Local test stacks leave this unset, and an empty file means no password gate.
+  game_password:
+    file: ${GAME_PASSWORD_FILE:-/dev/null}

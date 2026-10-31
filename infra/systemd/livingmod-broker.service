@@ -1,0 +1,18 @@
+# The broker's request loop on a rented server. The containers come back by themselves after a reboot, but this runs
+# on the host, so it needs something to do the same for it. Install with:
+#   cp infra/systemd/livingmod-broker.service /etc/systemd/system/ && systemctl enable --now livingmod-broker
+[Unit]
+Description=Living Mod broker
+After=docker.service
+Requires=docker.service
+
+[Service]
+User=livingmod
+WorkingDirectory=/srv/livingmod/repo
+ExecStart=/usr/bin/python3 -m broker.daemon
+Environment=PYTHONDONTWRITEBYTECODE=1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

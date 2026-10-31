@@ -43,12 +43,25 @@ EOF
 
 mkdir -p "$out"
 target="$out/LivingMod-$(date +%Y%m%d-%H%M%S).zip"
-python3 - "$instance" "$target" <<'PY'
-import pathlib, sys, zipfile
-root, target = pathlib.Path(sys.argv[1]), sys.argv[2]
+python3 - "$instance" "$target" "${GAME_ADDRESS:-localhost}" <<'PY'
+import pathlib, struct, sys, zipfile
+root, target, address = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+
+def text(value):
+    data = value.encode("utf-8")
+    return struct.pack(">H", len(data)) + data
+
+# The game's server list, with this server already in it and its resource pack already accepted.
+server = (b"\x08" + text("ip") + text(address) + b"\x08" + text("name") + text("Living Mod")
+          + b"\x01" + text("acceptTextures") + b"\x01" + b"\x00")
+servers = b"\x09" + text("servers") + b"\x0a" + struct.pack(">i", 1) + server
+(root / "minecraft" / "servers.dat").write_bytes(b"\x0a" + text("") + servers + b"\x00")
+
 with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
     for path in sorted(root.rglob("*")):
         if path.is_file():
             archive.write(path, path.relative_to(root))
 PY
+# The site offers this name, which never changes, so its link stays the same across rebuilds.
+cp "$target" "$out/LivingMod.zip"
 echo "$target"

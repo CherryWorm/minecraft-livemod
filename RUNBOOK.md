@@ -4,46 +4,68 @@ Everything here is run on the host from the repo folder unless it says otherwise
 
 ## Moving to a rented server
 
-Aim for about 8 fast cores and 32 GB of RAM, on Ubuntu 24.04. That's an estimate: prod 8 to 10 GB, shadow 6, test client 4, builds 4, agent 4.
+Aim for about 8 fast cores and 32 GB of RAM. That's an estimate: prod 8 to 10 GB, shadow 6, test client 4, builds 4, agent 4. This has been run on Ubuntu 26.04.
 
 1. **Fix your Minecraft login first.** Your client gets "Invalid session" from Mojang, which is why the development proxy has login checks off. The rented server has to keep them on, so you can't join it until this is sorted. Realms' error message points at your account's profile rather than anything on this side.
-2. **Install Docker** and create an unprivileged user with uid 1000 for the stack. Don't give the agent's user Docker access.
-3. **Copy the repo** to `/srv/livingmod/repo`, then run `./scripts/init-host.sh`.
+2. **Get the code and install Docker,** as root. This also creates the `livingmod` user the stack runs as, which needs uid 1000:
+   ```bash
+   mkdir -p /srv/livingmod
+   git clone https://github.com/CherryWorm/minecraft-livemod.git /srv/livingmod/repo
+   bash /srv/livingmod/repo/infra/wsl/bootstrap.sh
+   chown -R livingmod:livingmod /srv/livingmod
+   ```
+3. **As `livingmod`, set up the host:** `./scripts/init-host.sh --public YOUR.ADDRESS`. This writes `.env` and makes up the password, which you read with `cat ../runtime/secrets/password.secret`.
 4. **Edit `.env`:**
-   - `PROXY_ONLINE_MODE=true`. Never turn this off on anything reachable from the internet.
-   - `WHITE_LIST=true`, then add each friend with `./scripts/mc.sh whitelist add NAME`.
-   - `PACK_PUBLIC_URL=http://your.server.address:25567/`.
    - `MINECRAFT_EULA=true`, once you've read and accepted it.
    - `OWNER_UUID=` your Minecraft account's UUID, so `/agentstop` works for you in game.
-5. **Set the token** with `./scripts/set-claude-token.sh`. Don't copy it from the dev machine in a chat or a file you keep.
-6. **Check the agent's sandbox.** A host with AppArmor may block the namespaces credential scrubbing needs, so rerun both of these and read the results:
+   - `PROXY_ONLINE_MODE` stays `true`. Never turn this off on anything reachable from the internet.
+5. **Build and start it,** as `livingmod`. The first boot also makes the signing key that goes in the friend pack:
+   ```bash
+   ./scripts/stack.sh build
+   ./scripts/build-mods.sh current
+   ./scripts/stack.sh up -d
+   ./scripts/make-friend-pack.sh
+   python3 -m broker.promote --source "$(pwd)" --release-id baseline
+   ```
+6. **Start the broker as a service,** as root: `cp infra/systemd/livingmod-broker.service /etc/systemd/system/ && systemctl enable --now livingmod-broker`.
+7. **Set the Claude token,** as root, with `./scripts/set-claude-token.sh`. Don't copy it from the dev machine in a chat or a file you keep.
+8. **Check the agent's sandbox.** A host with AppArmor may block the namespaces credential scrubbing needs, so rerun both of these and read the results:
    ```bash
    ./scripts/stack.sh --profile agent build
    ./scripts/stack.sh --profile agent run --rm -T agent python3 /spikes/s5_plan_login.py
    ./scripts/stack.sh --profile agent run --rm -T agent python3 /spikes/s6_agent_smoke.py
    ```
-7. **Firewall:** allow 25565 for the game and 25567 for the resource pack. Keep 25566, 25568 and 25575 closed.
-8. **Set up off-box backups.** World backups land in `runtime/backups`. Copy them somewhere the agent can't reach, and copy `runtime/broker/signing` to somewhere safer still, because losing it means every friend has to reinstall.
-9. **Move the signing key** from the dev machine if a pack has already gone out, or make a new one with `python3 -m broker.sign` and rebuild the friend pack.
-10. **Start it:**
+9. **Set up off-box backups.** World backups land in `runtime/backups`. Copy them somewhere the agent can't reach, and copy `runtime/broker/signing` to somewhere safer still, because losing it means every friend has to reinstall.
+10. **Start the agent:**
     ```bash
-    ./scripts/stack.sh up -d
-    printf 'Name1\nName2\n' > "$RUNTIME_DIR/control/roster.txt"
+    printf 'Name1\nName2\n' > ../runtime/control/roster.txt
     ./scripts/agent-up.sh
     ```
 
-**Known gap:** the prod server can reach the internet, because Polymer serves the resource pack from it and that needs a public network. Agent-written server code runs in there, so on the rented server add a firewall rule that blocks new outbound connections from the prod container, or move the pack to a standalone host.
+To update the code later: `git pull` as `livingmod`, then `./scripts/stack.sh build`, `python3 -m broker.promote --source "$(pwd)" --release-id update-$(date +%s)`, `./scripts/stack.sh up -d`, and as root `systemctl restart livingmod-broker`.
 
-**What the agent can reach:** builders and their shell commands only reach Anthropic, through the `egress` proxy. Research goes through a separate `web` proxy, which can reach any public HTTPS site and refuses this machine and private networks. Only the research role holds its password, and that role has no shell, no files and nothing private in its prompt. The others get its answer as text. A misleading page can still mislead a builder through that text, so every release still goes through all the gates and the review.
+**What's open to the internet:** only what's in `compose.yaml` with no `127.0.0.1` in front of it, which is 25565 for the game, plus 80 and 443 for the site. 25566, 25567, 25568 and RCON aren't published beyond this machine. Docker writes its own firewall rules, so `ufw` can't close a published port, and that's why nothing else is published.
+
+## The password
+
+There's one password for the website and the game, kept in `runtime/secrets/password.secret`. Change it with `./scripts/set-password.sh`, which makes up a new one, or `./scripts/set-password.sh --ask` to type your own. Nothing needs restarting. Everyone is asked again the next time they join.
+
+- **Website:** the browser's own login box. The user name is `player`. The zip is behind it too.
+- **Game:** Minecraft's own dialog, shown before the player gets any further than logging in, so without the password they get no world, no resource pack and no chat, and the agent never hears of them. Getting it right is remembered per account. Three wrong answers disconnect them, and ten in an hour lock that account out for the hour. What's typed into the box is visible on screen, because Minecraft's dialogs have no hidden text field.
+- **What isn't behind it:** anyone can see that a Minecraft server is there and read its name in the server list, because Minecraft needs that to connect at all. The resource pack's address can't have a password either, because Minecraft can't send one, so it has a long random token instead. Only someone who has passed the password is ever told it.
+
+Mojang's login check still runs first, so people need a real Minecraft account as well.
+
+**What the agent can reach:** the game servers have no route to the internet at all, even though agent-written code runs in them. Clients reach their resource packs through the site's container. builders and their shell commands only reach Anthropic, through the `egress` proxy. Research goes through a separate `web` proxy, which can reach any public HTTPS site and refuses this machine and private networks. Only the research role holds its password, and that role has no shell, no files and nothing private in its prompt. The others get its answer as text. A misleading page can still mislead a builder through that text, so every release still goes through all the gates and the review.
 
 ## Before friends install anything
 
 Each friend has to agree to two things, knowing what they mean:
 
-- Their chat and private interview answers go to Anthropic. Their ideas can also shape what the agent looks up on the public web. A check keeps player names and long phrases from private answers out of those searches, but it can't catch a paraphrase.
+- Their chat and private interview answers go to Anthropic, including whatever they say to creatures. Creatures can repeat what they're told to other players as gossip. Their ideas can also shape what the agent looks up on the public web. A check keeps player names and long phrases from private answers out of those searches, but it can't catch a paraphrase.
 - The companion runs code an AI wrote on their PC. It's signed and checked, and it can't use files, the network or their login, but Java has no true sandbox, so this reduces risk rather than removing it. `/companion off` turns it off on their machine at any time.
 
-Then make the pack with `./scripts/make-friend-pack.sh` and send them the file. They need [Prism Launcher](https://prismlauncher.org/) and their own Minecraft account: *Add Instance → Import → choose the zip*, then add the server address. The first launch takes a few minutes.
+The website says all of this, above the download. The pack comes from `./scripts/make-friend-pack.sh`, which also updates the site's copy, so send people the site's address and the password. They need [Prism Launcher](https://prismlauncher.org/) and their own Minecraft account: *Add Instance → Import → choose the zip*. The server is already in the game's list. The first launch takes a few minutes.
 
 Prism's handling of the pack hasn't been tested on a real install yet, so try it on your own PC first.
 
@@ -57,6 +79,10 @@ Once anyone runs a client module, everyone needs the companion. Turn that on wit
 | See what it's released | `tail runtime/timeline.jsonl` and `cat runtime/agent-workspace/state/features.jsonl` |
 | See what it's asked the engine to add | `cat runtime/agent-workspace/state/host_requests.jsonl` |
 | See how much of your plan it's used | `cat runtime/agent-workspace/state/governor.json` |
+| See the world's progression and what's built on it | `cat runtime/agent-workspace/repo/bible/progression.json` |
+| See which numbers it's changed from feedback | `cat runtime/agent-workspace/state/tunes.jsonl` |
+| See what creatures with minds have been up to | `tail runtime/agent-workspace/state/minds.jsonl`, and `cat runtime/agent-workspace/state/rumours.jsonl` |
+| Turn minds off, or back on | `touch runtime/control/no_minds`, or `rm` the same file. `AGENT_MIND_USAGE_LIMIT` in `.env` sets their daily share, a tenth of the daily limit by default |
 | See what it's looked up | `ls runtime/agent-workspace/research`, and `docker logs livingmod-web-1 \| grep CONNECT` for every site |
 | Turn its research off, or back on | `touch runtime/control/no_research`, or `rm` the same file |
 | Make it decide now, without waiting for everyone | `touch runtime/control/decide_now` |
@@ -66,6 +92,10 @@ Once anyone runs a client module, everyone needs the companion. Turn that on wit
 | Open up land that's already generated to new biomes | Stop the server, then `python3 -m broker.prune runtime/prod/world` (add `--dry-run` first) |
 
 The kill switch stops releases and silences the character. The game keeps running, and everything already shipped keeps working.
+
+## What the numbers hold it to
+
+Everything the agent builds is checked against limits in `broker/gates/progression.py` and `broker/gates/static.py`: gear and mob strength by stage, automation rates, and how many moving parts a model can have. They're starting values, so tune them after you've played. Real frame rates on your friends' PCs are the thing to watch, because the test client renders in software and can't measure them.
 
 ## When something goes wrong
 

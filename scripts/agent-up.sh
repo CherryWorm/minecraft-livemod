@@ -11,13 +11,16 @@ if [[ "${1:-}" != "--no-build" ]]; then
   ./scripts/stack.sh --profile agent build agent egress web >/dev/null </dev/null
 fi
 
-pid_file="$RUNTIME_DIR/broker/daemon.pid"
-if [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
-  kill "$(cat "$pid_file")"
-  sleep 1
+# A rented server runs the broker as a service (infra/systemd), which brings it back after a crash or a reboot.
+if ! systemctl is-enabled --quiet livingmod-broker 2>/dev/null; then
+  pid_file="$RUNTIME_DIR/broker/daemon.pid"
+  if [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+    kill "$(cat "$pid_file")"
+    sleep 1
+  fi
+  nohup python3 -m broker.daemon >>"$RUNTIME_DIR/broker/daemon.log" 2>&1 </dev/null &
+  echo $! >"$pid_file"
 fi
-nohup python3 -m broker.daemon >>"$RUNTIME_DIR/broker/daemon.log" 2>&1 </dev/null &
-echo $! >"$pid_file"
 
 ./scripts/stack.sh --profile agent up -d --force-recreate agent </dev/null
 echo "agent and broker started"

@@ -9,7 +9,8 @@
 			"gm.companion.test.ModuleCycleTest",
 			"gm.companion.test.SceneTest",
 			"gm.companion.test.ModuleSafetyTest",
-			"gm.companion.test.KnowledgeTest"
+			"gm.companion.test.KnowledgeTest",
+			"gm.companion.test.PasswordTest"
 		]
 	}
 }

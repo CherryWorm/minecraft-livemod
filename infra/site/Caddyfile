@@ -1,0 +1,50 @@
+{
+	# Let's Encrypt only gives certificates for a bare IP address on its short-lived profile. Caddy renews them by itself.
+	cert_issuer acme {
+		profile shortlived
+	}
+}
+
+{$SITE_ADDRESS} {
+	# Minecraft can't send a password when it fetches a resource pack, so this path has no password. It's a long random
+	# token instead, which nobody learns until they've passed the game's own password.
+	@pack path /pack/{$PACK_TOKEN}/*
+	handle @pack {
+		uri strip_prefix /pack/{$PACK_TOKEN}
+		reverse_proxy prod:25567
+	}
+
+	handle {
+		# Written by scripts/set-password.sh. A missing file stops the site from starting, rather than opening it.
+		import /etc/caddy/auth/auth.caddy
+
+		header {
+			Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+			Referrer-Policy no-referrer
+			X-Content-Type-Options nosniff
+			Cache-Control no-store
+		}
+
+		handle /LivingMod.zip {
+			header Content-Disposition "attachment; filename=LivingMod.zip"
+			root * /srv/download
+			file_server
+		}
+
+		handle {
+			root * /srv/www
+			templates
+			file_server
+		}
+	}
+}
+
+# The game servers have no route to the internet, so their pack servers are reached through here. These two are only
+# published on this machine, for test clients and bots.
+:25567 {
+	reverse_proxy prod:25567
+}
+
+:25568 {
+	reverse_proxy shadow:25567
+}
