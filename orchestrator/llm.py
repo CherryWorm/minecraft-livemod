@@ -22,7 +22,9 @@ ROLES = {
     "builder": {"model": "claude-opus-5-5", "effort": "medium"},
     "reviewer": {"model": "claude-opus-5-5", "effort": "medium"},
     "researcher": {"model": "claude-haiku-5-5", "effort": "low"},
-    "tuner": {"model": "claude-haiku-5-5", "effort": "low"},
+    "sorter": {"model": "claude-sonnet-5-5", "effort": "low"},
+    "small_builder": {"model": "claude-sonnet-5-5", "effort": "medium"},
+    "news": {"model": "claude-haiku-5-5", "effort": "low"},
     "mind": {"model": "claude-haiku-5-5", "effort": "low"},
     "icon": {"model": "claude-opus-5-5", "effort": "medium"},
 }

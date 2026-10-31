@@ -28,7 +28,10 @@ CACHE_JAR = "/cache/gradle/caches/fabric-loom/26.3/minecraft-client.jar"
 AGENT_ICON = WORKSPACE / "icon" / "server-icon.png"
 PROXY_DATA = runtime.RUNTIME / "velocity"
 ICON_SIZE = 64
-QUICK = ("lint", "check", "javap", "server_icon")  # None of these touch the shadow server, and a builder is waiting on each one.
+QUICK = ("lint", "check", "javap", "server_icon", "set_rule")  # None of these touch the shadow server, and someone is waiting on each one.
+# Only these, because the rest of what a server command can do would get around the gates. All of them apply to everyone.
+RULES = {"players_sleeping_percentage": lambda value: isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 100,
+         "spawn_phantoms": lambda value: isinstance(value, bool), "keep_inventory": lambda value: isinstance(value, bool)}
 
 
 def assemble(commit):
@@ -117,6 +120,15 @@ def install_icon():
     return {"result": "installed"}
 
 
+def set_rule(rule, value):
+    if rule not in RULES:
+        return {"result": "blocked", "gate": "rule", "reason": f"{rule} isn't a rule that can be changed. These are: {', '.join(RULES)}."}
+    if not RULES[rule](value):
+        return {"result": "blocked", "gate": "rule", "reason": f"{value!r} isn't a usable value for {rule}."}
+    runtime.rcon("prod", "gamerule", rule, json.dumps(value))
+    return {"result": "set"}
+
+
 def handle(request):
     kind = request["kind"]
     if runtime.agent_disabled() and kind != "javap":
@@ -126,6 +138,8 @@ def handle(request):
         return promote(request["commit"], release_id, "--lint-only")
     if kind == "server_icon":
         return install_icon()
+    if kind == "set_rule":
+        return set_rule(request["rule"], request["value"])
     if kind == "check":
         return promote(request["commit"], release_id, "--check-only")
     if kind == "gates":
@@ -139,8 +153,12 @@ def handle(request):
 
 def next_request(pending):
     """Still one at a time, because there's one shadow server and releases must not overlap. But with several builders
-    working, a quick check shouldn't wait behind everyone else's full test run."""
-    return min(pending, key=lambda path: (json.loads(path.read_text(encoding="utf-8"))["kind"] not in QUICK, path.stat().st_mtime))
+    working, a quick check shouldn't wait behind everyone else's full test run, and a small change a player is waiting
+    for goes ahead of a big one that's being built in the background."""
+    def order(path):
+        request = json.loads(path.read_text(encoding="utf-8"))
+        return (0 if request["kind"] in QUICK else 1 if request.get("hurry") else 2, path.stat().st_mtime)
+    return min(pending, key=order)
 
 
 def main():

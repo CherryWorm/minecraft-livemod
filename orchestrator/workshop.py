@@ -24,10 +24,13 @@ REPORTS = pathlib.Path("/workspace/reports")
 REFERENCE_TEXTURES = pathlib.Path("/workspace/reference-textures")
 FEATURE_RESEARCH = 4
 TUNES_PER_HOUR = 6
-REQUEST_TIMEOUT = {"lint": 300, "check": 300, "gates": 1800, "release": 1800, "javap": 300, "server_icon": 300}  # Generous, because they queue behind whatever's running.
+REQUEST_TIMEOUT = {"lint": 300, "check": 300, "gates": 1800, "release": 1800, "javap": 300, "server_icon": 300, "set_rule": 300}  # Generous, because they queue behind whatever's running.
 # Turns and usage for one attempt, and how many attempts. The later a stage is, the bigger its features can be, and
 # nobody's waiting on them, because they're built in the background while people play.
 STAGE_LIMITS = {"early": (60, 8.0, 3), "mid": (120, 16.0, 4), "end": (200, 30.0, 5)}
+SMALL_LIMITS = (40, 3.0, 2)
+SMALL_NOTE = ("This is a small change a player just asked for, and they're waiting for it. Do it yourself, quickly, with no subagents and no research, "
+              "and change as little as you can. If it changes something players already have, say why in `changes_reached`.\n\n")
 
 VERDICT_SCHEMA = {
     "type": "object",
@@ -227,6 +230,7 @@ BUILDER_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Agent", "Task
                  "mcp__world__world_index", research.TOOL_NAME, *(f"mcp__broker__{name}" for name in templates.TEMPLATES)]
 # Only Bash runs in the sandbox, so file tools need their own limits on where secrets could be found. Builders can run
 # things and write code, so they never read a web page themselves: they ask the research tool.
+SMALL_TOOLS = [name for name in BUILDER_TOOLS if name not in ("Agent", "Task", research.TOOL_NAME)]
 BUILDER_DENIED = ["Read(//proc/**)", "Read(//run/**)", "Read(//home/agent/.claude/**)", "Read(//workspace/state/**)",
                   "Grep(//proc/**)", "Grep(//run/**)", "Grep(//workspace/state/**)",
                   "Glob(//workspace/state/**)", "WebFetch", "WebSearch"]
@@ -239,6 +243,7 @@ class Workshop:
         self.web_research = web_research
         self.reached = reached  # The names of what players already have.
         self.tune_times = []
+        self.changes = 0  # So that plain code can tell whether something really was changed, whatever a model says.
         self.release_lock = asyncio.Lock()
 
     def world_server(self, can_tune=False):
@@ -258,7 +263,26 @@ class Workshop:
         async def tune(args):
             return _text(await self.tune(args["feature"], args["table"], args["name"], args["field"], args["value"], args["reason"]))
 
-        return create_sdk_mcp_server("world", tools=[index, *([tune] if can_tune else [])])
+        @tool("set_rule", ("Changes a server rule for everyone, straight away. Rules: players_sleeping_percentage (0 to 100, how many players must "
+                           "sleep to skip the night), spawn_phantoms (true or false), keep_inventory (true or false)."),
+              {"type": "object", "required": ["rule", "value", "reason"], "properties": {"rule": {"type": "string"}, "value": {}, "reason": {"type": "string"}}})
+        async def set_rule(args):
+            return _text(await self.set_rule(args["rule"], args["value"], args["reason"]))
+
+        return create_sdk_mcp_server("world", tools=[index, *([tune, set_rule] if can_tune else [])])
+
+    async def set_rule(self, rule, value, reason):
+        blocked = self.governor.why_not_build()
+        if blocked:
+            return f"Not now: {blocked}."
+        answer = await request("set_rule", rule=rule, value=value)
+        if answer.get("result") != "set":
+            return f"Refused: {answer.get('reason')}"
+        self.changes += 1
+        with pathlib.Path("/workspace/state/tunes.jsonl").open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"at": time.time(), "rule": rule, "value": value, "reason": reason}) + "\n")
+        print(f"set the rule {rule} to {value}", flush=True)
+        return "Done: it's live."
 
     async def tune(self, feature_id, table, name, field, value, reason):
         """Plain code makes the change on its own branch, and the normal gates decide whether it goes out."""
@@ -291,6 +315,7 @@ class Workshop:
                 _git("checkout", "-q", "main")
                 _git("merge", "-q", "--no-ff", "-m", f"Tuned {feature_id}: {reason[:80]}", branch)
             self.tune_times.append(now)
+            self.changes += 1
             seconds = round(time.monotonic() - started, 1)
             with pathlib.Path("/workspace/state/tunes.jsonl").open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps({"at": now, "feature": feature_id, "name": name, "field": field, "value": value,
@@ -307,6 +332,9 @@ class Workshop:
             TREES.mkdir(parents=True, exist_ok=True)
             subprocess.run(["git", "worktree", "prune"], cwd=REPO, check=False)
             _git("worktree", "add", "-q", "-B", f"feature/{feature_id}", str(tree), "main")
+        # It's been here before, for a released feature that's changing or a build a restart interrupted, so catch up.
+        elif subprocess.run(["git", "merge", "-q", "--no-edit", "main"], cwd=tree, check=False, capture_output=True).returncode != 0:
+            subprocess.run(["git", "merge", "--abort"], cwd=tree, check=False, capture_output=True)
         return tree
 
     async def _review(self, spec, feature_id, tree, screenshots):
@@ -319,8 +347,9 @@ class Workshop:
             return {"approve": False, "problems": ["The review didn't complete, so it should run again."]}
         return result.structured
 
-    async def build(self, feature_id, spec, node, stage):
-        """Takes one feature from spec to released. Returns True if it reached players."""
+    async def build(self, feature_id, spec, node, stage, small=False):
+        """Takes one feature from spec to released. Returns True if it reached players, False if it couldn't be done,
+        and None if it had to stop for now and should be picked up again later."""
         started = time.monotonic()
         tree = self._prepare_tree(feature_id)
         (tree / "mods/genesis/features" / feature_id).mkdir(parents=True, exist_ok=True)
@@ -329,19 +358,20 @@ class Workshop:
         last_problem = ""
         timings = {}
         web = self.web_research.server(FEATURE_RESEARCH)
-        max_turns, usage, attempts = STAGE_LIMITS[stage]
+        max_turns, usage, attempts = SMALL_LIMITS if small else STAGE_LIMITS[stage]
+        tools = SMALL_TOOLS if small else BUILDER_TOOLS
         for attempt in range(1, attempts + 1):
             reason = self.governor.why_not_build()
             if reason:
                 print(f"{feature_id}: pausing: {reason}", flush=True)
-                return False
+                return None
 
-            prompt = feedback or (f"Build this feature, with id `{feature_id}`, in node `{node}`, which is in the {stage} game. Its place "
+            prompt = feedback or ((SMALL_NOTE if small else "") + f"Build this feature, with id `{feature_id}`, in node `{node}`, which is in the {stage} game. Its place "
                                   f"in the world is in bible/progression.json.\n\n{llm.untrusted('spec', spec)}\n\n"
                                   f"Your feature folder is mods/genesis/features/{feature_id}/.")
             began = time.monotonic()
-            result = await llm.ask(self.governor, "builder", prompt, tools=BUILDER_TOOLS, allowed_tools=BUILDER_TOOLS,
-                                   disallowed_tools=BUILDER_DENIED, agents=SUBAGENTS, cwd=str(tree), max_turns=max_turns, resume=session,
+            result = await llm.ask(self.governor, "small_builder" if small else "builder", prompt, system=llm.prompt_text("builder"), tools=tools, allowed_tools=tools,
+                                   disallowed_tools=BUILDER_DENIED, agents=None if small else SUBAGENTS, cwd=str(tree), max_turns=max_turns, resume=session,
                                    mcp_servers={"broker": _tools_for(feature_id, tree, node), "web": web, "world": self.world_server()},
                                    budget=usage)
             timings[f"build_{attempt}"] = round(time.monotonic() - began, 1)
@@ -354,7 +384,7 @@ class Workshop:
 
             commit = ready_commit(f"{feature_id}: attempt {attempt}", tree, feature_id, node)
             began = time.monotonic()
-            gates = await request("gates", commit=commit, release_id=f"{feature_id}-{attempt}")
+            gates = await request("gates", commit=commit, release_id=f"{feature_id}-{attempt}", hurry=small)
             timings[f"gates_{attempt}"] = round(time.monotonic() - began, 1)
             if gates.get("result") not in ("passed_gates", "nothing_to_release"):
                 self.governor.record_gate_result(False)

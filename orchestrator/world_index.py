@@ -8,7 +8,7 @@ from orchestrator import progression as graph
 
 STAGE_ORDER = {stage: index for index, stage in enumerate(graph.STAGES)}
 REFERENCE = re.compile(r"\$(?:block|item|mob):(?:(\w+)/)?(\w+)")
-GUIDE_LIMIT = 30000  # It's read for every chat message, so however big the world gets, this can't grow forever.
+GUIDE_LIMIT = 60000  # It's read for every chat message, so however big the world gets, this can't grow forever.
 
 
 def _describe_item(item):
@@ -106,7 +106,7 @@ def _guide_recipe(recipe, say):
     return f"{made}: {how}" + (", once it's been learned" if recipe.get("mode") == "known" else "")
 
 
-def _guide_feature(manifest, say):
+def _guide_feature(manifest, say, with_text):
     lines = [f"### {say(manifest.get('summary', ''))}"]
 
     def block_name(block):
@@ -145,7 +145,8 @@ def _guide_feature(manifest, say):
         lines.append(f"- recipe for {_guide_recipe(recipe, say)}")
     for name, entry in manifest.get("knowledge", {}).items():
         routes = " or ".join(f"{route.get('type')} {say(route.get('id', ''))}".strip() for route in entry.get("routes", []))
-        lines.append(f"- to learn \"{entry.get('title', name)}\": {routes}. It reads: {say(entry.get('text', ''))}")
+        reads = f" It reads: {say(entry.get('text', ''))}" if with_text else ""
+        lines.append(f"- to learn \"{entry.get('title', name)}\": {routes}.{reads}")
     return lines
 
 
@@ -155,13 +156,19 @@ def player_guide(features_dir):
     manifests = {path.parent.name: json.loads(path.read_text(encoding="utf-8")) for path in sorted(features_dir.glob("*/feature.json"))}
     names = {(feature_id, name): thing["display"] for feature_id, manifest in manifests.items()
              for table in ("blocks", "items", "mobs") for name, thing in manifest.get(table, {}).items() if thing.get("display")}
-    lines = []
-    for feature_id, manifest in manifests.items():
-        def say(value, feature_id=feature_id):
-            text = REFERENCE.sub(lambda found: names.get((found.group(1) or feature_id, found.group(2)), found.group(2).replace("_", " ")), str(value))
-            return re.sub(r"#?minecraft:(\w+)", lambda found: found.group(1).replace("_", " "), text)
-        lines += _guide_feature(manifest, say)
-    return "\n".join(lines)[:GUIDE_LIMIT] or "Nothing yet."
+
+    def written(with_text):
+        lines = []
+        for feature_id, manifest in manifests.items():
+            def say(value, feature_id=feature_id):
+                text = REFERENCE.sub(lambda found: names.get((found.group(1) or feature_id, found.group(2)), found.group(2).replace("_", " ")), str(value))
+                return re.sub(r"#?minecraft:(\w+)", lambda found: found.group(1).replace("_", " "), text)
+            lines += _guide_feature(manifest, say, with_text)
+        return "\n".join(lines)
+
+    # What codex entries say is the first thing to go, because players can read those for themselves.
+    guide = written(True)
+    return (guide if len(guide) <= GUIDE_LIMIT else written(False)[:GUIDE_LIMIT]) or "Nothing yet."
 
 
 def reached_nodes(features_dir, reached):

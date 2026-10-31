@@ -7,7 +7,7 @@ import pathlib
 import re
 import time
 
-from orchestrator import icon, llm, minds, progression, research, voice, workshop, world_index
+from orchestrator import feedback, icon, llm, minds, progression, research, voice, workshop, world_index
 from orchestrator.bridge import Bridge
 from orchestrator.governor import CONTROL, Governor
 
@@ -22,13 +22,14 @@ HOW_TO_ANSWER = ("§7Please answer me with a private message: type §f/dm§7, a 
 OPENING_NOTE = ("§7Until the first new things arrive, the world is small and safe: you can go {radius} blocks from spawn, as far as the glowing wall, "
                 "with no monsters and no hunger, and nothing can be broken yet.")
 CHAT_BATCH_SECONDS = 20
-WEEKLY_INTENTS_PER_PLAYER = 20
+WEEKLY_INTENTS_PER_PLAYER = 100
 CHAT_MEMORY = 12  # Enough of a private chat to follow the conversation, without each reply getting more expensive.
 WATCH_SECONDS = 5 * 60
 FEATURE_ID = r"[a-z][a-z0-9_]{1,40}"
 DIRECTION_RESEARCH = 6
 DIRECTOR_RESEARCH = 3
 DIRECTOR_REST_SECONDS = 30 * 60
+FEEDBACK_PLAN_SECONDS = 10 * 60  # How long new requests can wait for the director, however much is being built.
 STOP_AFTER_RELEASES = os.environ.get("AGENT_STOP_AFTER_RELEASES")  # Lets a test spend a known amount.
 
 STAGES_TEMPLATE = """\
@@ -53,13 +54,20 @@ DIRECTOR_SCHEMA = {
     "type": "object",
     "properties": {
         "features": {"type": "array", "items": {"type": "object", "properties": {
-            "id": {"type": "string"}, "node": {"type": "string"}, "spec": {"type": "string"}}, "required": ["id", "node", "spec"]}},
+            "id": {"type": "string"}, "node": {"type": "string"}, "spec": {"type": "string"},
+            "answers": {"type": "array", "items": {"type": "integer"}}}, "required": ["id", "node", "spec"]}},
+        "decisions": {"type": "array", "items": {"type": "object", "properties": {
+            "number": {"type": "integer"}, "outcome": {"type": "string", "enum": [feedback.LATER, feedback.DECLINED, "already_there"]}, "why": {"type": "string"}},
+            "required": ["number", "outcome", "why"]}},
         "new_nodes": {"type": "array", "items": NODE_SCHEMA},
     },
-    "required": ["features"],
+    "required": ["features", "decisions"],
 }
 
-TUNER_SCHEMA = {"type": "object", "properties": {"handled": {"type": "array", "items": {"type": "integer"}}}, "required": ["handled"]}
+SORTER_SCHEMA = {"type": "object", "properties": {"decisions": {"type": "array", "items": {"type": "object", "properties": {
+    "numbers": {"type": "array", "items": {"type": "integer"}}, "action": {"type": "string", "enum": ["changed", "small", "director"]},
+    "id": {"type": "string"}, "node": {"type": "string"}, "spec": {"type": "string"}, "why": {"type": "string"}}, "required": ["numbers", "action"]}}}, "required": ["decisions"]}
+SORTER_TOOLS = ["mcp__world__world_index", "mcp__world__tune", "mcp__world__set_rule"]
 
 
 class Agent:
@@ -72,20 +80,28 @@ class Agent:
         self.workshop = workshop.Workshop(self.governor, self.on_released, self.research, lambda: self.reached)
         self.told_about_dm = set()
         self.chat_buffer = []
-        self.queue = []
-        self.building = set()
         self.wake_director = asyncio.Event()
-        self.tune_wanted = asyncio.Event()
+        self.sort_wanted = asyncio.Event()
+        self.sort_wanted.set()  # There may be requests from before a restart.
+        self.planning = False
+        self.last_planned = 0
         self.director_rest_until = 0
         self.reached = []
         self.locks = {}
         self.choosing_direction = False
         self.direction_problems = []
         self.state = {"direction_chosen": False, "briefs": {}, "released": [], "border_open": False,
-                      "intents": {}, "intent_count": 0, "tuner_saw": 0, "handled_intents": [], "interviews": {}, "private_chats": {}}
+                      "intents": {}, "intent_count": 0, "interviews": {}, "private_chats": {}, "requests": {}, "sorted_up_to": 0, "director_saw": 0,
+                      "notices": {}, "queue": [], "in_flight": {}}
         if OPENING.exists():
             self.state.update(json.loads(OPENING.read_text(encoding="utf-8")))
         self.interviews = {player: voice.Interview(self.governor, player, saved) for player, saved in self.state["interviews"].items()}
+        self.requests = feedback.Requests(STATE / "intents.jsonl", self.state["requests"])
+        # Saved, so a restart costs as little as possible. What it interrupted goes first, and its work so far is still in its folder.
+        self.queue = self.state["queue"]
+        self.building = self.state["in_flight"]
+        self.queue[:0] = list(self.building.values())
+        self.building.clear()
 
     def save(self):
         self.state["interviews"] = {player: interview.saved() for player, interview in self.interviews.items()}
@@ -164,12 +180,44 @@ class Agent:
             await self.tell(player, voice.styled(reply) if in_character else AGENT_LABEL + reply, reply_click=True)
 
     async def what_they_have(self, player):
-        """So advice can be about their next step. An answer without it still beats no answer."""
+        """So advice can be about their next step. An answer without the game's part still beats no answer."""
+        known = {"what_they_asked_for": self.requests.of_player(player), "being_built_now": len(self.building), "waiting_to_be_built": len(self.queue)}
         try:
             progress = await self.bridge.call("progress")
         except (RuntimeError, ConnectionError, TimeoutError):
-            return {}
-        return {**progress.get("online", {}).get(player, {}), "nobody_has_worked_out": progress.get("undiscovered", [])}
+            return known
+        return {**known, **progress.get("online", {}).get(player, {}), "nobody_has_worked_out": progress.get("undiscovered", [])}
+
+    # What players hear back -------------------------------------------------------------------------
+
+    async def deliver(self, player, text):
+        """They may have logged off, in which case it waits for them."""
+        try:
+            await self.bridge.whisper(player, text, True)
+        except (RuntimeError, ConnectionError, TimeoutError):
+            self.state["notices"].setdefault(player, []).append(text)
+            self.save()
+
+    async def deliver_waiting(self, player):
+        waiting = self.state["notices"].pop(player, [])
+        if waiting:
+            self.save()
+        for text in waiting:
+            await self.deliver(player, text)
+
+    async def send_news(self, news):
+        """Takes (request, outcome, why) and tells each player once, however much was decided at the same time."""
+        by_player = {}
+        for entry, outcome, why in news:
+            by_player.setdefault(entry.get("player", ""), []).append({"wanted": entry["wants"], "outcome": outcome, **({"why": why} if why else {})})
+        for player, items in by_player.items():
+            try:
+                text = await voice.request_news(self.governor, items, self.briefs())
+            except Exception as error:  # noqa: BLE001 - the plain version below still tells them
+                print(f"writing the news failed: {error}", flush=True)
+                text = None
+            plain = "§7About what you asked for: " + "; ".join(f"{item['wanted']}: {item['outcome'].replace('_', ' ')}" for item in items)
+            await self.deliver(player, voice.styled(text) if text else plain[:voice.HELP_LIMIT])
 
     async def interview_turn(self, player, interview, text):
         reply = await interview.turn(text)
@@ -228,6 +276,7 @@ class Agent:
             if text:
                 await self.bridge.broadcast(voice.styled(text))
         print(f"direction chosen, {len(self.queue)} features queued", flush=True)
+        self.sort_wanted.set()  # What was said before there was a direction can be dealt with now.
         self.wake_director.set()
         asyncio.create_task(self.make_icon())
 
@@ -254,6 +303,7 @@ class Agent:
                 await self.resume_interview(player)
             elif player not in self.state["briefs"]:
                 await self.start_interview(player)
+            await self.deliver_waiting(player)
         elif kind == "dm":
             await self.on_dm(player, event.get("text", ""))
         elif kind == "chat":
@@ -338,36 +388,65 @@ class Agent:
                     self.state["intent_count"] += 1
                     stream.write(json.dumps({"at": time.time(), "number": self.state["intent_count"], **intent}) + "\n")
             self.save()
-            self.tune_wanted.set()
+            self.sort_wanted.set()
             self.wake_director.set()
 
-    # Tuning -----------------------------------------------------------------------------------------
+    # Sorting requests -------------------------------------------------------------------------------
 
-    async def tune_from_feedback(self):
-        """Feedback that a number can settle shouldn't wait for a builder. Anything else goes on to the director."""
-        path = STATE / "intents.jsonl"
-        entries = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
-        fresh = [entry for entry in entries if entry.get("number", 0) > self.state["tuner_saw"]]
-        if not fresh or not any(FEATURES.glob("*/feature.json")):
+    def work_list(self):
+        work = [*self.building.values(), *self.queue]
+        return "\n".join(llm.untrusted("work", f"{feature['id']}: {feature.get('spec', '')[:200]}") for feature in work) or "(nothing)"
+
+    def can_build(self, feature):
+        # The id comes from a model and becomes a folder and a branch name.
+        return (re.fullmatch(FEATURE_ID, feature.get("id") or "") and feature.get("spec")
+                and feature.get("node") in progression.read(PROGRESSION)["nodes"])
+
+    async def sort_requests(self):
+        """The fast look at anything new. A number or a server rule changes on the spot, a small job gets its own small
+        builder, and the rest go on to the director."""
+        fresh = self.requests.unanswered_after(self.state["sorted_up_to"])
+        if not fresh or not self.state["direction_chosen"]:
             return
         body = "\n".join(llm.untrusted("intent", json.dumps({"number": entry["number"], "wants": entry["wants"]})) for entry in fresh)
-        result = await llm.ask(self.governor, "tuner", body, schema=TUNER_SCHEMA, allowed_tools=["mcp__world__world_index", "mcp__world__tune"],
-                               mcp_servers={"world": self.workshop.world_server(can_tune=True)}, max_turns=10)
-        self.state["tuner_saw"] = fresh[-1]["number"]
-        if isinstance(result.structured, dict):
-            self.state["handled_intents"] += result.structured.get("handled", [])
-        self.save()
-
-    async def tune_loop(self):
-        while True:
-            await self.tune_wanted.wait()
-            self.tune_wanted.clear()
-            if self.governor.why_not_build():
+        changes_before = self.workshop.changes
+        try:
+            result = await llm.ask(self.governor, "sorter", f"{body}\n\nWhat's being built or waiting to be built:\n{self.work_list()}", schema=SORTER_SCHEMA,
+                                   allowed_tools=SORTER_TOOLS, mcp_servers={"world": self.workshop.world_server(can_tune=True)}, max_turns=20)
+            decisions = result.structured.get("decisions", []) if isinstance(result.structured, dict) and not result.is_error else []
+        finally:
+            # If this fails, the director still sees them, because a request only leaves its list by being decided.
+            self.state["sorted_up_to"] = fresh[-1]["number"]
+        known = {entry["number"]: entry for entry in fresh}
+        news = []
+        for decision in decisions:
+            numbers = [number for number in decision.get("numbers", []) if number in known]
+            if not numbers:
                 continue
-            try:
-                await self.tune_from_feedback()
-            except Exception as error:  # noqa: BLE001
-                print(f"tuning failed: {error}", flush=True)
+            if decision.get("action") == "changed" and self.workshop.changes > changes_before:
+                for number in numbers:
+                    self.requests.mark(number, feedback.DONE, why=decision.get("why", ""))
+                    news.append((known[number], feedback.DONE, decision.get("why", "")))
+            elif decision.get("action") == "small" and self.can_build(decision):
+                self.queue.insert(0, {"id": decision["id"], "node": decision["node"], "spec": decision["spec"], "answers": numbers, "small": True})
+                for number in numbers:
+                    self.requests.mark(number, feedback.BUILDING, feature=decision["id"])
+                    news.append((known[number], feedback.BUILDING, ""))
+                print(f"{decision['id']}: a small job, for requests {numbers}", flush=True)
+        self.save()
+        await self.send_news(news)
+
+    async def sort_loop(self):
+        while True:
+            await self.sort_wanted.wait()
+            if not self.governor.why_not_build():
+                try:
+                    await self.sort_requests()
+                except Exception as error:  # noqa: BLE001
+                    print(f"sorting requests failed: {error}", flush=True)
+            # Cleared only now, because the director shouldn't start on something this might be about to take.
+            self.sort_wanted.clear()
+            self.wake_director.set()
 
     # Building ---------------------------------------------------------------------------------------
 
@@ -381,8 +460,12 @@ class Agent:
             STATE.mkdir(parents=True, exist_ok=True)
             with (STATE / "host_requests.jsonl").open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps({"at": time.time(), "feature": feature_id, "requests": manifest["host_requests"]}) + "\n")
+        finished = self.requests.for_feature(feature_id)
+        for entry in finished:
+            self.requests.mark(entry["number"], feedback.DONE, feature=feature_id)
         self.save()
         await self.open_world()
+        await self.send_news([(entry, feedback.DONE, "") for entry in finished])
 
     async def open_world(self):
         """The first thing to reach players starts the game proper. A release can restart the server, so this may
@@ -398,11 +481,11 @@ class Agent:
         self.save()
 
     async def next_features(self):
-        """Asks the director what's next, once the first list has run out."""
-        intents = STATE / "intents.jsonl"
-        recent = intents.read_text(encoding="utf-8").splitlines()[-30:] if intents.exists() else []
-        handled = set(self.state["handled_intents"])
-        body = "\n".join(llm.untrusted("intent", line) for line in recent if json.loads(line).get("number") not in handled) or "(no requests yet)"
+        """Asks the director what's next, and what to do about everything players have asked for."""
+        undecided = {entry["number"]: entry for entry in self.requests.undecided()}
+        saw = self.requests.last_number()
+        body = "\n".join(llm.untrusted("intent", json.dumps({"number": number, "player": entry.get("player"), "wants": entry["wants"], "status": self.requests.status(number) or "new"}))
+                         for number, entry in undecided.items()) or "(no requests waiting)"
         try:
             found = await self.bridge.call("progress")
             self.reached = found.get("reached", [])
@@ -413,7 +496,8 @@ class Agent:
         briefs = "\n".join(llm.untrusted("brief", json.dumps(brief)) for brief in self.briefs())
         unfinished_file = STATE / "unfinished.jsonl"
         unfinished = "\n".join(unfinished_file.read_text(encoding="utf-8").splitlines()[-10:]) if unfinished_file.exists() else "(none)"
-        prompt = (f"Player requests:\n{body}\n\nWhat players have found and learned:\n{llm.untrusted('progress', progress)}\n\n"
+        prompt = (f"Player requests:\n{body}\n\nBeing built or waiting to be built, so don't ask for these again:\n{self.work_list()}\n\n"
+                  f"What players have found and learned:\n{llm.untrusted('progress', progress)}\n\n"
                   f"What each player privately said they wanted, never to be quoted or attributed:\n{briefs}\n\n"
                   f"Features that couldn't be finished, and why. Ask for these differently, or not at all:\n{unfinished}\n\n"
                   "Read bible/theme.md, bible/stages.yaml and bible/progression.json, look at world_index, then choose the next features.")
@@ -423,7 +507,58 @@ class Agent:
         if result.is_error or not isinstance(result.structured, dict):
             return []
         self.grow_progression(result.structured.get("new_nodes") or [])
-        return result.structured.get("features", [])
+        self.state["director_saw"] = saw
+        news = []
+        for decision in result.structured.get("decisions", []):
+            number, outcome = decision.get("number"), decision.get("outcome")
+            if number not in undecided or outcome not in (feedback.LATER, feedback.DECLINED, "already_there"):
+                continue
+            # It'll keep coming back as later, and they only need to hear that once.
+            if not (outcome == feedback.LATER and self.requests.status(number) == feedback.LATER):
+                news.append((undecided[number], outcome, decision.get("why", "")))
+            self.requests.mark(number, feedback.DONE if outcome == "already_there" else outcome, why=decision.get("why", ""))
+        taken = {feature["id"] for feature in [*self.queue, *self.building.values()]}
+        features = []
+        for feature in result.structured.get("features", []):
+            if feature.get("id") in taken:
+                continue
+            answers = [number for number in feature.get("answers", []) if number in undecided]
+            for number in answers:
+                self.requests.mark(number, feedback.BUILDING, feature=feature["id"])
+                news.append((undecided[number], feedback.BUILDING, ""))
+            features.append({**feature, "answers": answers})
+        self.save()
+        await self.send_news(news)
+        return features
+
+    async def plan(self):
+        """A director's call can take minutes, and building doesn't stop for it. What someone asked for goes first."""
+        try:
+            features = await self.next_features()
+            self.queue[:0] = [feature for feature in features if feature["answers"]]
+            self.queue.extend(feature for feature in features if not feature["answers"])
+            # This should hardly ever come back empty, because there's always more to build, but asking again every
+            # few minutes would use up the day's limit if it did.
+            self.director_rest_until = 0 if features else time.time() + DIRECTOR_REST_SECONDS
+        except Exception as error:  # noqa: BLE001 - it'll be asked again
+            print(f"planning failed: {error}", flush=True)
+            self.director_rest_until = time.time() + DIRECTOR_REST_SECONDS
+        finally:
+            self.planning = False
+            self.last_planned = time.time()
+            self.save()
+            self.wake_director.set()
+
+    def out_of_work(self):
+        return not any(not feature.get("small") for feature in [*self.queue, *self.building.values()])
+
+    def should_plan(self):
+        # While requests are being sorted, some of them may be about to become small jobs.
+        if self.planning or self.sort_wanted.is_set():
+            return False
+        if self.out_of_work() and time.time() >= self.director_rest_until:
+            return True
+        return bool(self.requests.unanswered_after(self.state["director_saw"])) and time.time() - self.last_planned >= FEEDBACK_PLAN_SECONDS
 
     def grow_progression(self, new_nodes):
         if not new_nodes:
@@ -437,6 +572,7 @@ class Agent:
             workshop.commit_all("The progression grew")
 
     async def build_one(self, feature):
+        shipped = False
         try:
             # The id comes from a model and becomes a folder and a branch name.
             if not re.fullmatch(FEATURE_ID, feature["id"]):
@@ -447,12 +583,34 @@ class Agent:
             if node not in graph["nodes"]:
                 print(f"refusing feature {feature['id']}: node {node!r} isn't in the progression", flush=True)
                 return
-            await self.workshop.build(feature["id"], feature["spec"], node, progression.stage_of(graph, node))
+            shipped = await self.workshop.build(feature["id"], feature["spec"], node, progression.stage_of(graph, node), small=feature.get("small", False))
         except Exception as error:  # noqa: BLE001 - one failed feature must not stop the others
             print(f"building {feature['id']} failed: {error}", flush=True)
         finally:
-            self.building.discard(feature["id"])
+            del self.building[feature["id"]]
+            if shipped is None:
+                self.queue.insert(0, feature)  # It had to stop for now, not because of anything wrong with it.
+            elif not shipped:
+                # Nobody's going to deliver it after all, so the director gets to decide again, soon.
+                for entry in self.requests.for_feature(feature["id"]):
+                    self.requests.reopen(entry["number"])
+                    self.state["director_saw"] = min(self.state["director_saw"], entry["number"] - 1)
+            self.save()
             self.wake_director.set()
+
+    def start_work(self):
+        """Small jobs have slots of their own, so that one never waits behind a big feature."""
+        for small, allowed in ((True, self.governor.small_builders_allowed()), (False, self.governor.builders_allowed())):
+            running = sum(bool(feature.get("small")) == small for feature in self.building.values())
+            for feature in [feature for feature in self.queue if bool(feature.get("small")) == small]:
+                if running >= allowed:
+                    break
+                if feature["id"] not in self.building:
+                    self.queue.remove(feature)
+                    self.building[feature["id"]] = feature
+                    running += 1
+                    asyncio.create_task(self.build_one(feature))
+        self.save()
 
     async def build_loop(self):
         while True:
@@ -468,15 +626,10 @@ class Agent:
                 except TimeoutError:
                     pass
                 continue
-            if not self.queue and not self.building and time.time() >= self.director_rest_until:
-                self.queue.extend(await self.next_features())
-                # This should hardly ever come back empty, because there's always more to build, but asking again every
-                # few minutes would use up the day's limit if it did.
-                self.director_rest_until = 0 if self.queue else time.time() + DIRECTOR_REST_SECONDS
-            while self.queue and len(self.building) < self.governor.builders_allowed():
-                feature = self.queue.pop(0)
-                self.building.add(feature["id"])
-                asyncio.create_task(self.build_one(feature))
+            if self.should_plan():
+                self.planning = True
+                asyncio.create_task(self.plan())
+            self.start_work()
             self.wake_director.clear()
             try:
                 await asyncio.wait_for(self.wake_director.wait(), timeout=300)
@@ -525,7 +678,7 @@ class Agent:
             name = player["name"] if isinstance(player, dict) else player
             await self.bridge.events.put({"event": "join", "player": name})
         print("agent running", flush=True)
-        await asyncio.gather(readers, self.event_loop(), self.chat_loop(), self.build_loop(), self.tune_loop(), self.opening_loop(),
+        await asyncio.gather(readers, self.event_loop(), self.chat_loop(), self.build_loop(), self.sort_loop(), self.opening_loop(),
                              self.status_loop(), self.watch_loop())
 
 

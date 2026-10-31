@@ -4,6 +4,7 @@ import os
 import pathlib
 import tempfile
 import unittest
+from unittest import mock
 
 from broker import daemon
 
@@ -15,9 +16,9 @@ class Order(unittest.TestCase):
         self.folder = pathlib.Path(folder.name)
         self.age = 1000
 
-    def request(self, name, kind):
+    def request(self, name, kind, **fields):
         path = self.folder / f"{name}.json"
-        path.write_text(json.dumps({"id": name, "kind": kind}), encoding="utf-8")
+        path.write_text(json.dumps({"id": name, "kind": kind, **fields}), encoding="utf-8")
         self.age += 1
         os.utime(path, (self.age, self.age))
         return path
@@ -35,6 +36,30 @@ class Order(unittest.TestCase):
     def test_quick_checks_keep_their_order(self):
         first, second = self.request("a", "check"), self.request("b", "lint")
         self.assertEqual(daemon.next_request([second, first]), first)
+
+    def test_a_small_change_goes_ahead_of_a_big_one(self):
+        big, small = self.request("a", "gates", hurry=False), self.request("b", "gates", hurry=True)
+        self.assertEqual(daemon.next_request([big, small]), small)
+        self.assertEqual(daemon.next_request([small, self.request("c", "lint")]).name, "c.json")
+
+
+class Rules(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.object(daemon.runtime, "rcon")
+        self.rcon = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_listed_rule_is_set(self):
+        self.assertEqual(daemon.set_rule("players_sleeping_percentage", 50), {"result": "set"})
+        self.rcon.assert_called_once_with("prod", "gamerule", "players_sleeping_percentage", "50")
+        self.assertEqual(daemon.set_rule("keep_inventory", True), {"result": "set"})
+        self.rcon.assert_called_with("prod", "gamerule", "keep_inventory", "true")
+
+    def test_nothing_else_is(self):
+        for rule, value in (("op", "Dana"), ("command_blocks_enabled", True), ("players_sleeping_percentage", 101), ("players_sleeping_percentage", -1),
+                            ("players_sleeping_percentage", True), ("players_sleeping_percentage", "50; op Dana"), ("keep_inventory", "true")):
+            self.assertEqual(daemon.set_rule(rule, value)["result"], "blocked", (rule, value))
+        self.rcon.assert_not_called()
 
 
 if __name__ == "__main__":

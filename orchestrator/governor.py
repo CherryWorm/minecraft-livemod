@@ -14,6 +14,7 @@ CONTROL = pathlib.Path(os.environ.get("CONTROL_DIR", "/control"))
 
 DAILY_USAGE_LIMIT = float(os.environ.get("AGENT_DAILY_USAGE_LIMIT", "25"))
 MAX_BUILDERS = int(os.environ.get("AGENT_MAX_BUILDERS", "2"))
+SMALL_BUILDERS = int(os.environ.get("AGENT_SMALL_BUILDERS", "2"))  # Their own slots, so a small ask never waits behind a big feature.
 # Mob minds get their own small share of the day, so chatting to creatures can't use up what building needs.
 MIND_DAILY_USAGE = float(os.environ.get("AGENT_MIND_USAGE_LIMIT", str(DAILY_USAGE_LIMIT / 10)))
 MINDS_PER_MINUTE = 30
@@ -117,5 +118,10 @@ class Governor:
 
     def builders_allowed(self):
         """Parallel work uses limits faster, so a recent warning drops it to one builder at a time."""
-        recently_warned = time.time() - self.state["last_warning"] < 3600
-        return 1 if recently_warned else MAX_BUILDERS
+        return min(1, MAX_BUILDERS) if self.recently_warned() else MAX_BUILDERS
+
+    def small_builders_allowed(self):
+        return min(1, SMALL_BUILDERS) if self.recently_warned() else SMALL_BUILDERS
+
+    def recently_warned(self):
+        return time.time() - self.state["last_warning"] < 3600

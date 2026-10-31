@@ -72,6 +72,15 @@ class PlayerGuide(unittest.TestCase):
         (self.features / "big" / "feature.json").write_text(json.dumps({"summary": "x" * (world_index.GUIDE_LIMIT * 2)}), encoding="utf-8")
         self.assertLessEqual(len(world_index.player_guide(self.features)), world_index.GUIDE_LIMIT)
 
+    def test_codex_text_is_the_first_thing_to_go(self):
+        self.assertIn("It reads:", self.guide)
+        (self.features / "big").mkdir()
+        # Just over the limit with the codex text, and under it without.
+        (self.features / "big" / "feature.json").write_text(json.dumps({"summary": "x" * (world_index.GUIDE_LIMIT - len(self.guide))}), encoding="utf-8")
+        smaller = world_index.player_guide(self.features)
+        self.assertNotIn("It reads:", smaller)
+        self.assertIn('to learn "Moss Lore": examine Moss Vein or obtain Moss Spore.', smaller)
+
     def test_an_empty_world_says_so(self):
         with tempfile.TemporaryDirectory() as empty:
             self.assertEqual(world_index.player_guide(pathlib.Path(empty)), "Nothing yet.")

@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from orchestrator import llm, main, voice
+from orchestrator import feedback, llm, main, voice
 
 BRIEF = {"wants": "exploring long dark caves with my friends every evening", "theme_ideas": "", "mods_enjoyed": [], "dislikes": "", "notes": ""}
 
@@ -41,10 +41,13 @@ class PrivateChat(unittest.IsolatedAsyncioTestCase):
         self.agent.bridge = mock.Mock()
         self.agent.bridge.call = mock.AsyncMock(return_value={"online": {"Dana": {"found": ["Iron Dust"], "known": ["Dusting"]}, "Eli": {"found": ["Eli's Thing"], "known": []}},
                                                               "undiscovered": ["Deep Lore"]})
-        self.agent.tune_wanted = asyncio.Event()
+        self.agent.sort_wanted = asyncio.Event()
         self.agent.wake_director = asyncio.Event()
         self.agent.state = {"direction_chosen": True, "briefs": {"Dana": BRIEF, "Eli": BRIEF}, "released": ["Glow Moss"],
                             "intents": {}, "intent_count": 0, "private_chats": {}}
+        self.agent.requests = feedback.Requests(self.folder / "intents.jsonl", {})
+        self.agent.queue = []
+        self.agent.building = {}
 
     def told(self):
         return [call.args[1] for call in self.agent.tell.await_args_list]
@@ -130,7 +133,16 @@ class PrivateChat(unittest.IsolatedAsyncioTestCase):
         self.ask.return_value = answer(intents=[{"wants": "more crystals in caves", "personal_advantage": False, "player": "Eli"}])
         await self.agent.on_dm("Dana", "more crystals please")
         self.assertEqual([(entry["player"], entry["wants"]) for entry in self.intents()], [("Dana", "more crystals in caves")])
-        self.assertTrue(self.agent.wake_director.is_set())
+        self.assertTrue(self.agent.sort_wanted.is_set())
+
+    async def test_it_knows_what_became_of_their_own_requests(self):
+        self.agent.requests.path.write_text(json.dumps({"number": 1, "player": "Dana", "wants": "a map"}) + "\n" + json.dumps({"number": 2, "player": "Eli", "wants": "a secret thing"}) + "\n", encoding="utf-8")
+        self.agent.requests.mark(1, feedback.DECLINED, why="maps spoil the survey")
+        self.agent.building["x"] = {}
+        await self.agent.on_dm("Dana", "did you add my map?")
+        self.assertIn("maps spoil the survey", self.prompt())
+        self.assertIn('"being_built_now": 1', self.prompt())
+        self.assertNotIn("a secret thing", self.prompt())
 
     async def test_a_request_for_an_advantage_is_not(self):
         self.ask.return_value = answer(intents=[{"wants": "give me diamonds", "personal_advantage": True}])

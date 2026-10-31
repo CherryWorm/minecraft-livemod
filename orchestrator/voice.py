@@ -80,6 +80,8 @@ PRIVATE_SCHEMA = {
     "required": ["reply", "intents"],
 }
 
+NEWS_SCHEMA = {"type": "object", "properties": {"reply": {"type": "string"}}, "required": ["reply"]}
+
 NO_CHARACTER_YET = ("You don't have one yet, because this world's theme hasn't been chosen. Speak plainly as the AI that's going to build it, "
                     "be friendly, and don't make up a theme.")
 
@@ -200,6 +202,14 @@ async def private_reply(governor, chat, in_character, seen=None):
     prompt = "\n".join(conversation(chat)) + "\n\nWhat this player has so far:\n" + llm.untrusted("progress", json.dumps(seen or {}))
     result = await llm.ask(governor, "dm", prompt, system=system, schema=PRIVATE_SCHEMA, max_turns=3)
     return result.structured if isinstance(result.structured, dict) and not result.is_error else None
+
+
+async def request_news(governor, items, briefs):
+    """One message to one player about what became of what they asked for. Returns None if it can't be said."""
+    result = await llm.ask(governor, "news", llm.untrusted("news", json.dumps(items)), system=llm.prompt_text("news") + persona() + guide(),
+                           schema=NEWS_SCHEMA, max_turns=3)
+    data = result.structured if isinstance(result.structured, dict) and not result.is_error else {}
+    return guard(data.get("reply"), briefs, HELP_LIMIT)
 
 
 class Watcher:
