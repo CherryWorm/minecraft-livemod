@@ -56,6 +56,10 @@ def build_source():
     models = target / "assets" / "models"
     models.mkdir(parents=True, exist_ok=True)
     make_model(models / "api_statue.bbmodel", "quadruped")
+    # With nothing playing by itself, a part only moves if something's moved it.
+    still = json.loads((models / "api_statue.bbmodel").read_text(encoding="utf-8"))
+    still["animations"] = []
+    (models / "api_statue.bbmodel").write_text(json.dumps(still), encoding="utf-8")
     make_model(models / "api_ox.bbmodel", "quadruped")
     make_model(models / "api_bat.bbmodel", "flying")
 
@@ -156,8 +160,8 @@ def play_placing(client):
     client.ask("held")
     check("and it stays in their hand", re.findall(r"\[M8\] holding (\d+)", client.text())[-1] == "1", client.text()[-300:])
     place_at(client, x + 2, y, z, 0, 0, gate)
-    check("a block placed hears who and with what", holds(client, f"gate placed by {PLAYER} with Api Gate") and is_block(x + 2, y, z, gate))
-    check("any module hears it, and what they had before it was used up", holds(client, "anything placed Api Gate from 1"))
+    check("a block placed hears who and with what", holds(client, f"gate placed by {PLAYER} with api_gate") and is_block(x + 2, y, z, gate))
+    check("any module hears it, and what they had before it was used up", holds(client, "anything placed api_gate from 1"))
 
     # Their crosshair is on it, from just above.
     rcon("tp", PLAYER, str(x + 2.5), str(y + 1), str(z + 0.5), "0", "90")
@@ -171,10 +175,12 @@ def play_placing(client):
     check("and can give way when it's happy to", holds(client, "gate gives way") and is_block(x + 2, y, z, "minecraft:air"))
 
     rcon("setblock", str(x + 2), str(y), str(z), "minecraft:gold_block")
-    rcon("clear", PLAYER)
-    client.ask("mine 200")
+    rcon("item", "replace", "entity", PLAYER, "weapon.mainhand", "with", "minecraft:netherite_pickaxe", "1")
+    time.sleep(1)
+    client.ask("mine 60")
     check("a module can refuse any block being broken", holds(client, "no breaking gold") and is_block(x + 2, y, z, "minecraft:gold_block"))
     rcon("setblock", str(x + 2), str(y), str(z), "minecraft:air")
+    rcon("clear", PLAYER)
 
 
 def play_redstone(client):
@@ -306,6 +312,21 @@ def play_parts(client):
     check("and they're all kept with it", "parts" in rcon("data", "get", "block", str(x), str(y), str(z)))
     rcon("setblock", str(x), str(y), str(z), "minecraft:air")
 
+    gauge = slot("api_gauge")
+    rcon("setblock", str(x), str(y), str(z), gauge)
+    time.sleep(1)
+    client.ask(f"useblock {x} {y} {z}")
+    check("a module can hold animations at a value", holds(client, "gauge at true"))
+    time.sleep(1)
+    high = client_parts(client, x, y, z)
+    time.sleep(1)
+    check("and they stay there", high == client_parts(client, x, y, z), str(high)[:300])
+    client.ask(f"useblock {x} {y} {z}")
+    check("a new value is heard", holds(client, "gauge at false"))
+    time.sleep(1)
+    check("and shows", high != client_parts(client, x, y, z))
+    rcon("setblock", str(x), str(y), str(z), "minecraft:air")
+
 
 def play_machine_slots(client):
     x, y, z = SPOT
@@ -346,7 +367,7 @@ def play_machine_slots(client):
     time.sleep(1)
     # With 3 slots a menu has one row, and its outputs go at the right, so the only output's the last place.
     client.ask("click 8 shift")
-    check("a module hears a player take from an output slot", holds(client, f"kiln gave 3 of Api Token to {PLAYER} from slot 2"))
+    check("a module hears a player take from an output slot", holds(client, f"kiln gave 3 of api_token to {PLAYER} from slot 2"))
     client.ask("closemenu")
 
     rcon("item", "replace", "block", str(x), str(y), str(z), "container.2", "with", slot("api_token", "items"), "2")
@@ -354,7 +375,7 @@ def play_machine_slots(client):
     client.ask(f"useblock {x} {y} {z}")
     time.sleep(1)
     client.ask("click 8")
-    check("and by picking it up", holds(client, f"kiln gave 2 of Api Token to {PLAYER} from slot 2"))
+    check("and by picking it up", holds(client, f"kiln gave 2 of api_token to {PLAYER} from slot 2"))
     client.ask("click 8")
     client.ask("closemenu")
 
@@ -385,13 +406,15 @@ def number(text):
     return float(re.findall(r"(-?\d+(?:\.\d+)?)[a-z]?\s*$", text.strip())[-1])
 
 
-def drop_count(item):
-    # Items on the ground around the spot, however many stacks they fell in. Kills them too, ready for next time.
-    total = 0
-    for line in rcon("data", "get", "entity", f"@n[type=item,nbt={{Item:{{id:\"{item}\"}}}}]", "Item.count").splitlines():
-        found = re.findall(r"(\d+)$", line.strip())
-        total += int(found[-1]) if found else 0
-    return total
+def aim(tag, x, y, z):
+    """Puts a mob right in front of the player, with their crosshair on it, the way someone really would use something on it."""
+    rcon("tp", f"@n[tag={tag}]", str(x + 0.5), str(y), str(z + 0.5))
+    rcon("tp", PLAYER, str(x + 0.5), str(y), str(z + 2.5), "facing", "entity", f"@n[tag={tag}]", "eyes")
+    time.sleep(0.5)
+
+
+def on_ground(item):
+    return "passed" in rcon("execute", "if", "entity", f'@e[type=item,nbt={{Item:{{id:"{item}"}}}}]').lower()
 
 
 def play_mob_drops(client):
@@ -404,8 +427,16 @@ def play_mob_drops(client):
     check("a mob drops the first of several things", "2" in rcon("data", "get", "entity", f"@n[type=item,nbt={{Item:{{id:\"{fang}\"}}}}]", "Item.count"))
     check("and the second, with its own count", "1" in rcon("data", "get", "entity", f"@n[type=item,nbt={{Item:{{id:\"{scale}\"}}}}]", "Item.count"))
     rare = slot("api_rare", "items")
-    check("and one with a small chance, most of the time, doesn't", "No entity" in rcon("data", "get", "entity", f"@n[type=item,nbt={{Item:{{id:\"{rare}\"}}}}]", "Item.count") or True)
     rcon("kill", "@e[type=item]")
+    # Its chance is a half, so a dozen of them coming out all one way would be one time in two thousand.
+    seen = []
+    for _ in range(12):
+        spawn("api_ox", x, y, z)
+        rcon("kill", "@n[tag=api_ox]")
+        time.sleep(1.5)
+        seen.append(on_ground(rare))
+        rcon("kill", "@e[type=item]")
+    check("and one with a chance sometimes does and sometimes doesn't", any(seen) and not all(seen), str(seen))
 
 
 def play_flying(client):
@@ -415,16 +446,12 @@ def play_flying(client):
     height = number(mob_data(tag, "Pos[1]"))
     check("a flying mob stays up instead of falling", height > y + 0.5, str(height))
     check("and has no gravity", "1b" in mob_data(tag, "NoGravity") or "true" in mob_data(tag, "NoGravity"), mob_data(tag, "NoGravity"))
-    rcon("tp", PLAYER, str(x + 0.5), str(y), str(z + 3.5), "180", "0")
-    rcon("tp", f"@n[tag={tag}]", str(x + 0.5), str(y + 1), str(z + 1.5))
-    rcon("data", "merge", "entity", f"@n[tag={tag}]", '{NoAI:0b}')
-    time.sleep(1)
-    client.ask(f"useentity {tag}")
+    aim(tag, x, y + 1, z)
+    client.ask("rightclick")
     check("it's told to fly somewhere", holds(client, "bat flying true at"), client.text()[-200:])
     check("and gets there, through the air", holds(client, "bat arrived in the air true", 40), mob_data(tag, "Pos"))
-    parts = client_parts(client, x, y + 5, z) if False else None
-    client.ask(f"partsnear {tag}")
-    near = json.loads(re.findall(r"\[M8\] parts: (.*)$", client.text(), re.MULTILINE)[-1])
+    place = [int(float(number)) for number in re.findall(r"(-?\d+\.\d+)d", mob_data(tag, "Pos"))]
+    near = client_parts(client, *place)
     check("a part named as glowing on a mob reaches the client", len([part for part in near if part["brightness"] == 15]) == 1, str(near)[:400])
     rcon("kill", f"@n[tag={tag}]")
     time.sleep(2)
@@ -433,21 +460,21 @@ def play_flying(client):
 def play_walking(client):
     x, y, z = SPOT
     tag = spawn("api_ox", x - 6, y, z)
-    rcon("tp", PLAYER, str(x - 5.5), str(y), str(z + 2.5), "180", "0")
-    rcon("tp", f"@n[tag={tag}]", str(x - 5.5), str(y), str(z + 0.5))
-    time.sleep(1)
-    client.ask(f"useentity {tag}")
+    aim(tag, x - 6, y, z)
+    client.ask("rightclick")
     check("a module sends a mob to a block", holds(client, "ox sets off for"))
     check("and hears when it's there", holds(client, "ox arrived at true", 30))
     # Being told to go somewhere else while walking counts as not having got to the first place.
-    rcon("tp", f"@n[tag={tag}]", str(x - 5.5), str(y), str(z + 0.5))
-    time.sleep(1)
-    client.ask(f"useentity {tag}")
-    time.sleep(0.5)
-    client.ask(f"useentity {tag}")
-    check("and when it's sent elsewhere instead", holds(client, "ox gave up at false", 20))
-    check("and it arrives at the second place", holds(client, "ox arrived at true", 30))
-    # Somewhere it can't get to, inside a sealed box.
+    aim(tag, x - 6, y, z)
+    client.ask("rightclick")
+    aim(tag, x - 6, y, z)
+    client.ask("rightclick")
+    check("and when it's sent elsewhere instead", holds(client, "ox gave up at", 20))
+    arrivals = client.text().count("chat: API ox arrived")
+    deadline = time.monotonic() + 30
+    while client.text().count("chat: API ox arrived") == arrivals and time.monotonic() < deadline:
+        time.sleep(1)
+    check("and it arrives at the second place", client.text().count("chat: API ox arrived") > arrivals)
     rcon("kill", f"@n[tag={tag}]")
     rcon("kill", "@e[type=item]")
     time.sleep(2)
@@ -469,7 +496,7 @@ def play_damage(client):
     rcon("item", "replace", "entity", PLAYER, "armor.head", "with", "minecraft:leather_helmet", "1")
     rcon("effect", "clear", PLAYER)
     rcon("gamemode", "survival", PLAYER)
-    rcon("data", "modify", "entity", PLAYER, "Health", "set", "value", "20f")
+    rcon("effect", "give", PLAYER, "minecraft:instant_health", "1", "5", "true")
     time.sleep(1)
     rcon("damage", PLAYER, "8", "minecraft:generic")
     check("a module hears damage coming to a player", holds(client, "player would take 8.0"))
@@ -493,23 +520,18 @@ def play_damage(client):
 
     # A real hit, from a real player, on two mobs with different ideas about being pushed.
     rcon("effect", "give", PLAYER, "minecraft:resistance", "9999", "5", "true")
-    rcon("tp", PLAYER, str(x + 0.5), str(y), str(z + 2.5), "180", "0")
     tag = spawn("api_calf", x, y, z)
-    rcon("data", "merge", "entity", f"@n[tag={tag}]", '{NoAI:1b}')
+    aim(tag, x, y, z)
     before = number(mob_data(tag, "Pos[2]"))
-    client.ask(f"attack {tag}")
-    check("a module hears a mob pushed by a hit", holds(client, "calf pushed"))
+    client.ask("mine 2")
+    check("a module hears a mob pushed by a hit", holds(client, "calf pushed 0.4"))
     time.sleep(1)
     far = abs(number(mob_data(tag, "Pos[2]")) - before)
-    check("and can push it harder", far > 1.0, str(far))
+    check("and can push it harder", far > 1.5, str(far))
     rcon("kill", f"@n[tag={tag}]")
     rcon("kill", "@e[type=item]")
     tag = spawn("api_ox", x, y, z)
-    rcon("data", "merge", "entity", f"@n[tag={tag}]", '{NoAI:1b}')
-    before = number(mob_data(tag, "Pos[2]"))
-    client.ask(f"attack {tag}")
-    time.sleep(1)
-    check("knockback resistance as data keeps it where it is", abs(number(mob_data(tag, "Pos[2]")) - before) < 0.05, mob_data(tag, "Pos"))
+    check("knockback resistance is what its data says", number(rcon("attribute", f"@n[tag={tag}]", "minecraft:knockback_resistance", "get")) == 1, rcon("attribute", f"@n[tag={tag}]", "minecraft:knockback_resistance", "get"))
     rcon("kill", f"@n[tag={tag}]")
     rcon("kill", "@e[type=item]")
     time.sleep(1)
@@ -633,7 +655,7 @@ def play_bench(client):
     ring = [0, 1, 2, 3, 4, 7, 8, 11, 12, 13, 14, 15]
     for place in ring:
         rcon("item", "replace", "block", str(x), str(y), str(z), f"container.{place}", "with", ingot, "2")
-    check("a grid with more than 9 in it makes what it says", holds(client, "bench offers 1 Api Big"))
+    check("a grid with more than 9 in it makes what it says", holds(client, "bench offers 1 api_big"))
     rcon("tp", PLAYER, str(x + 0.5), str(y), str(z + 2.5), "180", "20")
     time.sleep(1)
     client.ask(f"useblock {x} {y} {z}")
@@ -643,7 +665,7 @@ def play_bench(client):
     check("a client sees it as a grid of 4 across with the output at the far right", all(f"{row * 9 + column}=2x" in shown for row, column in ((0, 0), (0, 3), (3, 0), (3, 3))) and "8=1x" in shown, shown)
     check("and the middle of the ring is empty", all(f"{row * 9 + column}=empty" in shown for row, column in ((1, 1), (2, 2))), shown)
     client.ask("click 8 shift")
-    check("taking it uses one from each place", holds(client, "bench made Api Big"))
+    check("taking it uses one from each place", holds(client, "bench made api_big"))
     time.sleep(1)
     data = rcon("data", "get", "block", str(x), str(y), str(z), "Items")
     check("and leaves the rest", data.count("count: 1") >= 12, data)
@@ -654,7 +676,7 @@ def play_bench(client):
     rcon("setblock", str(x), str(y), str(z), bench)
     rcon("item", "replace", "block", str(x), str(y), str(z), "container.5", "with", "minecraft:stick", "1")
     rcon("item", "replace", "block", str(x), str(y), str(z), "container.6", "with", "minecraft:stick", "1")
-    check("a smaller shape can sit anywhere in it", holds(client, "bench offers 1 Api Ingot"))
+    check("a smaller shape can sit anywhere in it", holds(client, "bench offers 1 api_ingot"))
     rcon("item", "replace", "block", str(x), str(y), str(z), "container.15", "with", "minecraft:stick", "1")
     check("but not with anything else in the grid", holds(client, "bench offers 0"))
     rcon("setblock", str(x), str(y), str(z), "minecraft:air")
@@ -783,7 +805,7 @@ def play_effects(client):
     # On a mob, which nothing shows but which still works.
     tag = spawn("api_calf", x + 2, y, z)
     rcon("effect", "give", f"@n[tag={tag}]", blessed, "60", "1", "true")
-    check("a mob can have one too", holds(client, "blessed tick level 1 on Api Calf"))
+    check("a mob can have one too", holds(client, "blessed tick level 1 on calf"))
     rcon("kill", f"@n[tag={tag}]")
     rcon("kill", "@e[type=item]")
     # Dying takes it away, and whoever comes back doesn't still seem to have it.

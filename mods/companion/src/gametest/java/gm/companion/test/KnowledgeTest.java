@@ -110,19 +110,6 @@ public final class KnowledgeTest implements FabricClientGameTest {
 		context.waitFor(client -> client.level == null && client.gui.screen() instanceof TitleScreen, TICKS_PER_MINUTE);
 	}
 
-	/** A mob's tags aren't sent to clients, so the nearest mob with that one's name is the one. */
-	private static net.minecraft.world.entity.Entity tagged(net.minecraft.client.Minecraft client, String name) {
-		String wanted = name.replace("api_", "Api ").toLowerCase(java.util.Locale.ROOT);
-		net.minecraft.world.entity.Entity found = null;
-		for (net.minecraft.world.entity.Entity entity : client.level.entitiesForRendering()) {
-			if (entity != client.player && !(entity instanceof net.minecraft.world.entity.Display)
-					&& (found == null || entity.distanceToSqr(client.player) < found.distanceToSqr(client.player))) {
-				found = entity;
-			}
-		}
-		return found;
-	}
-
 	/** What a client has really been told about each part of a model, for a test to compare with what a module asked for. */
 	private static String describeParts(net.minecraft.client.Minecraft client, BlockPos pos) {
 		var box = new net.minecraft.world.phys.AABB(pos).inflate(0.5);
@@ -304,16 +291,6 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				String parts = context.computeOnClient(client -> describeParts(client, pos));
 				LOGGER.info("[M8] parts: {}", parts);
 			}
-			case "partsnear" -> {
-				BlockPos pos = context.computeOnClient(client -> tagged(client, words[1]).blockPosition());
-				String parts = context.computeOnClient(client -> describeParts(client, pos));
-				LOGGER.info("[M8] parts: {}", parts);
-			}
-			case "useentity" -> context.runOnClient(client -> {
-				var target = tagged(client, words[1]);
-				client.gameMode.interact(client.player, target, new net.minecraft.world.phys.EntityHitResult(target), InteractionHand.MAIN_HAND);
-			});
-			case "attack" -> context.runOnClient(client -> client.gameMode.attack(client.player, tagged(client, words[1])));
 			case "barheld" -> {
 				String bar = context.computeOnClient(client -> {
 					ItemStack stack = client.player.getMainHandItem();

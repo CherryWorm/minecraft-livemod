@@ -47,6 +47,20 @@ public final class ModuleApiModule implements ServerModule {
 		this.context.server().getPlayerList().broadcastSystemMessage(Component.literal("API " + text), false);
 	}
 
+	/** This world's names are only in the pack, so to the server they're keys. */
+	private String name(ItemStack stack) {
+		for (String item : List.of("api_token", "api_big", "api_ingot", "api_gate", "api_lamp")) {
+			if (stack.is(this.context.item(item))) {
+				return item;
+			}
+		}
+		return stack.isEmpty() ? "nothing" : stack.getItem().toString();
+	}
+
+	private String name(Entity entity) {
+		return entity.getType() == this.context.mob("api_calf") ? "calf" : entity.getName().getString();
+	}
+
 	@Override
 	public void enable(ServerModuleContext context) {
 		this.context = context;
@@ -55,6 +69,7 @@ public final class ModuleApiModule implements ServerModule {
 		bindLight();
 		bindStatue();
 		bindKiln();
+		bindGauge();
 		bindMobs();
 		bindItems();
 		context.bindBlock("api_brine", new BlockBehavior() {
@@ -74,7 +89,7 @@ public final class ModuleApiModule implements ServerModule {
 			@Override
 			public void tick(LivingEntity entity, int level) {
 				if (++this.ticks == 10) {
-					say("blessed tick level " + level + " on " + entity.getName().getString());
+					say("blessed tick level " + level + " on " + name(entity));
 				}
 			}
 
@@ -86,7 +101,7 @@ public final class ModuleApiModule implements ServerModule {
 
 			@Override
 			public void ended(LivingEntity entity) {
-				say("blessed ended on " + entity.getName().getString());
+				say("blessed ended on " + name(entity));
 			}
 		});
 		// It counts every time this module starts, so a test can tell it's been replaced, and that this came through.
@@ -162,7 +177,7 @@ public final class ModuleApiModule implements ServerModule {
 
 			@Override
 			public void blockPlaced(ServerPlayer player, ServerLevel level, BlockPos pos, BlockState state, ItemStack stack) {
-				say("anything placed " + state.getBlock().getName().getString() + " from " + stack.getCount());
+				say("anything placed " + name(stack) + " from " + stack.getCount());
 			}
 
 			@Override
@@ -242,7 +257,7 @@ public final class ModuleApiModule implements ServerModule {
 				ItemStack shown = attempt.succeeded() ? attempt.output().copy() : ItemStack.EMPTY;
 				if (!ItemStack.matches(shown, bench.getItem(16))) {
 					bench.setItem(16, shown);
-					say("bench offers " + shown.getCount() + " " + shown.getHoverName().getString());
+					say("bench offers " + shown.getCount() + " " + name(shown));
 				}
 			}
 
@@ -251,7 +266,7 @@ public final class ModuleApiModule implements ServerModule {
 				List<ItemStack> grid = grid(bench);
 				ModuleApiModule.this.context.attemptRecipe(null, "api_bench", grid, 4).consume(grid);
 				bench.setChanged();
-				say("bench made " + stack.getHoverName().getString());
+				say("bench made " + name(stack));
 			}
 		});
 	}
@@ -267,7 +282,7 @@ public final class ModuleApiModule implements ServerModule {
 
 			@Override
 			public void placed(BlockState state, Level level, BlockPos pos, LivingEntity by, ItemStack stack) {
-				say("gate placed by " + (by == null ? "nobody" : by.getName().getString()) + " with " + stack.getHoverName().getString());
+				say("gate placed by " + (by == null ? "nobody" : by.getName().getString()) + " with " + name(stack));
 			}
 
 			@Override
@@ -336,6 +351,27 @@ public final class ModuleApiModule implements ServerModule {
 		});
 	}
 
+	private void bindGauge() {
+		this.context.bindMachine("api_gauge", new MachineBehavior() {
+			@Override
+			public void tick(SlotBlockEntity machine) {}
+		});
+		this.context.bindBlock("api_gauge", new BlockBehavior() {
+			private boolean high;
+
+			@Override
+			public InteractionResult use(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
+				if (level.getBlockEntity(pos) instanceof SlotBlockEntity machine) {
+					this.high = !this.high;
+					machine.show("walk", this.high ? 0.75F : 0.25F);
+					machine.show("idle", 0.5F);
+					say("gauge at " + this.high);
+				}
+				return InteractionResult.SUCCESS;
+			}
+		});
+	}
+
 	private void bindKiln() {
 		this.context.bindMachine("api_kiln", new MachineBehavior() {
 			private int heard = -1;
@@ -360,7 +396,7 @@ public final class ModuleApiModule implements ServerModule {
 
 			@Override
 			public void outputTaken(SlotBlockEntity machine, int slot, ItemStack stack, Player player) {
-				say("kiln gave " + stack.getCount() + " of " + stack.getHoverName().getString() + " to " + player.getName().getString() + " from slot " + slot);
+				say("kiln gave " + stack.getCount() + " of " + name(stack) + " to " + player.getName().getString() + " from slot " + slot);
 			}
 		});
 		this.context.bindBlock("api_kiln", new BlockBehavior() {

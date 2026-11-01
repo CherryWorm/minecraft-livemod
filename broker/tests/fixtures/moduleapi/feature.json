@@ -92,6 +92,13 @@
         "outputs": 1,
         "width": 4
       }
+    },
+    "api_gauge": {
+      "family": "model",
+      "display": "Api Gauge",
+      "texture": "api_top",
+      "model": "api_ox",
+      "from_module": true
     }
   },
   "items": {
@@ -196,7 +203,7 @@
         },
         {
           "item": "api_rare",
-          "chance": 0.001
+          "chance": 0.5
         }
       ]
     },
