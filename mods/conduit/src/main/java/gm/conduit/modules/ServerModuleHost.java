@@ -24,6 +24,7 @@ import gm.conduit.entities.SlotEntities;
 import gm.conduit.entities.SlotProjectile;
 import gm.conduit.entities.SlotProp;
 import gm.conduit.entities.SlotVehicle;
+import gm.conduit.api.RuinSpot;
 import gm.conduit.pack.ServerNames;
 import gm.conduit.pack.Words;
 import gm.conduit.panels.PanelDefinition;
@@ -32,6 +33,8 @@ import gm.conduit.dimensions.Dimensions;
 import gm.conduit.knowledge.Codex;
 import gm.conduit.knowledge.Knowledge;
 import gm.conduit.provenance.Provenance;
+import gm.conduit.retrogen.LastingClimate;
+import gm.conduit.retrogen.OrePatchQueue;
 import gm.conduit.slots.ButtonMenu;
 import gm.conduit.slots.ItemBars;
 import gm.conduit.slots.SlotBlock;
@@ -860,5 +863,24 @@ public final class ServerModuleHost {
 		public int clientBlockId(BlockState state) {
 			return WorldEffects.clientBlockId(state);
 		}
+
+		@Override
+		public List<RuinSpot> ruinsNear(String ruin, ServerLevel level, BlockPos near, int chunks) {
+			return OrePatchQueue.ruinsNear(ruin.contains("/") ? ruin : this.moduleId + "/" + ruin, level, near, chunks);
+		}
+
+		@Override
+		public int setBiome(ServerLevel level, BlockPos from, BlockPos to, String biome) {
+			return LastingClimate.setBiome(level, from, to, biome.contains(":") ? biome : "gm:" + ServerModuleHost.this.biomeId(biome.contains("/") ? biome : this.moduleId + "/" + biome));
+		}
+	}
+
+	/** Worked out the same way the bundler names them. */
+	private String biomeId(String key) {
+		String biome = this.slotsByName.get("biome:" + key);
+		if (biome == null) {
+			throw new IllegalArgumentException("No biome is called " + key + ". It has to be in \"biomes\" in feature.json");
+		}
+		return biome;
 	}
 }

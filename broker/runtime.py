@@ -253,6 +253,22 @@ def vanilla_file(path):
     raise RuntimeError("No server jar found. Start prod once first.")
 
 
+def vanilla_feature_order():
+    """Every vanilla biome's features and every vanilla feature, read from the game's own jar, which is what a new biome's features have to agree with."""
+    import zipfile
+
+    from broker.feature_order import FeatureOrder
+
+    biome, placed = "data/minecraft/worldgen/biome/", "data/minecraft/worldgen/placed_feature/"
+    for folder in ("prod", "shadow"):
+        for jar in (RUNTIME / folder).glob("versions/*/server-*.jar"):
+            with zipfile.ZipFile(jar) as archive:
+                names = [name for name in archive.namelist() if name.endswith(".json")]
+                return FeatureOrder([json.loads(archive.read(name)).get("features", []) for name in names if name.startswith(biome)],
+                                    {"minecraft:" + name[len(placed):-len(".json")] for name in names if name.startswith(placed)})
+    raise RuntimeError("No server jar found. Start prod once first.")
+
+
 def _vanilla_data(folder_in_jar, kind, name):
     """A definition read from the game's own jar, so what's made from it starts from what's really there."""
     import zipfile

@@ -331,7 +331,7 @@ A release that changes these reaches stacks in inventories the next time that pl
 
 ## Ruins
 
-A small built thing that turns up in land nobody has been to yet. It has to fit in one chunk.
+A built thing that turns up in land nobody has been to yet, from a shrine in one chunk up to a whole fortress across eight.
 
 ```json
 "ruins": {
@@ -352,7 +352,9 @@ A small built thing that turns up in land nobody has been to yet. It has to fit 
 }
 ```
 
-`x` and `z` run from 0 to 15, and `y` from the ground up. A ruin is placed whole or not at all. `chance` is per chunk: 0.02 is about one in fifty. On the surface it sits on the sea floor if there's water. Underground it's placed at a random height, which is only right for something meant to be found while digging.
+`x` and `z` start at 0, and `y` from the ground up. Up to 15 fits in one chunk, and past that it's a big one, as below. A ruin is placed whole or not at all. `chance` is per chunk: 0.02 is about one in fifty. On the surface it sits on the sea floor if there's water. Underground it's placed at a random height, which is only right for something meant to be found while digging, unless it says `opensOntoCave`.
+
+Its blocks go in just as they're drawn, the same way the game places what it generates. Nothing around them reacts until something right next to them changes, so loose gravel and sand stay where they are, even over nothing, water doesn't flow, and a fence doesn't join up with its neighbours unless its block state says so. Once a player disturbs them, they behave as usual.
 
 Without any of what follows, the ground under its corner at `x` 0, `z` 0 is what counts, and all of it is built level from there, so it can float or bury itself on a slope.
 
@@ -363,6 +365,43 @@ Without any of what follows, the ground under its corner at `x` 0, `z` 0 is what
 - **`"highGround": 3`** only places it where the ground in the middle of its chunk is at least that many blocks above the average of the middles of the four chunks around it, so it sits on a rise, and not just on a slope. It's only for the surface, and it can't move a ruin to the top of a hill, only leave out the chunks that aren't one. In the worlds it's been tried on, 3 leaves between one chunk in ten and one in four, depending how hilly the land is, on top of what `chance` or `spacing` leave, so allow for that.
 - **A block state** goes after a part's block, written the way commands write it: `"minecraft:ladder[facing=north]"`, or `"minecraft:lantern[hanging=true]"`. Nothing else is checked when it's placed, so one that needs something to hold on to will stay there until something next to it changes, and then fall off if there's nothing there. With `followTerrain`, the columns next to it may not be at the height you drew.
 - **`"loot": {...}` on a part** gives that one container its own loot table. The ruin's own `loot` is for any container that hasn't got one. Only vanilla's chests, barrels, shulker boxes, dispensers, droppers, hoppers and crafters can hold loot.
+- **`"to": [47, 0, 47]` on a part** makes it a box of that block, from its `x`, `y` and `z` to that far corner, so a floor doesn't need a part for every block. A `chance` on a box is for each block in it, which is how to make something look crumbled. One layout can have at most 40000 blocks, counting everything in its boxes. A box can't have `loot` of its own.
+- **`"opensOntoCave": true`** on something underground looks through the heights from `minY` to `maxY` for one where it fits and a cave reaches it, so it can be found without digging straight into it. If any of its parts are `minecraft:air`, those are its rooms, and one of those has to touch the cave, so there's a way in. Otherwise any part will do. A chunk with no such height doesn't get one, so this is rarer than `chance` says, and rarer still at depths with few caves.
+
+### Bigger than a chunk
+
+`x` and `z` can go up to 127, which is 8 chunks across:
+
+```json
+"fortress": {
+  "id": "fortress_v1",
+  "parts": [
+    {"x": 0, "y": -1, "z": 0, "to": [47, -1, 47], "block": "$block:old_stone"},
+    {"x": 0, "y": 0, "z": 0, "to": [47, 4, 0], "block": "$block:old_stone", "chance": 0.8},
+    {"x": 24, "y": 0, "z": 24, "block": "minecraft:chest"}
+  ],
+  "on": ["natural"],
+  "replaces": ["natural"],
+  "spacing": 40,
+  "minY": 55, "maxY": 120,
+  "maxSlope": 10
+}
+```
+
+- **It needs a `spacing`** at least as wide as it is in chunks, which is how the game knows where to look, and it keeps two of them from landing on each other. `chance` is how likely each spot is to get one, and all of them if you leave it out.
+- **It's all or nothing, across all its chunks.** Every chunk it uses has to be somewhere nobody has been and nothing has been changed, and nothing else big can be there. It's decided once, a little ahead of anyone getting there, generating any of that land that doesn't exist yet, so normally nobody sees it appear. A spot it doesn't suit stays empty for good. Even a crash partway can't leave half of one for good or build one twice, because the rest is put in the next time that land loads.
+- **`"natural"` in `on` or `replaces`, on any ruin,** means anything at all as the world made it, which saves listing every bush, ore and kind of stone it might meet across all that land. It's safe because a ruin only ever goes where nobody's been, and it still won't go through a natural chest or spawner, or the bottom of the world. A big one nearly always wants this, because with a list, one block missing from it rules that spot out.
+- **With a list, the ground has to mostly suit it.** At least 9 in 10 of the columns it uses have to have their ground in `on`, because a stray patch of gravel shouldn't rule out the whole thing. On the surface it can still end up on the sea floor if there's water, so use `minY` to stay above the sea.
+- **It sits level** at the middle height of the ground under it, and `maxSlope`, 8 if you leave it out, is how far that ground may rise and fall before it won't go there. `y` -1 goes into the ground. `followTerrain` makes each column go by its own ground instead, as for a small one, which suits a wall better than a floor.
+- **`highGround`** compares the ground under its middle with the ground just beyond each of its sides.
+- **The release gate tries it out** on a test copy of the world, in land nobody's been to, at up to 16 spots until one fits, and refuses it if none does, with what stopped it, because otherwise it might simply never turn up. So a wide `on` and `replaces` matter.
+- Each one costs the server about as much as generating its land, so keep them rare, with `spacing` several times their width.
+
+### Finding a ruin from a module
+
+`context.ruinsNear("fortress", level, pos, 200)` says where a ruin is, or may turn up, within that many chunks of a place, nearest first and at most 32, in the dimension it's asked about. It loads nothing and generates nothing, so something like a compass can call it freely. `"other_feature/name"` asks about another feature's. Each answer is a `RuinSpot`, whose `placed()` says if it's really there, and if so `pos()` is its corner. For one nobody's reached yet, `pos()` is a good guess, and it may turn out not to suit the ruin, so don't promise anyone anything. Without `spacing` it only looks within 128 chunks.
+
+To react to one being built, listen for `ruinPlaced`: see "Things that happen in the world" in `docs/feature-format.md`.
 
 ```json
 "crater": {
@@ -422,7 +461,23 @@ Needs a restart, which players are held through, so these go out in batches.
 }
 ```
 
-It starts as an exact copy of `base`, and replaces `proportion` of it. If you change only `effects` and the `minecraft:visual/` or `minecraft:audio/` attributes, it's a sibling and spreads into land that already exists, because it's safe there. If you change `temperature`, `downfall`, `has_precipitation`, `features`, `carvers` or any other attribute, such as `minecraft:gameplay/natural_mob_spawns`, it only appears in land generated from then on, because changing those in existing land could freeze water or break a mob farm.
+It starts as an exact copy of `base`, and replaces `proportion` of it. If you change only `effects` and the `minecraft:visual/` or `minecraft:audio/` attributes, it's a sibling and spreads into land that already exists, because it's safe there. If you change `temperature`, `downfall`, `has_precipitation`, `features`, `add_features`, `carvers` or any other attribute, such as `minecraft:gameplay/natural_mob_spawns`, it only appears in land generated from then on, because changing those in existing land could freeze water or break a mob farm.
+
+**To give it more of vanilla's features,** like pumpkins or extra trees, use `add_features`, by the step of generation each one runs in:
+
+```json
+"add_features": {"vegetal_decoration": ["minecraft:patch_pumpkin"], "underground_ores": ["minecraft:ore_emerald"]}
+```
+
+The game refuses to start if two biomes disagree about which of two features runs first, so don't reorder them yourself. `add_features` finds a place in the list where every biome can agree, and the instant check refuses it if there's no such place, or the game has no such feature. A whole list in `features` has to agree too, and gets refused if it doesn't, so `add_features` is nearly always what you want. The steps, in order, are `raw_generation`, `lakes`, `local_modifications`, `underground_structures`, `surface_structures`, `strongholds`, `underground_ores`, `underground_decoration`, `fluid_springs`, `vegetal_decoration` and `top_layer_modification`. Use the step the feature runs in in vanilla's own biomes, because it's only the same feature in that step.
+
+**To change the climate of a piece of land for good,** a module can give it another biome:
+
+```java
+int cells = context.setBiome(level, from, to, "minecraft:snowy_plains");
+```
+
+The biome is vanilla's, or one of this feature's by name, or `"other_feature/name"`. It decides rain or snow, grass and leaf colours and what spawns there from then on, it's saved with the land, and players see it straight away. A module can read what it's like with `level.getBiome(pos).value()`, for crops that care about the climate. Anything already there stays, so snow won't appear by itself on a warm biome turned cold until it next snows, and water doesn't freeze until the game next gets to it. It applies wherever it's told to, so use `context.isNatural` first if it shouldn't reach someone's base. The land has to be loaded, it returns -1 and changes nothing if it isn't, and it works in cells of 4 blocks. The return value is how many cells changed.
 
 A biome made for a dimension of your own says `"spread": false`, and then it never turns up in the overworld.
 
@@ -451,6 +506,8 @@ A whole other place for players to visit, with land of its own. It opens with no
 - One biome throughout: `"biome_source": {"type": "minecraft:fixed", "biome": "$biome:hollow_floor"}`, or `"minecraft:plains"` for a vanilla one. The game's `minecraft:checkerboard` and `minecraft:multi_noise` with your own `biomes` list work too.
 - Flat: `{"type": "minecraft:flat", "settings": {"biome": "minecraft:plains", "structure_overrides": [], "layers": [{"block": "minecraft:stone", "height": 60}, {"block": "minecraft:grass_block", "height": 1}]}}`. Layers count up from the bottom of the world.
 - Nothing at all: the same with `"layers": []`, and the biome `minecraft:the_void`. Anyone arriving gets a small stone platform to stand on, and everything else there is up to you.
+
+**A sky of its own needs a biome of its own.** A dimension's `attributes` set its fog and most of how it looks and behaves, but a biome's own attributes win over them, and every one of vanilla's biomes has its own `minecraft:visual/sky_color`. So for a purple sky, give it a biome with that in its `attributes` and `"spread": false`, and use that in its `generator`. It has the overworld's weather, so it rains there when it rains here, which greys its sky too.
 
 **The land can't change once it's out.** Land already made wouldn't match what's made next to it, so changing `type` or `generator` later is refused, and you'd add a new dimension instead. `display` and `spawn` can change. A dimension can't be removed either, only marked `"retired": true`, like a block.
 
@@ -928,4 +985,4 @@ It can be seen from anywhere in a player's render distance, and that's a real li
 
 ## What the engine doesn't do yet
 
-Structures larger than a chunk. A vehicle has one rider, on the middle of it, and can't respond to its rider's keys any faster than the connection allows. A fluid can only flow and swim as water or lava does on a player's computer, though a still pool can have a picture of its own. A panel can only draw vanilla's mobs moving, so one of this world's is a picture there. Armor trims and new villager trades can't be added yet. Build the closest thing that works, and say what you wanted in `host_requests`.
+A vehicle has one rider, on the middle of it, and can't respond to its rider's keys any faster than the connection allows. A fluid can only flow and swim as water or lava does on a player's computer, though a still pool can have a picture of its own. A panel can only draw vanilla's mobs moving, so one of this world's is a picture there. A screen effect covers the whole screen, so there's no drawing a shader on one thing in the world. Armor trims and new villager trades can't be added yet. Build the closest thing that works, and say what you wanted in `host_requests`.

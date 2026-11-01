@@ -2,6 +2,7 @@ package gm.conduit;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.FloatArgumentType;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import gm.conduit.bridge.SafeMoment;
 import gm.conduit.entities.SlotProp;
@@ -14,6 +15,7 @@ import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.EntityArgument;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.Entity;
 
@@ -70,6 +72,18 @@ final class ConduitCommands {
 					int patches = OrePatchQueue.reload(context.getSource().getServer());
 					context.getSource().sendSuccess(() -> Component.literal("Ore patches active: " + patches), false);
 					return patches;
-				}))));
+				})))
+				.then(Commands.literal("ruin")
+						.then(Commands.literal("try").then(Commands.argument("id", StringArgumentType.word()).then(Commands.argument("spots", IntegerArgumentType.integer(1, 32)).executes(context -> {
+							String said = OrePatchQueue.tryOutRuin(context.getSource().getLevel(), StringArgumentType.getString(context, "id"),
+									BlockPos.containing(context.getSource().getPosition()), IntegerArgumentType.getInteger(context, "spots"));
+							context.getSource().sendSuccess(() -> Component.literal(said), false);
+							return 1;
+						}))))
+						.then(Commands.literal("summary").then(Commands.argument("id", StringArgumentType.word()).executes(context -> {
+							String said = OrePatchQueue.ruinSummary(StringArgumentType.getString(context, "id"));
+							context.getSource().sendSuccess(() -> Component.literal(said), false);
+							return 1;
+						})))));
 	}
 }

@@ -25,7 +25,7 @@ What the engine can do today, so your specs can be built quickly. Each of these 
 - Blocks and items with custom art, stats, tools, weapons and armor. Blocks come in families: stone, ore, deep ore, glowing ore, metal, wood, soil, glowing, machine, leaves and a very limited number of plants, crops with growth stages and connected cables.
 - Ores in the world, old and new, by depth and biome, as veins of up to 16 blocks, and if you like only where they can be seen on a cliff or cave wall.
 - Plants on the surface or on cave floors, by biome and height.
-- Small ruins, up to one chunk across, on the ground or underground, that can follow the land, vary, keep their distance and look for high ground, with different loot in each container.
+- Ruins, from a shrine in one chunk up to a fortress eight chunks across, on the ground or underground, that can follow the land, vary, keep their distance, look for high ground and open onto caves, with different loot in each container. Modules can ask where they are without going there, and hear when one's built.
 - Mobs of any shape, each modelled and animated from scratch: hostile, neutral, passive or skittish, spawning by light, height and biome. There's room for hundreds, so a world can be all about its creatures.
 - Machines and other blocks drawn as 3D models with moving parts, and gauges that show a value. A machine can have an inventory that hoppers and players use like a furnace's, and recipes with several outputs.
 - Menus made of chest slots, and books, which a module can open for a player.

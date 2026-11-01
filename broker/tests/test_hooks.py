@@ -493,11 +493,38 @@ class RuinRules(unittest.TestCase):
     def test_an_empty_layout(self):
         self.assert_refused(without(ruin(layouts=[[{"x": 0, "y": 0, "z": 0, "block": "minecraft:stone"}], []]), "parts"), "nothing in it")
 
-    def test_outside_the_chunk(self):
-        self.assert_refused(ruin(parts=[{"x": 16, "y": 0, "z": 0, "block": "minecraft:stone"}]), "fit in one chunk")
-        self.assert_refused(ruin(parts=[{"x": 0, "y": 0, "z": -1, "block": "minecraft:stone"}]), "fit in one chunk")
-        self.assert_refused(ruin(parts=[{"x": "east", "y": 0, "z": 0, "block": "minecraft:stone"}]), "fit in one chunk")
-        self.assert_refused(ruin(parts=[{"y": 0, "block": "minecraft:stone"}]), "fit in one chunk")
+    def test_outside_what_it_can_reach(self):
+        self.assert_refused(ruin(parts=[{"x": 128, "y": 0, "z": 0, "block": "minecraft:stone"}], spacing=9), "up to 127")
+        self.assert_refused(ruin(parts=[{"x": 0, "y": 0, "z": -1, "block": "minecraft:stone"}]), "up to 127")
+        self.assert_refused(ruin(parts=[{"x": "east", "y": 0, "z": 0, "block": "minecraft:stone"}]), "up to 127")
+        self.assert_refused(ruin(parts=[{"y": 0, "block": "minecraft:stone"}]), "up to 127")
+
+    def test_something_bigger_than_a_chunk_needs_a_spacing_as_wide_as_it_is(self):
+        big = [{"x": 40, "y": 0, "z": 0, "block": "minecraft:stone"}]
+        self.assert_refused(ruin(parts=big), "spacing of at least 3")
+        self.assert_refused(ruin(parts=big, spacing=2), "spacing of at least 3")
+        self.assert_fine(ruin(parts=big, spacing=3))
+        self.assert_fine(without(ruin(parts=big, spacing=3), "chance"))
+
+    def test_something_bigger_than_a_chunk_can_say_how_steep_is_too_steep(self):
+        self.assert_fine(ruin(parts=[{"x": 40, "y": 0, "z": 0, "block": "minecraft:stone"}], spacing=3, maxSlope=20))
+
+    def test_a_box_of_a_block(self):
+        self.assert_fine(ruin(parts=[{"x": 0, "y": 0, "z": 0, "to": [15, 3, 15], "block": "minecraft:stone"}]))
+        self.assert_refused(ruin(parts=[{"x": 0, "y": 0, "z": 0, "to": [15, 3], "block": "minecraft:stone"}]), "far corner")
+        self.assert_refused(ruin(parts=[{"x": 0, "y": 0, "z": 0, "to": [200, 3, 0], "block": "minecraft:stone"}], spacing=20), "reaching to x 200")
+        self.assert_refused(ruin(parts=[{"x": 0, "y": 0, "z": 0, "to": [20, 0, 0], "block": "minecraft:stone"}]), "spacing of at least 2")
+        self.assert_refused(ruin(parts=[{"x": 0, "y": 0, "z": 0, "to": [1, 0, 0], "block": "minecraft:chest", "loot": LOOT}]), "own loot")
+
+    def test_too_many_blocks(self):
+        self.assert_refused(ruin(parts=[{"x": 0, "y": 0, "z": 0, "to": [127, 10, 127], "block": "minecraft:stone"}], spacing=8), "the limit is")
+
+    def test_only_underground_has_caves_to_open_onto(self):
+        self.assert_fine(ruin(underground=True, opensOntoCave=True))
+        self.assert_refused(ruin(opensOntoCave=True), "isn't underground")
+
+    def test_a_ruins_y_has_to_be_a_number(self):
+        self.assert_refused(ruin(parts=[{"x": 0, "z": 0, "block": "minecraft:stone"}]), "whole number")
 
     def test_a_part_chance_has_to_be_a_share(self):
         for chance in (0, 1.5, "half", True):
@@ -580,6 +607,22 @@ class RuinsElsewhere(unittest.TestCase):
     def test_the_loot_in_one_container_can_be_had(self):
         _, handed_out = balance._natural_sources({"f": {"manifest": {"ruins": {"r": {"parts": [{**STONE, "block": "minecraft:chest", "loot": LOOT}]}}}}})
         self.assertEqual(handed_out, {"item:f/tablet"})
+
+    def test_the_gate_is_told_which_ones_are_big_and_where_they_go(self):
+        with tempfile.TemporaryDirectory() as folder:
+            new, old = pathlib.Path(folder) / "new", pathlib.Path(folder) / "old"
+            (new / "config").mkdir(parents=True)
+            (old / "config").mkdir(parents=True)
+            small = {"id": "small_v1", "parts": [STONE], "replaces": OPEN}
+            wide = {"id": "wide_v1", "parts": [{"x": 0, "y": 0, "z": 0, "to": [20, 0, 0], "block": "minecraft:stone"}], "replaces": OPEN}
+            far = {"id": "far_v1", "parts": [{"x": 0, "y": 0, "z": 16, "block": "minecraft:stone"}], "replaces": OPEN, "dimension": "gm:d0001"}
+            (new / "config" / "ruin_patches.json").write_text(json.dumps([small, wide, far]), encoding="utf-8")
+            found = {patch["id"]: patch for patch in promote.patches_changed(new, old)}
+        self.assertFalse(found["small_v1"]["big"])
+        self.assertTrue(found["wide_v1"]["big"])
+        self.assertTrue(found["far_v1"]["big"])
+        self.assertNotIn("dimension", found["wide_v1"])
+        self.assertEqual(found["far_v1"]["dimension"], "gm:d0001")
 
     def test_the_world_diff_goes_by_the_block_and_not_its_state(self):
         with tempfile.TemporaryDirectory() as folder:

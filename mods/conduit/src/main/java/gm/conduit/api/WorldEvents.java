@@ -91,4 +91,10 @@ public interface WorldEvents {
 
 	/** A player has examined a mob, or any other entity, in the same way. */
 	default void mobExamined(ServerPlayer player, Entity mob) {}
+
+	/**
+	 * A ruin has just been built, all of it, which is the moment to put a guardian in it or remember where it is. The ruin is its name,
+	 * {@code feature/name}, and the origin is its corner. If a crash interrupts a big one, the rest of it is built later and this isn't heard.
+	 */
+	default void ruinPlaced(ServerLevel level, String ruin, BlockPos origin) {}
 }

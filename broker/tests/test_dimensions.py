@@ -163,6 +163,11 @@ class Gates(unittest.TestCase):
     def test_a_biome_has_to_exist(self):
         refused("no feature declares", {"id": "a", "dimensions": {"moor": dimension(generator={**FLAT, "settings": {"biome": "$biome:nothing"}})}})
 
+    def test_a_sky_of_its_own_needs_a_biome_of_its_own(self):
+        sky = {"base": "minecraft:overworld", "attributes": {"minecraft:visual/sky_color": "#aa66cc"}}
+        refused("wins", {"id": "a", "dimensions": {"moor": dimension(type=sky)}})
+        static.check_dimensions(features({"id": "a", "biomes": {"land": {"base": "minecraft:plains"}}, "dimensions": {"moor": dimension(type=sky, generator={**FLAT, "settings": {"biome": "$biome:land"}})}}))
+
     def test_only_types_it_can_start_from(self):
         refused("\"type\"", {"id": "a", "dimensions": {"moor": dimension(type="minecraft:nowhere")}})
         refused("\"type\"", {"id": "a", "dimensions": {"moor": dimension(type={"ambient_light": 1})}})

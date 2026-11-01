@@ -232,4 +232,19 @@ public interface ServerModuleContext {
 
 	/** The number a client module can draw a block by, with canvas.block, which is the only way it can name one of this world's. */
 	int clientBlockId(BlockState state);
+
+	/**
+	 * Where one of this feature's ruins, or "other_feature/name", is or may turn up within this many chunks of a place, nearest first and
+	 * at most 32 of them, which needs no land to be loaded, so it's fine for something like a compass to ask. A spot that hasn't been
+	 * reached yet may turn out not to suit it, and then there's nothing there, so don't promise anyone anything.
+	 */
+	List<RuinSpot> ruinsNear(String ruin, ServerLevel level, BlockPos near, int chunks);
+
+	/**
+	 * Changes the biome for good across a box of land, which the game goes by for rain and snow, grass and leaf colours, and what spawns
+	 * there, as well as for anything a module asks about it, like how warm it is. The biome is vanilla's, like "minecraft:snowy_plains",
+	 * or one of this feature's by name, or "other_feature/name". The land has to be loaded, and the game works in cells of 4 blocks.
+	 * Returns how many cells changed, or -1 if some of it isn't loaded, in which case nothing changed.
+	 */
+	int setBiome(ServerLevel level, BlockPos from, BlockPos to, String biome);
 }

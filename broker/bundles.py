@@ -10,7 +10,7 @@ import pathlib
 import re
 import shutil
 
-from broker import guide, rawpack
+from broker import feature_order, guide, rawpack
 from orchestrator import others
 from orchestrator import wording
 
@@ -518,7 +518,27 @@ def _render_mind(mind, feature_id, ledger):
     return rendered
 
 
-def _render_biome(feature_id, name, biome, vanilla_biome, datapack):
+def _biome_features(feature_id, name, biome, merged, order):
+    """A biome's own list of features, or its base's with more added, in an order every biome can agree with, or the game wouldn't start."""
+    label = f"{feature_id}/{name}"
+    features = merged.get("features", [])
+    if "features" in biome or "add_features" in biome:
+        features = biome.get("features", features)
+        features = [*features, *[[] for _ in range(len(feature_order.STEPS) - len(features))]]
+        try:
+            for step, added in biome.get("add_features", {}).items():
+                for feature in added:
+                    if order is not None and feature not in order.placed_features:
+                        raise feature_order.OrderError(f"The game has no feature called {feature}.")
+                    features = (order or feature_order.FeatureOrder()).place(label, features, step, feature)
+            if order is not None:
+                order.add_biome(label, features)
+        except feature_order.OrderError as error:
+            raise BundleError(f"Biome {error}" if str(error).startswith(label) else f"Biome {label}: {error}") from error
+    return features
+
+
+def _render_biome(feature_id, name, biome, vanilla_biome, datapack, order=None):
     """Starts from a vanilla biome, so builders only state what's different. Changing only how it looks makes a
     sibling, which is safe to spread into land people have already seen."""
     base = biome.get("base")
@@ -530,7 +550,11 @@ def _render_biome(feature_id, name, biome, vanilla_biome, datapack):
         raise BundleError(f"{feature_id}/{name}: {error}. Use one of vanilla's, like minecraft:plains.") from error
     merged.setdefault("effects", {}).update(biome.get("effects", {}))
     climate_changed = False
-    for field in ("temperature", "downfall", "has_precipitation", "features", "carvers"):
+    features = _biome_features(feature_id, name, biome, merged, order)
+    if features != merged.get("features", []):
+        merged["features"] = features
+        climate_changed = True
+    for field in ("temperature", "downfall", "has_precipitation", "carvers"):
         if field in biome and biome[field] != merged.get(field):
             merged[field] = biome[field]
             climate_changed = True
@@ -572,6 +596,7 @@ def _render_ruin(feature_id, name, ruin, ledger, datapack):
 
     patch = _resolve_tokens({key: value for key, value in ruin.items() if key != "loot"}, feature_id, ledger)
     patch["id"] = ruin["id"]
+    patch["name"] = f"{feature_id}/{name}"
     patch["loot"] = write_table(ruin["loot"], f"{feature_id}/{name}") if ruin.get("loot") else None
     for index, layout in enumerate(patch.get("layouts") or [patch.get("parts", [])]):
         for part in layout:
@@ -862,9 +887,12 @@ def _write_book(features, ledger, entries, machines, names, nodes, pack, lang):
                     _write_json(pack / path.replace(f"/{language}/", f"/{variant}/"), contents)
 
 
-def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared", nodes=None, vanilla_type=None, languages=None, vanilla_file=None):
+def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared", nodes=None, vanilla_type=None, languages=None, vanilla_file=None, vanilla_feature_order=None):
     """Writes pack/, datapack/ and config/ under out. Returns nothing: out is the release's content. Languages are what wording.load_languages
     gives, and everything's written in English as well, for any game set to a language that isn't one of them."""
+    # Reading every vanilla biome takes a moment, so it's only for a release with a biome that needs it.
+    wants_order = any("features" in biome or "add_features" in biome for feature in features.values() for biome in feature["manifest"].get("biomes", {}).values())
+    order = vanilla_feature_order() if wants_order and vanilla_feature_order else None
     pack = out / "pack"
     datapack = out / "datapack"
     config = out / "config"
@@ -1069,7 +1097,8 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
         for plant in manifest.get("plants", []):
             surface_patches.append({**_resolve_tokens(plant, feature_id, ledger), "block": _resolve_tokens(f"$block:{plant['block']}", feature_id, ledger)})
         for name, biome in manifest.get("biomes", {}).items():
-            patch = _render_biome(feature_id, name, biome, vanilla_biome, datapack)
+            patch = _render_biome(feature_id, name, biome, vanilla_biome, datapack, order)
+            bindings[f"biome:{feature_id}/{name}"] = patch["to"].split(":", 1)[1]
             # One made for a dimension of its own has no business turning up across the overworld.
             if biome.get("spread", True):
                 biome_patches.append(patch)

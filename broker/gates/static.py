@@ -9,7 +9,7 @@ import re
 
 from PIL import Image
 
-from broker import bundles, rawpack
+from broker import bundles, feature_order, rawpack
 from broker.bundles import TOKEN
 from broker.gates import GateFailed, balance, mixins, progression, raw
 from orchestrator import others
@@ -122,6 +122,9 @@ MAX_COMPASS_FRAMES = 64
 # The game only knows %s, %1$s and %%, and shows the raw text if it finds anything else that looks like a place for a value.
 BAD_TEXT_PLACE = re.compile(r"%(?:\d+\$)?(?:[A-RT-Za-rt-z]|$)|%\d+\$%")
 TEXT_USED = re.compile(r"\.text\(\s*\"([a-z0-9_/]+)\"|\.textFor\([^\";]*?,\s*\"([a-z0-9_/]+)\"")
+# 8 chunks by 8 is the most land held loaded at once for deciding about one, which is 64 chunks. Starting values, to be tuned on the real server.
+MOST_RUIN_ACROSS = 128
+MOST_RUIN_BLOCKS = 40000
 BLOCK_WITH_STATE = re.compile(r"[^\[\]\s]+(\[[a-z0-9_]+=[a-z0-9_]+(,[a-z0-9_]+=[a-z0-9_]+)*\])?")
 # The vanilla blocks whose block entity takes a loot table. An ender chest looks like one, but it's the player's own.
 LOOT_CONTAINERS = re.compile(r"minecraft:(chest|trapped_chest|barrel|dispenser|dropper|hopper|crafter|([a-z]+_)?shulker_box|([a-z]+_)*copper_chest)")
@@ -386,10 +389,23 @@ def check_ruins(features):
             layouts = balance.ruin_layouts(ruin)
             if not all(layouts):
                 _fail(f"{label} has a layout with nothing in it.")
+            across = 0
             for layout in layouts:
+                blocks = 0
                 for part in layout:
-                    if not all(isinstance(part.get(axis), int) and not isinstance(part.get(axis), bool) and 0 <= part[axis] < 16 for axis in "xz"):
-                        _fail(f"{label} has a part at x {part.get('x')}, z {part.get('z')}. A ruin has to fit in one chunk, so both run from 0 to 15.")
+                    if not all(isinstance(part.get(axis), int) and not isinstance(part.get(axis), bool) and 0 <= part[axis] < MOST_RUIN_ACROSS for axis in "xz"):
+                        _fail(f"{label} has a part at x {part.get('x')}, z {part.get('z')}. Both run from 0, its corner, up to {MOST_RUIN_ACROSS - 1}, which is 8 chunks across.")
+                    if not isinstance(part.get("y"), int) or isinstance(part.get("y"), bool):
+                        _fail(f"{label} has a part with y {part.get('y')!r}, which has to be a whole number.")
+                    to = part.get("to", [part["x"], part["y"], part["z"]])
+                    if not (isinstance(to, list) and len(to) == 3 and all(isinstance(corner, int) and not isinstance(corner, bool) for corner in to)):
+                        _fail(f"{label} has a part with to {to!r}. It's the far corner of a box of that block, like [15, 0, 15].")
+                    if not all(0 <= corner < MOST_RUIN_ACROSS for corner in (to[0], to[2])):
+                        _fail(f"{label} has a box reaching to x {to[0]}, z {to[2]}. Both run from 0, its corner, up to {MOST_RUIN_ACROSS - 1}.")
+                    if "to" in part and "loot" in part:
+                        _fail(f"{label} has a box with loot of its own. Each container with its own loot has to be a part by itself.")
+                    blocks += (abs(to[0] - part["x"]) + 1) * (abs(to[1] - part["y"]) + 1) * (abs(to[2] - part["z"]) + 1)
+                    across = max(across, part["x"] // 16 + 1, part["z"] // 16 + 1, to[0] // 16 + 1, to[2] // 16 + 1)
                     if "chance" in part and not _is_share(part["chance"]):
                         _fail(f"{label} has a part with chance {part['chance']!r}. It's how often that part is there, above 0 and up to 1.")
                     if not isinstance(part.get("block"), str) or not BLOCK_WITH_STATE.fullmatch(part["block"]):
@@ -400,9 +416,15 @@ def check_ruins(features):
                     if "loot" in part and not LOOT_CONTAINERS.fullmatch(balance.part_block(part)):
                         _fail(f"{label} gives loot to {part.get('block')}, which can't hold any. Only vanilla's chests, barrels, shulker boxes, "
                               "dispensers, droppers, hoppers and crafters can.")
+                if blocks > MOST_RUIN_BLOCKS:
+                    _fail(f"{label} has {blocks} blocks in one layout, and the limit is {MOST_RUIN_BLOCKS}, because it all has to be placed while people are playing.")
             spacing = ruin.get("spacing")
             if spacing is not None and (not isinstance(spacing, int) or isinstance(spacing, bool) or spacing < 1):
                 _fail(f"{label} has spacing {spacing!r}. It's a whole number of chunks, at least 1.")
+            if across > 1 and (spacing or 0) < across:
+                _fail(f"{label} reaches across {across} chunks, so it needs a spacing of at least {across}. That's how it's found, and it stops two of them landing on each other.")
+            if ruin.get("opensOntoCave") and not ruin.get("underground"):
+                _fail(f"{label} opens onto a cave, and it isn't underground. Only something underground has caves to open onto.")
             if "chance" in ruin and not _is_share(ruin["chance"]):
                 _fail(f"{label} has chance {ruin['chance']!r}. It has to be above 0 and up to 1.")
             if "chance" not in ruin and not spacing:
@@ -410,8 +432,8 @@ def check_ruins(features):
             if ruin.get("followTerrain") and ruin.get("underground"):
                 _fail(f"{label} follows the terrain and is underground. Only something on the surface has terrain to follow.")
             if "maxSlope" in ruin:
-                if not ruin.get("followTerrain"):
-                    _fail(f"{label} has a maxSlope, which only means something with followTerrain.")
+                if not ruin.get("followTerrain") and across <= 1:
+                    _fail(f"{label} has a maxSlope, which only means something with followTerrain, or for one bigger than a chunk.")
                 if not isinstance(ruin["maxSlope"], int) or isinstance(ruin["maxSlope"], bool) or ruin["maxSlope"] < 0:
                     _fail(f"{label} has maxSlope {ruin['maxSlope']!r}. It's a whole number of blocks.")
             if "highGround" in ruin:
@@ -440,11 +462,32 @@ def check_dimensions(features):
             base = kind.get("base") if isinstance(kind, dict) else kind
             if base not in VANILLA_DIMENSION_TYPES:
                 _fail(f"{key}: a dimension's \"type\" is one of {', '.join(sorted(VANILLA_DIMENSION_TYPES))}, or changes to one of them with {{\"base\": ...}}, not {kind!r}.")
+            # It would look right here and do nothing in the game, where a biome's own sky wins, and every one of vanilla's has one.
+            if isinstance(kind, dict) and "minecraft:visual/sky_color" in kind.get("attributes", {}) and "$biome:" not in json.dumps(generator):
+                _fail(f"{key}: its type sets minecraft:visual/sky_color, and that won't show, because each of vanilla's biomes has a sky of its own, which wins. "
+                      "Give it a biome of your own with that in its attributes and \"spread\": false, and use that in its generator.")
             spawn = dimension.get("spawn", {"x": 0, "z": 0})
             if not (isinstance(spawn, dict) and isinstance(spawn.get("x"), int) and isinstance(spawn.get("z"), int)):
                 _fail(f"{key}: \"spawn\" is where players arrive, like {{\"x\": 0, \"z\": 0}}, not {spawn!r}.")
     if total > MOST_DIMENSIONS:
         _fail(f"{total} dimensions would be open, and the limit is {MOST_DIMENSIONS}, because each one costs the server something all the time. Use a biome or an area of one that exists.")
+
+
+def check_biome_features(features):
+    """Whatever's wrong here would only show as a server that won't start. Whether their order works is worked out when the release is put together, from the game's own biomes."""
+    for feature_id, feature in features.items():
+        for name, biome in feature["manifest"].get("biomes", {}).items():
+            added = biome.get("add_features")
+            if added is None:
+                continue
+            label = f"Biome {feature_id}/{name}"
+            if not isinstance(added, dict):
+                _fail(f"{label} has add_features {added!r}. It's lists of the game's features by step, like {{\"vegetal_decoration\": [\"minecraft:patch_pumpkin\"]}}.")
+            for step, listed in added.items():
+                if step not in feature_order.STEPS:
+                    _fail(f"{label} adds features to {step!r}. The steps are {', '.join(feature_order.STEPS)}.")
+                if not isinstance(listed, list) or not all(isinstance(entry, str) and ":" in entry for entry in listed):
+                    _fail(f"{label} has {listed!r} in {step}. It's a list of the game's features, like \"minecraft:patch_pumpkin\".")
 
 
 def check_block_drops(features):
@@ -1184,6 +1227,7 @@ def run(features, old_ledger, new_ledger, pool, content):
     check_no_tags_in_patches(features)
     check_ruins(features)
     check_dimensions(features)
+    check_biome_features(features)
     check_block_drops(features)
     check_block_kinds(features)
     check_items(features)

@@ -20,6 +20,7 @@ from orchestrator import wording
 
 SERVER_MODS = ("conduit",)
 PROGRESS_SNAPSHOT = "progress_snapshot.json"
+CHUNK_SIDE = 16
 PASSES_KEPT_SECONDS = 86400
 
 
@@ -69,7 +70,7 @@ def compile_content(source, mods, content):
     new_ledger = bundles.assign_slots(features, json.loads(json.dumps(old_ledger)), pool)
     if content.exists():
         shutil.rmtree(content)
-    bundles.render(features, new_ledger, content, runtime.data_format(), runtime.vanilla_biome, discovery_scope(source), progression_nodes(source), runtime.vanilla_dimension_type, wording.load_languages(source), runtime.vanilla_file)
+    bundles.render(features, new_ledger, content, runtime.data_format(), runtime.vanilla_biome, discovery_scope(source), progression_nodes(source), runtime.vanilla_dimension_type, wording.load_languages(source), runtime.vanilla_file, runtime.vanilla_feature_order)
     return features, pool, old_ledger, new_ledger
 
 
@@ -282,7 +283,8 @@ def patches_changed(content, old_content):
         if ruins.exists():
             # Each block in a ruin can only overwrite what the ruin says it may, and only a ruin may add a chest.
             for ruin in json.loads(ruins.read_text(encoding="utf-8")):
-                found.extend({"id": ruin["id"], "block": block, "replaces": ruin["replaces"], "adds_block_entities": True}
+                big = any(max(part.get("x", 0), part.get("z", 0), *part.get("to", [0, 0, 0])[::2]) >= CHUNK_SIDE for layout in balance.ruin_layouts(ruin) for part in layout)
+                found.extend({"id": ruin["id"], "block": block, "replaces": ruin["replaces"], "adds_block_entities": True, "big": big, **({"dimension": ruin["dimension"]} if ruin.get("dimension") else {})}
                              for block in {balance.part_block(part) for layout in balance.ruin_layouts(ruin) for part in layout})
         return found
 

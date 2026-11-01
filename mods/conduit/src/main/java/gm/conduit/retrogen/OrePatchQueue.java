@@ -1,5 +1,7 @@
 package gm.conduit.retrogen;
 
+import gm.conduit.api.RuinSpot;
+import gm.conduit.modules.ServerModuleHost;
 import gm.conduit.provenance.Provenance;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
@@ -62,6 +64,7 @@ public final class OrePatchQueue {
 	private List<SurfacePatch> surfacePatches = List.of();
 	private List<BiomePatch> biomePatches = List.of();
 	private List<RuinPatch> ruinPatches = List.of();
+	private final RuinPlans plans = new RuinPlans();
 	private final Deque<Waiting> queue = new ArrayDeque<>();
 	private final Set<Waiting> queued = new HashSet<>();
 	private final long budgetNanos = readBudgetMicros() * 1_000;
@@ -84,6 +87,7 @@ public final class OrePatchQueue {
 	}
 
 	public static void register() {
+		RuinPlans.init();
 		ServerLifecycleEvents.SERVER_STARTED.register(OrePatchQueue::reload);
 		ServerChunkEvents.CHUNK_LOAD.register((level, chunk, generated) -> INSTANCE.onLoad(level, chunk));
 		ServerChunkEvents.CHUNK_UNLOAD.register(INSTANCE::onUnload);
@@ -102,6 +106,7 @@ public final class OrePatchQueue {
 		INSTANCE.surfacePatches = SurfacePatch.load();
 		INSTANCE.biomePatches = BiomePatch.load();
 		INSTANCE.ruinPatches = RuinPatch.load();
+		INSTANCE.plans.reload(server, INSTANCE.ruinPatches);
 		int total = patches.size() + INSTANCE.surfacePatches.size() + INSTANCE.biomePatches.size() + INSTANCE.ruinPatches.size();
 		if (total > 0) {
 			LOGGER.info("retrogen: {} patches active", total);
@@ -115,6 +120,8 @@ public final class OrePatchQueue {
 	}
 
 	private void onLoad(ServerLevel level, LevelChunk chunk) {
+		// Land that could be part of something big can load before anyone's decided about it, by someone flying or a module.
+		this.plans.considerArea(level, chunk.getPos().x(), chunk.getPos().z(), chunk.getPos().x(), chunk.getPos().z());
 		if (!hasOutstanding(level, chunk)) {
 			return;
 		}
@@ -137,7 +144,8 @@ public final class OrePatchQueue {
 		return this.patches.stream().anyMatch(patch -> patch.dimension().equals(here) && !applied.contains(patch.id()))
 				|| this.surfacePatches.stream().anyMatch(patch -> patch.dimension().equals(here) && !applied.contains(patch.id()))
 				|| here.equals(Level.OVERWORLD) && this.biomePatches.stream().anyMatch(patch -> !applied.contains(patch.id()))
-				|| this.ruinPatches.stream().anyMatch(patch -> patch.dimension().equals(here) && !applied.contains(patch.id()));
+				|| this.ruinPatches.stream().anyMatch(patch -> !patch.big() && patch.dimension().equals(here) && !applied.contains(patch.id()))
+				|| this.plans.owes(level, chunk);
 	}
 
 	private void tick(MinecraftServer server) {
@@ -145,6 +153,7 @@ public final class OrePatchQueue {
 			return;
 		}
 		long started = System.nanoTime();
+		this.plans.tick(server, started + this.budgetNanos);
 		int attempts = this.queue.size();
 		while (attempts-- > 0 && System.nanoTime() - started < this.budgetNanos) {
 			Waiting waiting = this.queue.pollFirst();
@@ -153,6 +162,11 @@ public final class OrePatchQueue {
 			ChunkPos pos = waiting.pos();
 			LevelChunk chunk = level.getChunkSource().getChunkNow(pos.x(), pos.z());
 			if (chunk == null) {
+				continue;
+			}
+			// This needs nothing from the chunks next door, and it shouldn't wait for them, because someone may be looking at this one.
+			this.plans.settle(level, chunk);
+			if (!hasOutstanding(level, chunk)) {
 				continue;
 			}
 			if (neighboursLoaded(level, pos)) {
@@ -172,10 +186,11 @@ public final class OrePatchQueue {
 			this.tickIndex = 0;
 			long[] sorted = this.tickNanos.clone();
 			Arrays.sort(sorted);
-			LOGGER.info("retrogen: queued={} chunks={} ores={} ruins={} tick_ms_p99={} tick_ms_max={}",
-					this.queue.size(), this.chunksPatched, this.oresPlaced, this.ruinsPlaced,
+			LOGGER.info("retrogen: queued={} chunks={} ores={} ruins={} tick_ms_p99={} tick_ms_max={} plans={}",
+					this.queue.size(), this.chunksPatched, this.oresPlaced, this.ruinsPlaced + this.plans.bigPlaced(),
 					"%.2f".formatted(sorted[STATUS_INTERVAL_TICKS * 99 / 100] / 1e6),
-					"%.2f".formatted(sorted[STATUS_INTERVAL_TICKS - 1] / 1e6));
+					"%.2f".formatted(sorted[STATUS_INTERVAL_TICKS - 1] / 1e6),
+					this.plans.busy());
 		}
 	}
 
@@ -212,7 +227,8 @@ public final class OrePatchQueue {
 			}
 		}
 		for (RuinPatch patch : this.ruinPatches) {
-			if (patch.dimension().equals(here) && applied.add(patch.id()) && !visited) {
+			// One that's bigger than this chunk isn't this chunk's to decide. See RuinPlans.
+			if (!patch.big() && patch.dimension().equals(here) && applied.add(patch.id()) && !visited && !this.plans.taken(level, chunk.getPos())) {
 				placeRuin(level, chunk, patch);
 			}
 		}
@@ -223,8 +239,7 @@ public final class OrePatchQueue {
 
 	private void placeRuin(ServerLevel level, LevelChunk chunk, RuinPatch patch) {
 		ChunkPos pos = chunk.getPos();
-		RandomSource random = RandomSource.create(level.getSeed() ^ (patch.id().hashCode() * 0x9E3779B97F4A7C15L)
-				^ (pos.x() * 341873128712L) ^ (pos.z() * 132897987541L));
+		RandomSource random = patch.random(level.getSeed(), pos);
 		if (!patch.spotAt(level.getSeed(), pos) || random.nextFloat() >= patch.chance()) {
 			return;
 		}
@@ -234,31 +249,72 @@ public final class OrePatchQueue {
 		BlockPos origin = patch.underground()
 				? new BlockPos(x, patch.minY() + random.nextInt(Math.max(1, patch.maxY() - patch.minY())), z)
 				: new BlockPos(x, chunk.getHeight(Heightmap.Types.OCEAN_FLOOR, x & 15, z & 15) + 1, z);
-		int[] ground = patch.followTerrain() ? groundUnder(chunk, patch, parts) : null;
-		boolean suits = patch.followTerrain() ? ground != null
-				: origin.getY() >= patch.minY() && origin.getY() <= patch.maxY() && patch.on().contains(chunk.getBlockState(origin.below()).getBlock());
-		if (!suits || !onHighGround(level, chunk, patch) || !(patch.biomes().isEmpty() || patch.biomes().stream().anyMatch(level.getBiome(origin)::is))) {
-			return;
-		}
-		List<BlockPos> spots = parts.stream().map(part -> ground == null ? origin.offset(part.x(), part.y(), part.z())
-				: new BlockPos(x + part.x(), ground[column(part)] + 1 + part.y(), z + part.z())).toList();
-		// All of it or none of it, so no half-built ruin ever appears.
-		for (BlockPos spot : spots) {
-			if (!patch.replaces().contains(chunk.getBlockState(spot).getBlock())) {
+		if (patch.opensOntoCave()) {
+			origin = caveOpening(level, chunk, patch, parts, origin);
+			if (origin == null) {
 				return;
 			}
 		}
+		BlockPos start = origin;
+		int[] ground = patch.followTerrain() ? groundUnder(chunk, patch, parts) : null;
+		boolean suits = patch.followTerrain() ? ground != null
+				: start.getY() >= patch.minY() && start.getY() <= patch.maxY() && (patch.opensOntoCave() || patch.sitsOn(chunk.getBlockState(start.below()).getBlock()));
+		if (!suits || !onHighGround(level, chunk, patch) || !(patch.biomes().isEmpty() || patch.biomes().stream().anyMatch(level.getBiome(start)::is))) {
+			return;
+		}
+		List<BlockPos> spots = parts.stream().map(part -> ground == null ? start.offset(part.x(), part.y(), part.z())
+				: new BlockPos(x + part.x(), ground[column(part)] + 1 + part.y(), z + part.z())).toList();
+		// All of it or none of it, so no half-built ruin ever appears.
+		for (BlockPos spot : spots) {
+			if (!patch.canReplace(chunk.getBlockState(spot))) {
+				return;
+			}
+		}
+		this.plans.recordSmall(level, patch, pos, start);
 		Provenance.untracked(() -> {
 			for (int i = 0; i < spots.size(); i++) {
-				BlockPos spot = spots.get(i);
-				level.setBlock(spot, parts.get(i).state(), Block.UPDATE_CLIENTS);
-				String loot = parts.get(i).loot() != null ? parts.get(i).loot() : patch.loot();
-				if (loot != null && level.getBlockEntity(spot) instanceof RandomizableContainerBlockEntity chest) {
-					chest.setLootTable(ResourceKey.create(Registries.LOOT_TABLE, Identifier.parse(loot)), random.nextLong());
-				}
+				RuinPlans.place(level, spots.get(i), parts.get(i), patch, random.nextLong());
 			}
 		});
 		this.ruinsPlaced++;
+		ServerModuleHost.instance().fire(events -> events.ruinPlaced(level, patch.name(), start));
+	}
+
+	/** Looks through the heights it can be at, from the one it would have had, for one it fits at that a cave reaches. */
+	private static BlockPos caveOpening(ServerLevel level, LevelChunk chunk, RuinPatch patch, List<RuinPatch.Part> parts, BlockPos from) {
+		int room = Math.max(1, patch.maxY() - patch.minY());
+		for (int step = 0; step < room; step++) {
+			BlockPos origin = new BlockPos(from.getX(), patch.minY() + (from.getY() - patch.minY() + step) % room, from.getZ());
+			boolean fits = parts.stream().allMatch(part -> {
+				BlockPos spot = origin.offset(part.x(), part.y(), part.z());
+				return !level.isOutsideBuildHeight(spot) && patch.canReplace(chunk.getBlockState(spot));
+			});
+			if (fits && RuinPlans.opensOntoCave(level, parts, origin)) {
+				return origin;
+			}
+		}
+		return null;
+	}
+
+	/** Where this ruin is, or may turn up, around a place, without loading anything. */
+	public static List<RuinSpot> ruinsNear(String name, ServerLevel level, BlockPos near, int chunks) {
+		RuinPatch patch = INSTANCE.ruinPatches.stream().filter(ruin -> ruin.name().equals(name)).findFirst()
+				.orElseThrow(() -> new IllegalArgumentException("No ruin is called " + name));
+		return patch.dimension().equals(level.dimension()) ? INSTANCE.plans.near(patch, level, near, chunks) : List.of();
+	}
+
+	/** For the gate: decides the spots nearest a place for a new ruin, however unlikely they'd be to have it, to prove it can be placed at all. */
+	public static String tryOutRuin(ServerLevel level, String id, BlockPos near, int spots) {
+		RuinPatch patch = INSTANCE.ruinPatches.stream().filter(ruin -> ruin.id().equals(id)).findFirst()
+				.orElseThrow(() -> new IllegalArgumentException("No ruin has the id " + id));
+		StringBuilder said = new StringBuilder();
+		INSTANCE.plans.tryOut(level, patch, near, spots, said::append);
+		return said.toString();
+	}
+
+	public static String ruinSummary(String id) {
+		return INSTANCE.ruinPatches.stream().filter(ruin -> ruin.id().equals(id)).findFirst()
+				.map(INSTANCE.plans::summary).orElse("No ruin has the id " + id);
 	}
 
 	/**
@@ -295,7 +351,7 @@ public final class OrePatchQueue {
 				continue;
 			}
 			BlockPos floor = groundAt(chunk, part.x(), part.z());
-			if (floor.getY() < patch.minY() - 1 || floor.getY() >= patch.maxY() || !patch.on().contains(chunk.getBlockState(floor).getBlock())) {
+			if (floor.getY() < patch.minY() - 1 || floor.getY() >= patch.maxY() || !patch.sitsOn(chunk.getBlockState(floor).getBlock())) {
 				return null;
 			}
 			ground[column(part)] = floor.getY();
