@@ -1,0 +1,22 @@
+{
+  "id": "tonic",
+  "node": "first_comforts",
+  "summary": "A simple drink for a long day of building. Hearty Tonic, made from an apple and a glass bottle, fills your hunger right up when you drink it.",
+  "items": {
+    "hearty_tonic": {"display": "Hearty Tonic", "texture": "hearty_tonic", "tooltip": ["Fills your hunger when you drink it."]}
+  },
+  "recipes": {
+    "hearty_tonic": {
+      "mode": "open",
+      "json": {
+        "type": "minecraft:crafting_shapeless",
+        "category": "misc",
+        "ingredients": ["minecraft:apple", "minecraft:glass_bottle"],
+        "result": {"id": "$item:hearty_tonic", "count": 1}
+      }
+    }
+  },
+  "knowledge": {
+    "hearty_tonic_notes": {"title": "Hearty Tonic", "text": "An apple in a bottle of water fills you right up.", "routes": [{"type": "obtain", "id": "$item:hearty_tonic"}]}
+  }
+}

@@ -35,6 +35,7 @@ class PrivateChat(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(patcher.stop)
 
         self.agent = main.Agent.__new__(main.Agent)
+        self.agent.bugs = mock.Mock(**{"of_player.return_value": [], "open_count.return_value": 0})
         self.agent.governor = mock.Mock()
         self.agent.interviews = {}
         self.agent.tell = mock.AsyncMock()

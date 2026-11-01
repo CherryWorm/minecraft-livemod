@@ -46,6 +46,7 @@ public final class Bridge {
 	private static final int PORT = 25580;
 
 	private static final String DM_USAGE = "§7Type §f/dm§7, a space, then your message, like §f/dm I love exploring§7. Only the agent sees it.";
+	private static final String BUG_USAGE = "§7Type §f/bug§7, a space, then what went wrong, like §f/bug my furnace ate my coal§7. An agent looks into it straight away and tells you what it finds.";
 
 	private static final List<Client> CLIENTS = new CopyOnWriteArrayList<>();
 	private static MinecraftServer server;
@@ -84,6 +85,16 @@ public final class Bridge {
 					return Command.SINGLE_SUCCESS;
 				}))));
 
+		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> dispatcher.register(Commands.literal("bug")
+				.executes(context -> {
+					context.getSource().getPlayerOrException().sendSystemMessage(literal(BUG_USAGE));
+					return Command.SINGLE_SUCCESS;
+				})
+				.then(Commands.argument("report", StringArgumentType.greedyString()).executes(context -> {
+					bug(context.getSource().getPlayerOrException(), StringArgumentType.getString(context, "report"));
+					return Command.SINGLE_SUCCESS;
+				}))));
+
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> dispatcher.register(Commands.literal("plan").executes(context -> {
 			ServerPlayer player = context.getSource().getPlayerOrException();
 			if (CLIENTS.isEmpty() || KillSwitch.on()) {
@@ -113,6 +124,18 @@ public final class Bridge {
 		JsonObject dm = event("dm", player);
 		dm.addProperty("text", text);
 		emit(dm);
+	}
+
+	/** Like a /dm, it goes to the agent and to nobody else, but it goes straight to whoever looks into bugs. */
+	private static void bug(ServerPlayer player, String text) {
+		if (CLIENTS.isEmpty() || KillSwitch.on()) {
+			player.sendSystemMessage(literal("§7The agent isn't listening right now, so that wasn't sent. Try again later."));
+			return;
+		}
+		player.sendSystemMessage(literal("§8Your bug report: §7" + text));
+		JsonObject bug = event("bug", player);
+		bug.addProperty("text", text);
+		emit(bug);
 	}
 
 	public static JsonObject event(String kind, ServerPlayer player) {

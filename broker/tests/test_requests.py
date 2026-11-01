@@ -38,6 +38,7 @@ class Base(unittest.IsolatedAsyncioTestCase):
     def make_agent(self, saved):
         """Everything but the connections to the game and the broker."""
         agent = main.Agent.__new__(main.Agent)
+        agent.bugs = mock.Mock(**{"of_player.return_value": [], "open_count.return_value": 0})
         agent.governor = mock.Mock()
         agent.governor.why_not_build.return_value = None
         agent.governor.builders_allowed.return_value = 2

@@ -28,6 +28,8 @@ ROLES = {
     "teaser": {"model": "claude-haiku-5-5", "effort": "low"},
     "mind": {"model": "claude-haiku-5-5", "effort": "low"},
     "icon": {"model": "claude-opus-5-5", "effort": "medium"},
+    "bug_investigator": {"model": "claude-opus-5-5", "effort": "medium"},
+    "bug_fixer": {"model": "claude-opus-5-5", "effort": "medium"},
 }
 WORKER = {"model": "claude-opus-5-5", "effort": "low"}
 

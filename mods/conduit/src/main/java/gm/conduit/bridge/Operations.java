@@ -8,12 +8,18 @@ import gm.conduit.KillSwitch;
 import gm.conduit.Opening;
 import gm.conduit.knowledge.Knowledge;
 import gm.conduit.mobs.Minds;
+import gm.conduit.pack.LiveAssets;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 
 import java.util.Set;
 
@@ -24,6 +30,7 @@ import java.util.Set;
  */
 final class Operations {
 	private static final Set<String> READ_ONLY = Set.of("status", "players", "progress");
+	private static final double REACH = 5.0;
 
 	private Operations() {}
 
@@ -43,6 +50,7 @@ final class Operations {
 			case "whisper" -> whisper(server, text(request, "player"), text(request, "text"), request.has("reply_click"));
 			case "broadcast" -> broadcast(server, text(request, "text"));
 			case "players" -> players(server);
+			case "inspect_player" -> inspectPlayer(server, text(request, "player"));
 			case "open_world" -> new JsonPrimitive(Opening.open(server));
 			case "progress" -> Knowledge.instance().progress();
 			case "mob_act" -> Minds.act(request);
@@ -53,6 +61,42 @@ final class Operations {
 
 	private static String text(JsonObject request, String field) {
 		return request.get(field).getAsString();
+	}
+
+	/** So a bug someone's reported can be checked against what's really in front of them. It only reads. */
+	private static JsonElement inspectPlayer(MinecraftServer server, String name) {
+		ServerPlayer player = server.getPlayerList().getPlayerByName(name);
+		if (player == null) {
+			throw new IllegalArgumentException(name + " isn't online");
+		}
+		JsonObject found = new JsonObject();
+		found.addProperty("dimension", player.level().dimension().identifier().toString());
+		found.addProperty("x", player.getBlockX());
+		found.addProperty("y", player.getBlockY());
+		found.addProperty("z", player.getBlockZ());
+		found.addProperty("game_mode", player.gameMode.getGameModeForPlayer().getName());
+		found.addProperty("health", player.getHealth());
+		found.addProperty("food", player.getFoodData().getFoodLevel());
+		found.addProperty("screen_open", player.containerMenu != player.inventoryMenu);
+		if (player.pick(REACH, 1.0F, false) instanceof BlockHitResult block && block.getType() == HitResult.Type.BLOCK) {
+			BlockState state = player.level().getBlockState(block.getBlockPos());
+			found.addProperty("looking_at", BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
+			found.addProperty("looking_at_name", LiveAssets.shownName(state.getBlock().getName()));
+		}
+		JsonArray carrying = new JsonArray();
+		for (int slot = 0; slot < player.getInventory().getContainerSize(); slot++) {
+			ItemStack stack = player.getInventory().getItem(slot);
+			if (!stack.isEmpty()) {
+				JsonObject item = new JsonObject();
+				item.addProperty("slot", slot);
+				item.addProperty("item", BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
+				item.addProperty("name", LiveAssets.shownName(stack.getHoverName()));
+				item.addProperty("count", stack.getCount());
+				carrying.add(item);
+			}
+		}
+		found.add("carrying", carrying);
+		return found;
 	}
 
 	private static JsonElement whisper(MinecraftServer server, String name, String text, boolean replyClick) {

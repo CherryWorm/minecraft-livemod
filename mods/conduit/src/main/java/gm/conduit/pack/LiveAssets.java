@@ -1,8 +1,12 @@
 package gm.conduit.pack;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
 import eu.pb4.polymer.resourcepack.api.PolymerResourcePackUtils;
 import gm.conduit.slots.NeutralSlots;
+import net.minecraft.network.chat.Component;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -36,6 +40,24 @@ public final class LiveAssets {
 				builder.copyFromPath(ROOT);
 			}
 		});
+	}
+
+	/**
+	 * What a player's game calls something. The names of this world's own things are only in the pack, so on the server they're just
+	 * keys. It's read each time, because this is rare, and the pack can change under it.
+	 */
+	public static String shownName(Component name) {
+		String text = name.getString();
+		Path names = ROOT.resolve("assets/gm/lang/en_us.json");
+		if (!text.contains(".gm.") || !Files.exists(names)) {
+			return text;
+		}
+		try {
+			JsonElement shown = JsonParser.parseString(Files.readString(names)).getAsJsonObject().get(text);
+			return shown == null ? text : shown.getAsString();
+		} catch (IOException | RuntimeException error) {
+			return text;
+		}
 	}
 
 	private static byte[] itemDefinition(String model) {

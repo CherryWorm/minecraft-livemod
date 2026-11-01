@@ -8,7 +8,7 @@ import pathlib
 import re
 import time
 
-from orchestrator import feedback, icon, lanes, llm, minds, progression, research, voice, worker_hub, workshop, world_index
+from orchestrator import bugs, feedback, icon, lanes, llm, minds, progression, research, voice, worker_hub, workshop, world_index
 from orchestrator.bridge import Bridge
 from orchestrator.governor import CONTROL, Governor
 
@@ -27,7 +27,7 @@ CHAT_BATCH_SECONDS = 20
 WEEKLY_INTENTS_PER_PLAYER = 100
 CHAT_MEMORY = 12  # Enough of a private chat to follow the conversation, without each reply getting more expensive.
 WATCH_SECONDS = 5 * 60
-FEATURE_ID = r"[a-z][a-z0-9_]{1,40}"
+FEATURE_ID = workshop.FEATURE_ID
 DIRECTION_RESEARCH = 6
 DIRECTOR_RESEARCH = 3
 DIRECTOR_REST_SECONDS = 30 * 60
@@ -108,6 +108,7 @@ class Agent:
             self.state.update(json.loads(OPENING.read_text(encoding="utf-8")))
         self.interviews = {player: voice.Interview(self.governor, player, saved) for player, saved in self.state["interviews"].items()}
         self.requests = feedback.Requests(STATE / "intents.jsonl", self.state["requests"])
+        self.bugs = bugs.BugDesk(self)
         # Saved, so a restart costs as little as possible. What it interrupted goes first, and its work so far is still in its folder.
         self.queue = self.state["queue"]
         self.building = self.state["in_flight"]
@@ -192,7 +193,7 @@ class Agent:
 
     async def what_they_have(self, player):
         """So advice can be about their next step. An answer without the game's part still beats no answer."""
-        known = {"what_they_asked_for": self.requests.of_player(player), "being_built_now": self.described(self.building.values()), "waiting_to_be_built": self.described(self.queue)}
+        known = {"what_they_asked_for": self.requests.of_player(player), "bugs_they_reported": self.bugs.of_player(player), "being_built_now": self.described(self.building.values()), "waiting_to_be_built": self.described(self.queue)}
         try:
             progress = await self.bridge.call("progress")
         except (RuntimeError, ConnectionError, TimeoutError):
@@ -211,6 +212,8 @@ class Agent:
         shown = ", ".join(waiting[:PLAN_SHOWN]) + (f", and {len(waiting) - PLAN_SHOWN} more" if len(waiting) > PLAN_SHOWN else "")
         await self.tell(player, f"§7Being built right now: §f{', '.join(now) or 'nothing'}")
         await self.tell(player, f"§7Up next, in order: §f{shown or 'nothing yet'}" + (" §7(more being planned)" if self.planning else ""))
+        if self.bugs.open_count():
+            await self.tell(player, f"§7Bugs being looked into or fixed, ahead of all of that: §f{self.bugs.open_count()}")
         await self.tell(player, f"§7Out so far: §f{self.state.get('release_count', 0)} §7things. Ask about any of it with §f/dm§7, or keep the numbers on screen with §f/board§7.", reply_click=True)
 
     async def deliver(self, player, text):
@@ -317,7 +320,7 @@ class Agent:
         self.governor.player_seen()
         if self.governor.why_not_speak():
             # The character has gone quiet for now, so don't leave someone talking to nobody in private.
-            if kind in ("dm", "plan"):
+            if kind in ("dm", "plan", "bug"):
                 await self.tell(player, "§7I can't answer right now, so I haven't read that. Please try again later.")
             return
         if kind == "join":
@@ -329,6 +332,9 @@ class Agent:
             await self.deliver_waiting(player)
         elif kind == "dm":
             await self.on_dm(player, event.get("text", ""))
+        elif kind == "bug":
+            await self.bugs.report(player, event.get("text", ""))
+            return
         elif kind == "plan":
             await self.show_plan(player)
         elif kind == "chat":
@@ -801,6 +807,7 @@ class Agent:
         for player in await self.bridge.call("players"):
             name = player["name"] if isinstance(player, dict) else player
             await self.bridge.events.put({"event": "join", "player": name})
+        self.bugs.resume()
         print("agent running", flush=True)
         await asyncio.gather(readers, self.event_loop(), self.chat_loop(), self.build_loop(), self.sort_loop(), self.opening_loop(),
                              self.status_loop(), self.watch_loop(), self.board_loop(), self.self_hosted.serve(), self.hub.serve())

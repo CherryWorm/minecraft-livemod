@@ -25,7 +25,7 @@ REPORTS = pathlib.Path("/workspace/reports")
 REFERENCE_TEXTURES = pathlib.Path("/workspace/reference-textures")
 FEATURE_RESEARCH = 4
 TUNES_PER_HOUR = 6
-REQUEST_TIMEOUT = {"lint": 300, "check": 300, "gates": 1800, "release": 1800, "javap": 300, "server_icon": 300, "set_rule": 300}  # Generous, because they queue behind whatever's running.
+REQUEST_TIMEOUT = {"lint": 300, "check": 300, "gates": 1800, "release": 1800, "javap": 300, "server_icon": 300, "set_rule": 300, "server_errors": 300}  # Generous, because they queue behind whatever's running.
 KEEP_ASKING = ("gates", "release")  # A broker that's down or far behind isn't something a builder can fix, so these wait for it, which costs nothing.
 RELEASE_TREE = TREES / "_release"
 RELEASE_BRANCH = "release/next"
@@ -36,10 +36,16 @@ MOST_IN_A_RELEASE = 8  # Finding a bad one takes longer the more there are. Anyt
 # nobody's waiting on them, because they're built in the background while people play.
 STAGE_LIMITS = {"early": (100, 14.0, 3), "mid": (160, 24.0, 4), "end": (240, 40.0, 5)}
 SMALL_LIMITS = (40, 3.0, 2)
+FIX_LIMITS = (60, 6.0, 3)
+FEATURE_ID = r"[a-z][a-z0-9_]{1,40}"
 STALE = "is in the ledger but no feature declares it"
 STALE_RETRIES = 4
 SMALL_NOTE = ("This is a small change a player just asked for, and they're waiting for it. Do it yourself, quickly, with no subagents and no research, "
               "and change as little as you can. If it changes something players already have, say why in `changes_reached`.\n\n")
+
+FIX_NOTE = ("This is a bug a player reported in something that's already out, and it's being fixed ahead of everything else. Someone who looked into it wrote the "
+            "brief below, so check it against the code, fix the cause and change nothing else: what it otherwise does, its art, names, recipes and balance all stay as "
+            "they are. Do it yourself, with no subagents and no research, and say what changed in `changes_reached`.\n\n")
 
 VERDICT_SCHEMA = {
     "type": "object",
@@ -270,6 +276,7 @@ class Ready:
     node: str
     answer: asyncio.Future
     about: str = ""
+    branch: str = ""
 
 
 class Workshop:
@@ -288,11 +295,12 @@ class Workshop:
 
     # Releases -----------------------------------------------------------------------------------------------
 
-    async def _release(self, feature_id, tree, node, about=""):
+    async def _release(self, feature_id, tree, node, about="", fix=None):
         """Waits for the next release, which takes everything that's ready by then. A release costs about the same whatever's in it,
-        and players get more at once. Returns what the broker said about the release that this feature's fate was settled in."""
-        ready = Ready(feature_id, tree, node, asyncio.get_running_loop().create_future(), about)
-        self.ready.append(ready)
+        and players get more at once. Returns what the broker said about the release that this feature's fate was settled in.
+        A bug fix goes in the next one whatever else is waiting, so it's first in line for it."""
+        ready = Ready(feature_id, tree, node, asyncio.get_running_loop().create_future(), about, f"fix/{fix}" if fix else f"feature/{feature_id}")
+        self.ready.insert(sum(item.branch.startswith("fix/") for item in self.ready) if fix else len(self.ready), ready)
         if self.releasing is None or self.releasing.done():
             self.releasing = asyncio.create_task(self._run_releases())
         return await ready.answer
@@ -348,7 +356,7 @@ class Workshop:
         for ready in batch:
             try:
                 ready_commit(f"{ready.feature_id}: ready to release", ready.tree, ready.feature_id, ready.node)
-                _git("merge", "-q", "--no-edit", f"feature/{ready.feature_id}", cwd=RELEASE_TREE)
+                _git("merge", "-q", "--no-edit", ready.branch, cwd=RELEASE_TREE)
                 included.append(ready)
             except subprocess.CalledProcessError as error:
                 subprocess.run(["git", "merge", "--abort"], cwd=RELEASE_TREE, check=False, capture_output=True)
@@ -437,16 +445,21 @@ class Workshop:
             subprocess.run(["git", "worktree", "remove", "--force", str(tree)], cwd=REPO, check=False, capture_output=True)
             subprocess.run(["git", "branch", "-D", branch], cwd=REPO, check=False, capture_output=True)
 
-    def _prepare_tree(self, feature_id):
-        tree = TREES / feature_id
+    def _prepare_tree(self, feature_id, fix=None):
+        """A bug fix starts from what's out, in a folder and on a branch of its own, so it doesn't wait for or pick up whatever a builder is doing to the same feature."""
+        tree = TREES / (fix or feature_id)
         if not tree.exists():
             TREES.mkdir(parents=True, exist_ok=True)
             subprocess.run(["git", "worktree", "prune"], cwd=REPO, check=False)
-            _git("worktree", "add", "-q", "-B", f"feature/{feature_id}", str(tree), "main")
+            _git("worktree", "add", "-q", "-B", f"fix/{fix}" if fix else f"feature/{feature_id}", str(tree), "main")
         # It's been here before, for a released feature that's changing or a build a restart interrupted, so catch up.
         elif subprocess.run(["git", "merge", "-q", "--no-edit", "main"], cwd=tree, check=False, capture_output=True).returncode != 0:
             subprocess.run(["git", "merge", "--abort"], cwd=tree, check=False, capture_output=True)
         return tree
+
+    def remove_fix(self, fix):
+        subprocess.run(["git", "worktree", "remove", "--force", str(TREES / fix)], cwd=REPO, check=False, capture_output=True)
+        subprocess.run(["git", "branch", "-D", f"fix/{fix}"], cwd=REPO, check=False, capture_output=True)
 
     async def _review(self, spec, feature_id, tree, screenshots):
         shots = "\n".join(f"- {path}" for path in screenshots) or "(none: this feature adds nothing visible)"
@@ -458,9 +471,9 @@ class Workshop:
             return {"approve": False, "problems": ["The review didn't complete, so it should run again."]}
         return result.structured
 
-    async def _attempt(self, feature_id, tree, prompt, session, small, lane, node, stage, max_turns, usage, tools, web):
+    async def _attempt(self, feature_id, tree, prompt, session, small, lane, node, stage, max_turns, usage, tools, web, fix=None):
         """One go at the feature, by a model here or on another machine. Either way, what it did ends up in this tree."""
-        role = "small_builder" if small else "builder"
+        role = "bug_fixer" if fix else "small_builder" if small else "builder"
         if lane == lanes.REMOTE:
             # Being committed is what lets the machine see any earlier attempt's work.
             ready_commit(f"{feature_id}: before going to another machine", tree, feature_id, node)
@@ -472,18 +485,19 @@ class Workshop:
                              mcp_servers={"broker": _tools_for(feature_id, tree, node), "web": web, "world": self.world_server()},
                              budget=usage, lane=chosen)
 
-    async def build(self, feature_id, spec, node, stage, small=False, lane=None, about=""):
+    async def build(self, feature_id, spec, node, stage, small=False, lane=None, about="", fix=None, on_released=None):
         """Takes one feature from spec to released. Returns True if it reached players, False if it couldn't be done,
-        and None if it had to stop for now and should be picked up again later."""
+        and None if it had to stop for now and should be picked up again later. With fix, it's the name of a bug fix to an
+        existing feature rather than the feature itself being built."""
         started = time.monotonic()
-        tree = self._prepare_tree(feature_id)
+        tree = self._prepare_tree(feature_id, fix)
         (tree / "mods/genesis/features" / feature_id).mkdir(parents=True, exist_ok=True)
         session = None
         feedback = None
         last_problem = ""
         timings = {}
         web = self.web_research.server(FEATURE_RESEARCH)
-        max_turns, usage, attempts = SMALL_LIMITS if small else STAGE_LIMITS[stage]
+        max_turns, usage, attempts = FIX_LIMITS if fix else SMALL_LIMITS if small else STAGE_LIMITS[stage]
         tools = SMALL_TOOLS if small else BUILDER_TOOLS
         for attempt in range(1, attempts + 1):
             reason = self.governor.why_not_build()
@@ -491,11 +505,11 @@ class Workshop:
                 print(f"{feature_id}: pausing: {reason}", flush=True)
                 return None
 
-            prompt = feedback or ((SMALL_NOTE if small else "") + f"Build this feature, with id `{feature_id}`, in node `{node}`, which is in the {stage} game. Its place "
+            prompt = feedback or ((FIX_NOTE if fix else SMALL_NOTE if small else "") + f"Build this feature, with id `{feature_id}`, in node `{node}`, which is in the {stage} game. Its place "
                                   f"in the world is in bible/progression.json.\n\n{llm.untrusted('spec', spec)}\n\n"
                                   f"Your feature folder is mods/genesis/features/{feature_id}/.")
             began = time.monotonic()
-            result = await self._attempt(feature_id, tree, prompt, session, small, lane, node, stage, max_turns, usage, tools, web)
+            result = await self._attempt(feature_id, tree, prompt, session, small, lane, node, stage, max_turns, usage, tools, web, fix)
             if result.stop_reason in lanes.MACHINE_GONE:
                 print(f"{feature_id}: the machine it was on has gone, so it's going back in the queue", flush=True)
                 return None
@@ -507,7 +521,7 @@ class Workshop:
                 continue
 
             began = time.monotonic()
-            gates = await checked_against_main("gates", f"{feature_id}: attempt {attempt}", tree, feature_id, node, release_id=f"{feature_id}-{attempt}", hurry=small)
+            gates = await checked_against_main("gates", f"{feature_id}: attempt {attempt}", tree, feature_id, node, release_id=f"{fix or feature_id}-{attempt}", hurry=small, first=bool(fix))
             timings[f"gates_{attempt}"] = round(time.monotonic() - began, 1)
             if gates.get("result") not in ("passed_gates", "nothing_to_release"):
                 feedback = f"The automated gates stopped this at {gates.get('gate')}:\n{gates.get('reason')}\n\nFix it."
@@ -529,7 +543,7 @@ class Workshop:
                 print(f"{feature_id}: shipping anyway: the problems aren't serious and the gates passed", flush=True)
 
             began = time.monotonic()
-            released = await self._release(feature_id, tree, node, about)
+            released = await self._release(feature_id, tree, node, about, fix)
             timings["release"] = round(time.monotonic() - began, 1)
             if released.get("result") not in WENT_OUT:
                 feedback = f"Release failed at {released.get('gate')}: {released.get('reason')}\n\nFix it."
@@ -537,13 +551,17 @@ class Workshop:
                 print(f"{feature_id}: release failed: {released.get('reason')}", flush=True)
                 continue
 
-            self.governor.record_gate_result(True)
+            if not fix:
+                self.governor.record_gate_result(True)
             timings["total"] = round(time.monotonic() - started, 1)
             self._log_timing(feature_id, timings, released)
             print(f"{feature_id}: released in {timings['total']}s: {timings}", flush=True)
-            await self.on_released(feature_id, tree)
+            await (on_released or self.on_released)(feature_id, tree)
             return True
         print(f"{feature_id}: giving up after {attempts} attempts", flush=True)
+        # What players report shouldn't be able to stop everything else, or send the director off after something it never asked for.
+        if fix:
+            return False
         # Only a whole feature failing counts, because builders getting a check wrong on the way is just how they work,
         # and with several at once, five of those in a row is nothing to stop for.
         self.governor.record_gate_result(False)

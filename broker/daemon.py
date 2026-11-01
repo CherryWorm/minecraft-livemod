@@ -9,6 +9,7 @@ Usage: python3 -m broker.daemon
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -30,7 +31,13 @@ PROXY_DATA = runtime.RUNTIME / "velocity"
 ICON_SIZE = 64
 STARTED = runtime.BROKER / "started.json"
 TRIES_BEFORE_REFUSING = 2  # How many times one request can take the whole broker down before it's answered instead.
-QUICK = ("lint", "check", "javap", "server_icon", "set_rule")  # None of these touch the shadow server, and someone is waiting on each one.
+QUICK = ("lint", "check", "javap", "server_icon", "set_rule", "server_errors")  # None of these touch the shadow server, and someone is waiting on each one.
+PROD_LOG = runtime.RUNTIME / "prod" / "logs" / "latest.log"
+MOST_LOG_LINES = 200
+MOST_LOG_CHARACTERS = 16000
+WENT_WRONG = re.compile(r"\b(WARN|ERROR|FATAL)\b|Exception|^\s+at |^Caused by")
+IP_ADDRESS = re.compile(r"\b\d{1,3}(\.\d{1,3}){3}(:\d+)?\b")
+LOG_NOISE = ("minecraftservices", "authlib", "Services are unavailable")
 # Only these, because the rest of what a server command can do would get around the gates. All of them apply to everyone.
 RULES = {"players_sleeping_percentage": lambda value: isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 100,
          "spawn_phantoms": lambda value: isinstance(value, bool), "keep_inventory": lambda value: isinstance(value, bool)}
@@ -131,6 +138,18 @@ def set_rule(rule, value):
     return {"result": "set"}
 
 
+def server_errors(contains=""):
+    """What's gone wrong on the live server lately, for whoever's looking into a bug. It's only warnings and errors, because the rest
+    of the log says who's been doing what, and never anyone's address."""
+    if not PROD_LOG.exists():
+        return {"output": "There's no log yet."}
+    lines = [IP_ADDRESS.sub("(address)", line) for line in PROD_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
+             if WENT_WRONG.search(line) and not any(noise in line for noise in LOG_NOISE)]
+    if contains:
+        lines = [line for line in lines if contains.lower() in line.lower()]
+    return {"output": "\n".join(lines[-MOST_LOG_LINES:])[-MOST_LOG_CHARACTERS:] or "Nothing like that in the log."}
+
+
 def handle(request):
     kind = request["kind"]
     if runtime.agent_disabled() and kind != "javap":
@@ -150,6 +169,8 @@ def handle(request):
         return promote(request["commit"], release_id, f"--why={request.get('why', '')}")
     if kind == "javap":
         return javap(request["class_name"])
+    if kind == "server_errors":
+        return server_errors(request.get("contains", ""))
     return {"result": "blocked", "gate": "broker", "reason": f"Unknown request {kind}"}
 
 
@@ -169,10 +190,10 @@ def next_request(pending):
     """Still one at a time, because there's one shadow server and releases must not overlap. But with several builders
     working, a quick check shouldn't wait behind everyone else's full test run, and a small change a player is waiting
     for goes ahead of a big one that's being built in the background. So does a release, because that's finished work
-    that everything still being tested would otherwise have to be tested again on top of."""
+    that everything still being tested would otherwise have to be tested again on top of. A bug fix goes ahead of all of those."""
     def order(path):
         request = json.loads(path.read_text(encoding="utf-8"))
-        return (0 if request["kind"] in QUICK else 1 if request.get("hurry") or request["kind"] == "release" else 2, path.stat().st_mtime)
+        return (0 if request["kind"] in QUICK else 1 if request.get("first") else 2 if request.get("hurry") or request["kind"] == "release" else 3, path.stat().st_mtime)
     return min(pending, key=order)
 
 
