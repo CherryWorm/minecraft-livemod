@@ -58,7 +58,7 @@ public final class SlotFluids {
 			Identifier model = id("block/" + blockPath);
 			SlotFluid.Source source = Registry.register(BuiltInRegistries.FLUID, id("fl" + number), new SlotFluid.Source(blockPath));
 			SlotFluid.Flowing flowing = Registry.register(BuiltInRegistries.FLUID, id("fl" + number + "_flowing"), new SlotFluid.Flowing(blockPath));
-			var properties = BlockBehaviour.Properties.of().noCollision().strength(100.0F).pushReaction(PushReaction.DESTROY).noLootTable().liquid().replaceable()
+			var properties = BlockBehaviour.Properties.of().noCollision().strength(100.0F).pushReaction(PushReaction.POPPED).noLootTable().liquid().replaceable()
 					.sound(SoundType.EMPTY).instrument(NoteBlockInstrument.HARP).randomTicks().lightLevel(state -> state.getValue(gm.conduit.slots.SlotBlock.LIGHT))
 					.setId(ResourceKey.create(Registries.BLOCK, id(blockPath)));
 			SlotLiquidBlock block = Registry.register(BuiltInRegistries.BLOCK, id(blockPath), new SlotLiquidBlock(source, properties, blockPath, model));

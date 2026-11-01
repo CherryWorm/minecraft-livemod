@@ -464,6 +464,7 @@ def play_walking(client):
     client.ask("rightclick")
     check("a module sends a mob to a block", holds(client, "ox sets off for"))
     check("and hears when it's there", holds(client, "ox arrived at true", 30))
+    check("its walk animation plays on the way", holds(client, "ox legs moving", 1))
     # Being told to go somewhere else while walking counts as not having got to the first place.
     aim(tag, x - 6, y, z)
     client.ask("rightclick")

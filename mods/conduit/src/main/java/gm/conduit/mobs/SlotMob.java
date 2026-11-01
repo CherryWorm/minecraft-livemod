@@ -37,7 +37,6 @@ import net.minecraft.world.entity.ai.control.FlyingMoveControl;
 import net.minecraft.world.entity.ai.control.MoveControl;
 import net.minecraft.world.entity.ai.navigation.FlyingPathNavigation;
 import net.minecraft.world.entity.ai.util.DefaultRandomPos;
-import net.minecraft.world.entity.animal.FlyingAnimal;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.PathfinderMob;
@@ -67,7 +66,7 @@ import java.util.function.Consumer;
  * comes from the current release: looks, size, stats, behaviour, so a new mob needs no restart. A slot with
  * nothing bound removes itself rather than standing around invisible.
  */
-public final class SlotMob extends PathfinderMob implements AnimatedEntity, FlyingAnimal {
+public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 	private static final String IDLE = "idle";
 	private static final String WALK = "walk";
 	private static final String FLY = "fly";
@@ -218,6 +217,8 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity, Flyi
 		if (current != this.applied && !current.equals(this.applied)) {
 			apply(current);
 		}
+		// The game only works this out on clients now, and it's what says whether to play its walk.
+		calculateEntityAnimation(this.flies);
 		if (this.posed != null) {
 			holdPose();
 		} else if (this.tickCount % 2 == 0) {
@@ -251,8 +252,13 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity, Flyi
 		}
 	}
 
-	@Override
 	public boolean isFlying() {
+		return this.flies;
+	}
+
+	/** Lets it stay as steady going up or down as it does going along, as a bee does. */
+	@Override
+	protected boolean omnidirectionalAirMover() {
 		return this.flies;
 	}
 

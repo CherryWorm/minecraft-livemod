@@ -24,6 +24,7 @@ import net.minecraft.world.level.material.Fluids;
  */
 public abstract class SlotFluid extends FlowingFluid implements PolymerSyncedObject<Fluid> {
 	private static final float BEYOND_ANY_EXPLOSION = 100.0F;
+	private static final int SOURCE_AMOUNT = 8;
 	private final String slotId;
 	private SlotFluid other;
 	private LiquidBlock block;
@@ -127,7 +128,7 @@ public abstract class SlotFluid extends FlowingFluid implements PolymerSyncedObj
 
 		@Override
 		public int getAmount(FluidState state) {
-			return FlowingFluid.SOURCE_LEVEL;
+			return SOURCE_AMOUNT;
 		}
 	}
 

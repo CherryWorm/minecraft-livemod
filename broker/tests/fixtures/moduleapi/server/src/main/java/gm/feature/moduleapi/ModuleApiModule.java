@@ -196,6 +196,16 @@ public final class ModuleApiModule implements ServerModule {
 
 	private void bindMobs() {
 		this.context.bindMob("api_ox", new MobBehavior() {
+			private boolean said;
+
+			@Override
+			public void tick(SlotMob mob) {
+				if (!this.said && mob.isWalking() && mob.walkAnimation.isMoving()) {
+					this.said = true;
+					say("ox legs moving");
+				}
+			}
+
 			@Override
 			public InteractionResult interact(SlotMob mob, Player player, InteractionHand hand) {
 				if (hand != InteractionHand.MAIN_HAND) {
