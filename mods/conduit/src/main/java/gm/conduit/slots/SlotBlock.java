@@ -14,6 +14,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.InsideBlockEffectApplier;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -246,6 +247,15 @@ public class SlotBlock extends Block implements PolymerTexturedBlock {
 		BlockBehavior behavior = ServerModuleHost.instance().blockBehavior(this.slotId);
 		if (behavior != null && !level.isClientSide()) {
 			ServerModuleHost.instance().guarded(this.slotId, () -> behavior.neighborChanged(state, level, pos, neighbor));
+		}
+	}
+
+	@Override
+	protected void entityInside(BlockState state, Level level, BlockPos pos, Entity entity, InsideBlockEffectApplier effects, boolean precise) {
+		super.entityInside(state, level, pos, entity, effects, precise);
+		BlockBehavior behavior = ServerModuleHost.instance().blockBehavior(this.slotId);
+		if (behavior != null && !level.isClientSide()) {
+			ServerModuleHost.instance().guarded(this.slotId, () -> behavior.entityInside(state, level, pos, entity));
 		}
 	}
 

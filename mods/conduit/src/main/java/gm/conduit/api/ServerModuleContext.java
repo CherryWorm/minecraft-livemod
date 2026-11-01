@@ -19,6 +19,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.Fluid;
 
 import java.util.List;
 import java.util.function.Consumer;
@@ -52,6 +53,9 @@ public interface ServerModuleContext {
 
 	/** The item for a name in this feature's manifest, or for "other_feature/name". */
 	Item item(String name);
+
+	/** The fluid for a name in this feature's "fluids", or for "other_feature/name". {@link #block} gives its block, and {@link #bindBlock} works on it. */
+	Fluid fluid(String name);
 
 	/** The entity type for a mob in this feature's manifest, or for "other_feature/name". */
 	EntityType<?> mob(String name);

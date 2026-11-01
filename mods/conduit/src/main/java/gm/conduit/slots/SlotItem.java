@@ -12,16 +12,22 @@ import net.minecraft.core.component.DataComponentMap;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.Fluid;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 
 /** A blank item. Tool and weapon stats come from components on the stack, set by the recipe that makes it. */
 public final class SlotItem extends SimplePolymerItem {
@@ -42,10 +48,31 @@ public final class SlotItem extends SimplePolymerItem {
 		holder.bindComponents(components == null ? this.baseComponents : DataComponentMap.composite(this.baseComponents, components));
 	}
 
+	/** The same as the game's own buckets do, for one that's only known to be a bucket from what the current release says. */
+	private static InteractionResult pour(Level level, Player player, InteractionHand hand, Fluid fluid) {
+		BlockHitResult hit = getPlayerPOVHitResult(level, player, ClipContext.Fluid.NONE);
+		if (hit.getType() != HitResult.Type.BLOCK) {
+			return InteractionResult.PASS;
+		}
+		BlockPos clicked = hit.getBlockPos();
+		BlockPos spot = level.getBlockState(clicked).canBeReplaced() ? clicked : clicked.relative(hit.getDirection());
+		ItemStack held = player.getItemInHand(hand);
+		if (!level.mayInteract(player, clicked) || !player.mayUseItemAt(spot, hit.getDirection(), held) || !level.getBlockState(spot).canBeReplaced()) {
+			return InteractionResult.FAIL;
+		}
+		level.setBlockAndUpdate(spot, fluid.defaultFluidState().createLegacyBlock());
+		level.playSound(null, spot, SoundEvents.BUCKET_EMPTY, SoundSource.BLOCKS, 1.0F, 1.0F);
+		return InteractionResult.SUCCESS.heldItemTransformedTo(player.hasInfiniteMaterials() ? held : new ItemStack(Items.BUCKET));
+	}
+
 	@Override
 	public InteractionResult use(Level level, Player player, InteractionHand hand) {
 		if (player instanceof ServerPlayer serverPlayer && Knowledge.instance().useItem(serverPlayer, player.getItemInHand(hand))) {
 			return InteractionResult.SUCCESS;
+		}
+		Fluid bucketOf = ItemDefaults.bucket(this);
+		if (bucketOf != null && !level.isClientSide()) {
+			return pour(level, player, hand, bucketOf);
 		}
 		ItemBehavior behavior = ServerModuleHost.instance().itemBehavior(this.slotId);
 		if (behavior != null && !level.isClientSide()) {

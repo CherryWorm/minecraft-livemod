@@ -377,6 +377,81 @@ class Effects(unittest.TestCase):
             static.check_spoilers(root / "out" / "pack")
 
 
+class Fluids(unittest.TestCase):
+    def manifest(self, **fields):
+        return {"f": {"manifest": {"fluids": {"brine": {"display": "Brine", **fields}}}}}
+
+    def test_fine(self):
+        static.check_fluids(self.manifest(looks_like="lava", reach=2, thins=2, ticks=30, light=15, renews=True))
+        static.check_fluids(self.manifest(surface="brine_top"))
+
+    def test_wrong(self):
+        for fields, mention in (({"looks_like": "milk"}, "can only draw"), ({"reach": 0}, "from 1 to 8"), ({"ticks": 500}, "from 1 to 200"), ({"thins": "lots"}, "from 1 to 8"),
+                                ({"light": 16}, "from 0 to 15"), ({"looks_like": "lava", "surface": "x"}, "has to be under water")):
+            with self.assertRaises(GateFailed) as caught:
+                static.check_fluids(self.manifest(**fields))
+            self.assertIn(mention, caught.exception.message)
+
+    def test_needs_a_name(self):
+        with self.assertRaises(GateFailed) as caught:
+            static.check_fluids({"f": {"manifest": {"fluids": {"brine": {}}}}})
+        self.assertIn("needs a display", caught.exception.message)
+
+    def test_cant_share_a_block_name(self):
+        with self.assertRaises(GateFailed) as caught:
+            static.check_fluids({"f": {"manifest": {"blocks": {"brine": {}}, "fluids": {"brine": {"display": "B"}}}}})
+        self.assertIn("same name", caught.exception.message)
+
+    def render(self, fluid, **items):
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder)
+            textures = root / "f" / "assets" / "textures"
+            textures.mkdir(parents=True)
+            from PIL import Image
+            Image.new("RGBA", (16, 16), (1, 2, 3, 255)).save(textures / "top.png")
+            Image.new("RGBA", (16, 16), (1, 2, 3, 255)).save(textures / "pail.png")
+            features = {"f": {"manifest": {"id": "f", "fluids": {"brine": {"display": "Brine", **fluid}}, "items": items}, "dir": root / "f"}}
+            ledger = bundles.assign_slots(features, bundles.empty_ledger(), {**POOL, "fluid_count": 2})
+            bundles.render(features, ledger, root / "out", 1)
+            out = root / "out"
+            static.check_spoilers(out / "pack")
+            return (json.loads((out / "config" / "fluids.json").read_text(encoding="utf-8")), json.loads((out / "config" / "item_defaults.json").read_text(encoding="utf-8")),
+                    json.loads((out / "config" / "bindings.json").read_text(encoding="utf-8")),
+                    {path.name: json.loads(path.read_text(encoding="utf-8")) for path in (out / "datapack" / "data" / "minecraft" / "tags" / "fluid").glob("*.json")},
+                    (out / "pack" / "assets" / "gm" / "models" / "block" / "fb0001.json").exists(), ledger)
+
+    def test_rendered_like_water_unless_it_says(self):
+        fluids, _, bindings, tags, surface, ledger = self.render({})
+        self.assertEqual(fluids["fb0001"], {"lava": False, "renews": False, "reach": 4, "drop_off": 1, "ticks": 5, "light": 0, "surface": False})
+        self.assertEqual(bindings["f/brine"], "fb0001")
+        self.assertEqual(tags["water.json"]["values"], ["gm:fl0001", "gm:fl0001_flowing"])
+        self.assertFalse(surface)
+        self.assertEqual(ledger["fluids"]["f/brine"]["slot"], "0001")
+
+    def test_rendered_like_lava(self):
+        fluids, _, _, tags, _, _ = self.render({"looks_like": "lava"})
+        self.assertEqual(fluids["fb0001"], {"lava": True, "renews": False, "reach": 2, "drop_off": 2, "ticks": 30, "light": 15, "surface": False})
+        self.assertEqual(list(tags), ["lava.json"])
+
+    def test_a_surface_goes_in_the_pack(self):
+        self.assertTrue(self.render({"surface": "top"})[4])
+
+    def test_a_bucket(self):
+        fluids, defaults, _, _, _, ledger = self.render({}, pail={"display": "Pail", "texture": "pail", "bucket_of": "brine"})
+        item = f"gm:{ledger['items']['f/pail']['slot']}"
+        self.assertEqual(defaults[item]["bucket_of"], "gm:fl0001")
+        self.assertEqual(defaults[item]["components"]["minecraft:max_stack_size"], 1)
+        self.assertEqual(fluids["fb0001"]["bucket"], item)
+
+    def test_a_bucket_of_nothing(self):
+        with self.assertRaises(bundles.BundleError):
+            self.render({}, pail={"display": "Pail", "texture": "pail", "bucket_of": "tar"})
+
+    def test_a_fluid_can_be_part_of_a_ruin(self):
+        ledger = {**bundles.empty_ledger(), "fluids": {"f/brine": {"slot": "0001", "index": 0}}}
+        self.assertEqual(bundles._resolve_tokens("$fluid:brine", "f", ledger), "gm:fb0001")
+
+
 class RuinRules(unittest.TestCase):
     def assert_fine(self, entry):
         static.check_ruins(features(entry))

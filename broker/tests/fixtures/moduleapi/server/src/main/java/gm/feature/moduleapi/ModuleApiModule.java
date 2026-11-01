@@ -22,6 +22,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -56,6 +57,17 @@ public final class ModuleApiModule implements ServerModule {
 		bindKiln();
 		bindMobs();
 		bindItems();
+		context.bindBlock("api_brine", new BlockBehavior() {
+			private boolean said;
+
+			@Override
+			public void entityInside(BlockState state, Level level, BlockPos pos, Entity entity) {
+				if (!this.said && entity instanceof Player) {
+					this.said = true;
+					say("in the brine, in water " + entity.isInWater() + " is it " + level.getFluidState(pos).is(ModuleApiModule.this.context.fluid("api_brine")));
+				}
+			}
+		});
 		context.bindEffect("api_blessed", new EffectBehavior() {
 			private int ticks;
 

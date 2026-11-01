@@ -58,6 +58,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.Fluid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -516,6 +517,11 @@ public final class ServerModuleHost {
 		@Override
 		public Item item(String name) {
 			return BuiltInRegistries.ITEM.getValue(idOf(name));
+		}
+
+		@Override
+		public Fluid fluid(String name) {
+			return BuiltInRegistries.BLOCK.getValue(idOf(name)).defaultBlockState().getFluidState().getType();
 		}
 
 		@Override

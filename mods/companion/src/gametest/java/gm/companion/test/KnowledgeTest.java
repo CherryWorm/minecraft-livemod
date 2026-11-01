@@ -347,6 +347,10 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				client.gui.setScreen(null);
 			});
 			case "guiwide" -> context.runOnClient(client -> client.options.guiScale().set(2));
+			case "inwater" -> {
+				boolean wet = context.computeOnClient(client -> client.player.isInWater());
+				LOGGER.info("[M8] in water: {}", wet);
+			}
 			case "hotbarclick" -> context.runOnClient(client -> client.gameMode.handleContainerInput(client.player.containerMenu.containerId,
 					client.player.containerMenu.slots.size() - 9 + Integer.parseInt(words[1]), LEFT_BUTTON, ContainerInput.PICKUP, client.player));
 			case "oldcompanion" -> rejoinWithout(context, "inventory_hooks");

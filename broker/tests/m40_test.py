@@ -3,7 +3,7 @@
 both ways, comparators, light a module sets, blocks nothing can break, and a model's named parts moved, tinted and scaled. Reuses whatever world is
 there, as long as it has land near the spot, so a run needs no reset. Name the stages to run, or leave them out for all of them.
 
-Usage: python3 -m broker.tests.m40_test [blocks mobs items input effects ...]
+Usage: python3 -m broker.tests.m40_test [blocks mobs items input effects fluids ...]
 """
 import json
 import pathlib
@@ -799,11 +799,70 @@ def play_effects(client):
     rcon("effect", "give", PLAYER, "minecraft:resistance", "9999", "5", "true")
 
 
+def play_fluids(client):
+    x, y, z = SPOT
+    bucket, brine, slag = slot("api_brine_bucket", "items"), "gm:fb" + slot_number("api_brine"), "gm:fb" + slot_number("api_slag")
+    rcon("fill", str(x - 12), str(y), str(z - 12), str(x + 12), str(y + 8), str(z + 12), "minecraft:air")
+    rcon("clear", PLAYER)
+    rcon("give", PLAYER, bucket, "1")
+    rcon("tp", PLAYER, str(x + 0.5), str(y + 2), str(z + 0.5), "0", "90")
+    time.sleep(1)
+    client.ask("rightclick")
+    time.sleep(1)
+    check("a bucket pours it out", is_block(x, y, z, brine), rcon("data", "get", "entity", PLAYER, "SelectedItem"))
+    client.ask("held")
+    check("and leaves an empty bucket", "bucket" in rcon("data", "get", "entity", PLAYER, "SelectedItem"), rcon("data", "get", "entity", PLAYER, "SelectedItem"))
+    time.sleep(4)
+    check("it spreads over the ground by itself", is_block(x + 2, y, z, brine), client_sees(client, x + 2, y, z))
+    check("and thins as it goes", is_block(x + 2, y, z, f"{brine}[level=2]"), rcon("execute", "if", "block", str(x + 2), str(y), str(z), f"{brine}[level=2]"))
+    check("to a client it's flowing water", "minecraft:water" in client_sees(client, x + 2, y, z), client_sees(client, x + 2, y, z))
+    still = client_sees(client, x, y, z)
+    check("a still pool is its own thing to a client", "water" not in still and "level" not in still, still)
+    # Doesn't renew, so a trench between two sources stays flowing.
+    light = client_light(client, x, y + 1, z)
+    check("and gives its own light", light == 5, str(light))
+    client.ask("shot fluid_pool")
+
+    # Swimming: what a client sees has to agree with what the server does.
+    rcon("tp", PLAYER, str(x + 0.5), str(y), str(z + 0.5), "0", "0")
+    time.sleep(2)
+    check("a module hears something in it, and it's water to the game", holds(client, "in the brine, in water true is it true"))
+    client.ask("inwater")
+    check("and the client is swimming in it too", re.findall(r"\[M8\] in water: (\w+)", client.text())[-1] == "true")
+
+    rcon("tp", PLAYER, str(x + 0.5), str(y + 3), str(z + 0.5), "0", "90")
+    rcon("clear", PLAYER)
+    rcon("give", PLAYER, "minecraft:bucket", "1")
+    time.sleep(1)
+    client.ask("rightclick")
+    time.sleep(2)
+    check("an empty bucket takes it back", bucket in rcon("data", "get", "entity", PLAYER, "SelectedItem"), rcon("data", "get", "entity", PLAYER, "SelectedItem"))
+    time.sleep(8)
+    check("and what flowed from it dries up", is_block(x + 2, y, z, "minecraft:air"))
+
+    rcon("setblock", str(x), str(y), str(z), slag)
+    rcon("gamerule", "doFireTick", "false")
+    time.sleep(2)
+    check("a fluid that looks like lava is lava to a client", "minecraft:lava" in client_sees(client, x, y, z), client_sees(client, x, y, z))
+    check("and glows like it by default", client_light(client, x, y + 1, z) == 14, str(client_light(client, x, y + 1, z)))
+    time.sleep(3)
+    check("it spreads, thinning as fast as it says", is_block(x + 1, y, z, f"{slag}[level=3]"), client_sees(client, x + 1, y, z))
+    rcon("fill", str(x - 6), str(y), str(z - 6), str(x + 6), str(y + 2), str(z + 6), "minecraft:air")
+    rcon("clear", PLAYER)
+    time.sleep(2)
+
+
+def slot_number(name):
+    ledger = json.loads((runtime.HISTORY / runtime.load_state()["current"] / "registry-ledger.json").read_text(encoding="utf-8"))
+    return ledger["fluids"][f"moduleapi/{name}"]["slot"]
+
+
 STAGES = {"blocks": (play_facing, play_placing, play_redstone, play_light, play_unbreakable, play_parts, play_machine_slots),
           "mobs": (play_mob_drops, play_flying, play_walking, play_damage),
           "items": (play_bar, play_recipes, play_bench),
           "input": (play_keys, play_chunks, play_state),
-          "effects": (play_effects,)}
+          "effects": (play_effects,),
+          "fluids": (play_fluids,)}
 
 
 def main():

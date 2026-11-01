@@ -1,7 +1,7 @@
 {
   "id": "moduleapi",
   "phase": 1,
-  "summary": "Test fixture for the server modules' API: blocks that face a way and refuse things, redstone, light, unbreakable blocks and model parts. Mobs that fly and drop several things, walking somewhere, and changing damage and knockback. A bar on an item that isn't a tool, recipes that carry things over or mend, and a bench with a bigger grid. Jumping and double tapping heard on the server, chunks loading, and a module's own saved data. Status effects of its own.",
+  "summary": "Test fixture for the server modules' API: blocks that face a way and refuse things, redstone, light, unbreakable blocks and model parts. Mobs that fly and drop several things, walking somewhere, and changing damage and knockback. A bar on an item that isn't a tool, recipes that carry things over or mend, and a bench with a bigger grid. Jumping and double tapping heard on the server, chunks loading, and a module's own saved data. Status effects of its own. Fluids of its own.",
   "blocks": {
     "api_front": {
       "family": "facing",
@@ -144,6 +144,12 @@
     "api_big": {
       "display": "Api Big",
       "texture": "api_front"
+    },
+    "api_brine_bucket": {
+      "display": "Api Brine Bucket",
+      "texture": "api_side",
+      "bucket_of": "api_brine",
+      "from_module": true
     }
   },
   "mobs": {
@@ -296,6 +302,19 @@
       "icon": "api_blessed",
       "color": "#00FF00",
       "category": "harmful"
+    }
+  },
+  "fluids": {
+    "api_brine": {
+      "display": "Api Brine",
+      "surface": "api_front",
+      "light": 6
+    },
+    "api_slag": {
+      "display": "Api Slag",
+      "looks_like": "lava",
+      "ticks": 10,
+      "thins": 3
     }
   }
 }

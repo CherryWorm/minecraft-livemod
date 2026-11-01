@@ -3,6 +3,7 @@ package gm.conduit.pack;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import eu.pb4.polymer.resourcepack.api.PolymerResourcePackUtils;
+import gm.conduit.fluids.SlotFluids;
 import gm.conduit.slots.NeutralSlots;
 import net.minecraft.network.chat.Component;
 
@@ -30,6 +31,9 @@ public final class LiveAssets {
 				builder.addData("assets/gm/items/" + id + ".json", itemDefinition("gm:block/" + id));
 			}
 			for (String model : NeutralSlots.stateModels()) {
+				builder.addData("assets/gm/models/block/" + model + ".json", bytes(PLACEHOLDER_MODEL));
+			}
+			for (String model : SlotFluids.stateModels()) {
 				builder.addData("assets/gm/models/block/" + model + ".json", bytes(PLACEHOLDER_MODEL));
 			}
 			for (String id : NeutralSlots.itemIds()) {

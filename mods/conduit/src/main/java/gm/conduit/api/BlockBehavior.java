@@ -56,6 +56,9 @@ public interface BlockBehavior {
 		return true;
 	}
 
+	/** Something is inside this, which only happens in a fluid or something with no collision, and it runs every tick that lasts. */
+	default void entityInside(BlockState state, Level level, BlockPos pos, Entity entity) {}
+
 	/** A delay it asked for has run out, from {@code level.scheduleTick(pos, state.getBlock(), ticks)}. It's how a block does anything later. */
 	default void scheduledTick(BlockState state, ServerLevel level, BlockPos pos, RandomSource random) {}
 

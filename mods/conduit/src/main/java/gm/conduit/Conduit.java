@@ -3,6 +3,7 @@ package gm.conduit;
 import eu.pb4.polymer.resourcepack.api.PolymerResourcePackUtils;
 import gm.conduit.bridge.Board;
 import gm.conduit.effects.SlotEffects;
+import gm.conduit.fluids.SlotFluids;
 import gm.conduit.bridge.Bridge;
 import gm.conduit.dimensions.Dimensions;
 import gm.conduit.knowledge.Codex;
@@ -45,6 +46,7 @@ public final class Conduit implements ModInitializer {
 		PasswordGate.register();
 		Opening.register();
 		NeutralSlots.register();
+		SlotFluids.register();
 		SlotRecipes.register();
 		ItemDefaults.register();
 		SlotMobs.register();

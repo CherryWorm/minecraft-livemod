@@ -23,7 +23,11 @@ MIXIN_SOURCE_REFUSALS[re.compile(r"require\s*=\s*0\b")] = "lets an injection fin
 RESERVE = 0.2
 RECIPE_MODES = {"open", "known", "guessable"}
 ROUTE_TYPES = {"obtain", "examine", "kill", "read", "fragments"}
-LEDGER_TABLES = ("blocks", "items", "mobs", "dimensions", "effects")
+LEDGER_TABLES = ("blocks", "items", "mobs", "dimensions", "effects", "fluids")
+FLUID_LOOKS = {"water", "lava"}
+MOST_FLUID_REACH = 8
+MOST_FLUID_THINS = 8
+MOST_FLUID_TICKS = 200
 EFFECT_CATEGORIES = {"beneficial", "harmful", "neutral"}
 EFFECT_COLOUR = re.compile(r"#[0-9a-fA-F]{6}")
 # What the game draws an effect's picture at, and the same at the size of everything else in a feature.
@@ -93,8 +97,8 @@ BLOCK_WITH_STATE = re.compile(r"[^\[\]\s]+(\[[a-z0-9_]+=[a-z0-9_]+(,[a-z0-9_]+=[
 # The vanilla blocks whose block entity takes a loot table. An ender chest looks like one, but it's the player's own.
 LOOT_CONTAINERS = re.compile(r"minecraft:(chest|trapped_chest|barrel|dispenser|dropper|hopper|crafter|([a-z]+_)?shulker_box|([a-z]+_)*copper_chest)")
 # Words that would give content away if they appeared in a path players can see.
-SAFE_PATH = re.compile(r"^assets/(gm/(textures/(block/s\d{4}(_(top|bottom|front|back|left|right|side|\d))?|item/[is]\d{4}(_[cv]\d+)?)\.png(\.mcmeta)?"
-                       r"|models/(block/s\d{4}(_c?\d+)?|item/[is]\d{4}(_[cv]\d+)?)\.json|items/[is]\d{4}\.json|lang/[a-z]{2}_[a-z]{2}\.json|sounds/[0-9a-f]+\.ogg|sounds\.json|shaders/post/p[0-9a-f]+\.fsh|post_effect/p[0-9a-f]+\.json|textures/gui/p[0-9a-f]+\.png|textures/gui/sprites/mob_effect/fx\d{4}\.png)"
+SAFE_PATH = re.compile(r"^assets/(gm/(textures/(block/fb\d{4}|block/s\d{4}(_(top|bottom|front|back|left|right|side|\d))?|item/[is]\d{4}(_[cv]\d+)?)\.png(\.mcmeta)?"
+                       r"|models/(block/s\d{4}(_c?\d+)?|block/fb\d{4}|item/[is]\d{4}(_[cv]\d+)?)\.json|items/[is]\d{4}\.json|lang/[a-z]{2}_[a-z]{2}\.json|sounds/[0-9a-f]+\.ogg|sounds\.json|shaders/post/p[0-9a-f]+\.fsh|post_effect/p[0-9a-f]+\.json|textures/gui/p[0-9a-f]+\.png|textures/gui/sprites/mob_effect/fx\d{4}\.png)"
                        r"|companion/patchouli_books/guide/[a-z]{2}_[a-z]{2}/(entries/k[0-9a-f]+|categories/(n[0-9a-f]+|s_[a-z]+(_\d+)?|other))\.json)$")
 
 
@@ -140,6 +144,9 @@ def check_slot_budget(ledger, pool):
     items = len(ledger["items"])
     if items > int(pool["item_count"] * (1 - RESERVE)):
         _fail(f"{items} item slots used, over the limit of {int(pool['item_count'] * (1 - RESERVE))}.")
+    fluids = len(ledger.get("fluids", {}))
+    if fluids > int(pool.get("fluid_count", 0) * (1 - RESERVE)):
+        _fail(f"{fluids} fluids would be in use, over the limit of {int(pool.get('fluid_count', 0) * (1 - RESERVE))}.")
     effects = len(ledger.get("effects", {}))
     if effects > int(pool.get("effect_count", 0) * (1 - RESERVE)):
         _fail(f"{effects} status effects would be in use, over the limit of {int(pool.get('effect_count', 0) * (1 - RESERVE))}.")
@@ -782,6 +789,31 @@ def check_machines(features):
                 _fail(f"{label} has outputs {made!r}. Each is like {{\"item\": \"$item:name\", \"count\": 1}}.")
 
 
+def check_fluids(features):
+    """How a fluid spreads goes straight into the game's own flowing, and nothing would say if it made no sense."""
+    for feature_id, feature in features.items():
+        fluids = feature["manifest"].get("fluids", {})
+        blocks = feature["manifest"].get("blocks", {})
+        for name, fluid in fluids.items():
+            label = f"Fluid {feature_id}/{name}"
+            if name in blocks:
+                _fail(f"{label} has the same name as a block in this feature, and a module finds both by name.")
+            if not isinstance(fluid, dict) or not isinstance(fluid.get("display"), str):
+                _fail(f"{label} needs a display, which is what it's called.")
+            if fluid.get("looks_like", "water") not in FLUID_LOOKS:
+                _fail(f"{label} looks like {fluid.get('looks_like')!r}. A client can only draw {sorted(FLUID_LOOKS)}, and it's what it swims or sinks in.")
+            for field, most in (("reach", MOST_FLUID_REACH), ("thins", MOST_FLUID_THINS), ("ticks", MOST_FLUID_TICKS)):
+                if field in fluid and not (isinstance(fluid[field], int) and not isinstance(fluid[field], bool) and 1 <= fluid[field] <= most):
+                    _fail(f"{label} has {field} {fluid[field]!r}. It's a whole number from 1 to {most}.")
+            if "light" in fluid and not (isinstance(fluid["light"], int) and not isinstance(fluid["light"], bool) and 0 <= fluid["light"] <= MOST_LIGHT):
+                _fail(f"{label} has light {fluid['light']!r}. It's a whole number from 0 to {MOST_LIGHT}.")
+            if fluid.get("surface") and fluid.get("looks_like") == "lava":
+                _fail(f"{label} has a surface and looks like lava. Only something that looks like water can have one, because the block standing in for it has to be under water.")
+        for name, item in feature["manifest"].get("items", {}).items():
+            if "bucket_of" in item and "places" in item:
+                _fail(f"Item {feature_id}/{name} is a bucket and also places something. It can only do one.")
+
+
 def check_effects(features):
     for feature_id, feature in features.items():
         effects = feature["manifest"].get("effects", {})
@@ -1002,6 +1034,7 @@ def run(features, old_ledger, new_ledger, pool, content):
     check_screen_effects(features)
     check_panels(features)
     check_machines(features)
+    check_fluids(features)
     check_effects(features)
     check_mobs(features)
     check_mob_sounds(features)

@@ -12,6 +12,7 @@ import net.minecraft.resources.RegistryOps;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.material.Fluid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,6 +33,7 @@ public final class ItemDefaults {
 	private static final Path FILE = Path.of("config", "conduit", "item_defaults.json");
 	private static final Map<Item, Placement> PLACEMENTS = new HashMap<>();
 	private static final Set<Item> TIMED_USE = new HashSet<>();
+	private static final Map<Item, Fluid> BUCKETS = new HashMap<>();
 
 	/** @param on what it can be placed on, or empty for anything solid */
 	record Placement(Block block, Set<Block> on) {}
@@ -47,6 +49,11 @@ public final class ItemDefaults {
 		return PLACEMENTS.get(item);
 	}
 
+	/** What it empties into the world, if it's a bucket of something. */
+	static Fluid bucket(Item item) {
+		return BUCKETS.get(item);
+	}
+
 	/** Whether using this runs for a while and then goes to a module, instead of it being eaten. */
 	static boolean isTimedUse(Item item) {
 		return TIMED_USE.contains(item);
@@ -55,6 +62,7 @@ public final class ItemDefaults {
 	private static void reload(MinecraftServer server) {
 		PLACEMENTS.clear();
 		TIMED_USE.clear();
+		BUCKETS.clear();
 		BuiltInRegistries.ITEM.forEach(item -> {
 			if (item instanceof SlotItem slot) {
 				slot.setReleaseComponents(null);
@@ -76,6 +84,9 @@ public final class ItemDefaults {
 					}
 					if (defaults.has("timed_use")) {
 						TIMED_USE.add(item);
+					}
+					if (defaults.has("bucket_of")) {
+						BUCKETS.put(item, BuiltInRegistries.FLUID.getValue(Identifier.parse(defaults.get("bucket_of").getAsString())));
 					}
 					if (defaults.has("places")) {
 						PLACEMENTS.put(item, readPlacement(defaults.getAsJsonObject("places")));

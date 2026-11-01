@@ -466,6 +466,46 @@ ServerLevel level = context.dimension("hollow");  // To look at it or change it,
 
 Anyone who dies there respawns as usual, which is normally back in the overworld, so a dangerous place needs a way back to it. If a release that added a dimension is rolled back, the world and the land there are kept, it just doesn't open until it's released again, and anyone who was in it is brought back when they next join.
 
+## Fluids
+
+```json
+"fluids": {
+  "brine": {"display": "Brine", "looks_like": "water", "reach": 4, "thins": 1, "ticks": 5, "renews": false, "light": 0, "surface": "brine_top"}
+},
+"items": {
+  "brine_bucket": {"display": "Bucket of Brine", "texture": "brine_bucket", "bucket_of": "brine"}
+}
+```
+
+A fluid that flows through the world by the game's own rules. There are 16, so spend them on something that matters.
+
+**What it looks like is the one real limit.** A game client can only draw water and lava, and nothing can add a fluid to one from a server, so that's what it is to anyone's computer, and that's what they swim or sink in, with lava's slowness and water's push. `looks_like` is `water` or `lava`, and everything else in the game treats it the same way: it puts fires out and fills boats, or burns and lights things. So it looks like one of those unless you do this:
+
+`surface` is a picture for a still pool, which shows on every side of each source block, up to where water's own surface would be. It's only for what `looks_like` water, and it can't be see-through: a pixel's either there or it's not, so a pattern with holes in it is as close as it gets, and water shows through those. Where it's flowing it still looks like water, because only a source block can stand in for it. It's for a tar pit or a pool of something strange, and it can be animated like any texture. A stack of sources shows a line where each one's surface is. It takes something on a player's own computer to do better than this, such as tinting the water, which the companion doesn't do yet.
+
+- **`reach`** is how far it looks for somewhere lower to flow, from 1 to 8. Water is 4 and lava is 2, and that's what it has if you leave it out.
+- **`thins`** is how much shorter it gets with each block it spreads, from 1 to 8, which sets how far it goes on the flat. Water is 1, for 7 blocks, and lava is 2.
+- **`ticks`** is how many ticks each step of spreading takes, from 1 to 200. Water is 5 and lava is 30.
+- **`renews`** means two sources make a new one between them, as water does. It's false if you leave it out.
+- **`light`** is how much light it gives, from 0 to 15, which is 15 if it looks like lava and 0 if not.
+
+`"bucket_of": "brine"` on an item makes it a bucket of that fluid: using it pours it out and leaves an empty bucket, and using an empty bucket on a source gives it back. It needs a recipe or a drop like any other item, and a fluid with no bucket just can't be picked up. Another feature's fluid is `"other_feature/name"`. A module places one with `level.setBlockAndUpdate(pos, context.block("brine").defaultBlockState())`, and a ruin can have one as a part with `"block": "$fluid:brine"`.
+
+A module says what it does, in the way it would for a block:
+
+```java
+context.bindBlock("brine", new BlockBehavior() {
+    @Override
+    public void entityInside(BlockState state, Level level, BlockPos pos, Entity entity) {
+        if (entity instanceof LivingEntity living && level.getGameTime() % 40 == 0) {
+            living.addEffect(new MobEffectInstance(MobEffects.POISON, 60));
+        }
+    }
+});
+```
+
+`entityInside` runs each tick for everything in it, which is also true of a `plant` or anything else with no collision, so keep it small. `randomTick` runs for a still source every so often, for something that changes by itself. `context.fluid("brine")` gives the game's own fluid, for `level.getFluidState(pos).is(context.fluid("brine"))` and the like. There's no fluid on a machine and no pipes here: a module can keep an amount in `machine.data()` and show it with a bar or a model part.
+
 ## Sounds
 
 List names in `"sounds": ["chime"]`, with `assets/sounds/chime.ogg` from `assetkit/sounds.py`. Refer to one as `$sound:chime` in data.
@@ -683,4 +723,4 @@ That's `raw/data/gm/jukebox_song/ember_song.json`, with `"sounds": ["ember_song"
 
 ## What the engine doesn't do yet
 
-Structures larger than a chunk. A panel can only draw vanilla's mobs moving, so one of this world's is a picture there. A screen effect covers the whole screen, so there's no drawing a shader on one thing in the world. Armor trims and new villager trades can't be added yet. Build the closest thing that works, and say what you wanted in `host_requests`.
+Structures larger than a chunk. A fluid can only flow and swim as water or lava does on a player's computer, though a still pool can have a picture of its own. A panel can only draw vanilla's mobs moving, so one of this world's is a picture there. A screen effect covers the whole screen, so there's no drawing a shader on one thing in the world. Armor trims and new villager trades can't be added yet. Build the closest thing that works, and say what you wanted in `host_requests`.
