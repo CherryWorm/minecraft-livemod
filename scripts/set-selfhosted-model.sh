@@ -43,7 +43,7 @@ read -r -p "Run builders, bug fixes and chat only on it, rather than Claude? y o
 read -r -p "How many big builders it can run at once [8]: " builders
 builders=${builders:-8}
 read -r -p "Can it see images? y or n [n]: " vision
-read -r -p "How many tokens it can hold in one conversation [128000]: " context
+read -r -p "How many tokens to let one conversation reach, under any limit on a single request (Langdock's is 150000) [128000]: " context
 context=${context:-128000}
 
 secret="$RUNTIME_DIR/secrets/model_key.secret"
