@@ -313,6 +313,77 @@ A menu has from 1 to 6 rows of 9. Each slot is a button: what's in it is only a 
 
 A book page holds about 230 characters. It isn't a real item, so it can't be dropped or copied, and the player's hand doesn't change.
 
+### Panels
+
+A panel is a screen of its own, for a machine, an item, a mob or anything else a module decides: art you drew, item slots wherever you want them, bars, buttons, tabs, scrolling lists, a mob and somewhere to type. You describe it, a module runs it, and no code goes to anyone's computer.
+
+```json
+"panels": {
+  "kiln": {
+    "title": "Kiln",
+    "width": 176,
+    "height": 166,
+    "background": "kiln_back",
+    "inventory": {"x": 8, "y": 84},
+    "widgets": [
+      {"type": "slot", "x": 56, "y": 35, "slot": 0},
+      {"type": "slot", "x": 116, "y": 35, "slot": 1},
+      {"type": "bar", "id": "heat", "x": 80, "y": 36, "width": 24, "height": 16, "image": "flame", "text": "Heat"},
+      {"type": "label", "id": "state", "x": 8, "y": 20, "text": "Cold"},
+      {"type": "button", "id": "light", "x": 8, "y": 60, "width": 40, "height": 18, "text": "Light", "tooltip": "Burns one coal"}
+    ]
+  }
+}
+```
+
+Everything is in pixels from the panel's top left corner, at most 320 by 230, which is what fits on a small screen. Images are `assets/panels/<name>.png` and are stretched to whatever they're drawn at. With no `background` it's a plain grey panel with its slots drawn for you. `inventory` is where the player's own 36 slots go, 162 by 76, or `false` for none. Leave it out and they sit along the bottom.
+
+| `type` | Needs | Can also have |
+|---|---|---|
+| `slot` | `x`, `y`, `slot`: which slot of the inventory it shows, from 0. `x` and `y` are where the 16 pixel item goes, so a frame in your art starts a pixel up and left of that | |
+| `label` | `text` | `id`, to change it. `width`, to wrap it. `color` like `"#404040"`, `shadow` |
+| `icon` | `icon`: an item, or `id` for a module to set one | `tooltip` |
+| `image` | `width`, `height`, `image` | |
+| `bar` | `id` or `value` from 0 to 1, `width`, `height`, and `image` or `color` to fill with | `direction`: `right`, `left`, `up` or `down`. `back_color`. `text`, for its name in a plain chest |
+| `button` | `id`, `width`, `height` | `text`, `icon`, `tooltip`, `image`, `hover_image`, `disabled_image`, `enabled` |
+| `tabs` | `id`, `tabs`: a list of `{"id": "offers", "text": "Offers"}` | |
+| `list` | `id`, `width`, `height` | `row_height`, `max_rows`: the most it can ever have, 9 unless you say, up to 45 |
+| `mob` | `width`, `height`, `mob` | `portrait`, `size` |
+| `text_field` | `id`, `width`, `height`, `max_length`, from 1 to 256 | `hint`, and `text`, for its name in a plain chest |
+
+Any of them can have `page` with a tab's id, and then it only shows on that tab. Only vanilla's mobs can be drawn moving, so `"mob": "minecraft:villager"` works by itself and one of this world's needs a `portrait`, an image of it. Render that from its model with assetkit.
+
+A module opens it, and says what it does:
+
+```java
+context.openPanel(player, "kiln", machine, new PanelBehavior() {
+    @Override
+    public void tick(PanelView panel) {
+        panel.setValue("heat", machine.data().getFloatOr("heat", 0));
+        panel.setText("state", machine.data().getBooleanOr("lit", false) ? "Burning" : "Cold");
+    }
+
+    @Override
+    public void clicked(PanelView panel, String id, int row, boolean rightClick, boolean shift) {
+        if (id.equals("light")) {
+            machine.data().putBoolean("lit", true);
+        }
+    }
+});
+```
+
+- `context.openPanel(player, "kiln", behavior)` is for anything, like an item's use. Its slots are an inventory of its own, and whatever's left in them goes back to the player when it closes.
+- `context.openPanel(player, "kiln", container, behavior)` shows a real inventory, usually a machine's. It closes when that goes away.
+- `context.openPanel(player, "talk", mob, behavior)` closes when the mob dies or they walk away.
+
+`opened` sets what it starts with and `tick` keeps it current. Only what's really different gets sent, so setting everything every tick is fine. `clicked` hears buttons, tabs and rows, with the row's number for a list, `typed` hears a text field, and `closed` hears it closing, whyever it closed. A module can use `setText`, `setValue`, `setEnabled`, `setVisible`, `setTooltip`, `setItem` for an icon, `setRows` for a list, `setTyped`, `setPage` and `close`, by the widget's `id`.
+
+For someone to talk to or trade with, a `mob`, a `label` for what it says, and a `list` of what they can say or buy back with `PanelRow.of("Bread", new ItemStack(Items.BREAD))` is all it takes. A row can be turned off with a reason: `new PanelRow("Sold out", icon, false, "Come back tomorrow")`.
+
+Someone with no companion, or one too old for panels, gets the same panel as a plain chest, which does all the same things: slots are slots, and buttons, tabs and rows are named items they can click. So nothing needs its own code, but keep it usable that way: a bar's value is only a number in an item's name there, and they can't type at all, so never make typing the only way. Every slot, button, tab and row, and anything with an `id`, takes a place in that chest, which has 54.
+
+The release gates open each new or changed panel on a real client and photograph it for the reviewer, before anything has driven it, so what a module sets in `opened` won't be in that picture.
+
 ### Talking to other features
 
 Modules can't share classes, but one can tell any others that care that something happened:

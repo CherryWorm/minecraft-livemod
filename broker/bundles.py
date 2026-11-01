@@ -22,6 +22,9 @@ CONNECTED_ARMS = (((6, 0, 6), (10, 6, 10)), ((6, 10, 6), (10, 16, 10)), ((6, 6, 
 CUBE_FACES = ("down", "up", "north", "south", "west", "east")
 LIGHT_EMISSION_FULL = 15
 USE_SOUND = "minecraft:intentionally_empty"
+DEFAULT_LIST_ROWS = 9
+CHEST_ROW = 9
+PANEL_IMAGE_FIELDS = ("image", "hover_image", "disabled_image", "portrait")
 LOOKS_ONLY_ATTRIBUTES = ("minecraft:visual/", "minecraft:audio/")
 BLOCK_FACES = {"top", "bottom", "front", "back", "left", "right", "side"}
 
@@ -390,6 +393,48 @@ def _copy_sounds(feature, feature_id, pack, sounds_json):
         sounds_json[hashed] = {"sounds": [f"gm:{hashed}"]}
 
 
+def panel_chest_slots(panel):
+    """Where each thing goes in the real chest underneath a panel, which is what a client with no companion sees, and what a click on
+    it really is for one that has. It's in the order they're listed. Returns how many places that takes."""
+    used = 0
+    for widget in panel.get("widgets", []):
+        kind = widget.get("type")
+        size = {"slot": 1, "button": 1, "text_field": 1, "tabs": len(widget.get("tabs", [])), "list": widget.get("max_rows", DEFAULT_LIST_ROWS),
+                "label": 1 if widget.get("id") else 0, "bar": 1 if widget.get("id") else 0, "icon": 1 if widget.get("id") else 0}.get(kind, 0)
+        if size:
+            widget["chest_slot"], widget["chest_size"] = used, size
+            used += size
+    return used
+
+
+def _panel_image(feature, feature_id, panel_name, name, pack):
+    source = feature["dir"] / "assets" / "panels" / f"{name}.png"
+    if not source.exists():
+        raise BundleError(f"{feature_id}/{panel_name}: panel image {name}.png is missing")
+    hashed = "p" + hashlib.sha256(f"{feature_id}/{name}".encode()).hexdigest()[:16]
+    target = pack / "assets/gm/textures/gui" / f"{hashed}.png"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, target)
+    return f"gm:textures/gui/{hashed}.png"
+
+
+def _render_panels(feature, feature_id, ledger, pack):
+    """A panel as a client and the server will read it: slot names for the game, its art under names that give nothing away, and where it all goes in the chest underneath."""
+    rendered = {}
+    for name, panel in feature["manifest"].get("panels", {}).items():
+        copied = json.loads(json.dumps(panel))
+        if copied.get("background"):
+            copied["background"] = _panel_image(feature, feature_id, name, copied["background"], pack)
+        for widget in copied.get("widgets", []):
+            for field in PANEL_IMAGE_FIELDS:
+                if widget.get(field):
+                    widget[field] = _panel_image(feature, feature_id, name, widget[field], pack)
+        copied["widgets"] = _resolve_tokens(copied.get("widgets", []), feature_id, ledger)
+        copied["chest_rows"] = max(1, (panel_chest_slots(copied) + CHEST_ROW - 1) // CHEST_ROW)
+        rendered[f"{feature_id}/{name}"] = copied
+    return rendered
+
+
 def _effect_id(feature_id, name):
     """The companion works this out the same way, from the name a module asks for."""
     return "p" + _sound_id(feature_id, name)
@@ -454,6 +499,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
     block_models = {}
     machine_inventories = {}
     block_settings = {}
+    panels = {}
 
     for feature_id, feature in features.items():
         manifest = feature["manifest"]
@@ -564,6 +610,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
             ruin_patches.append(_render_ruin(feature_id, name, ruin, ledger, datapack))
         _copy_sounds(feature, feature_id, pack, sounds_json)
         _copy_screen_effects(feature, feature_id, pack)
+        panels.update(_render_panels(feature, feature_id, ledger, pack))
         # Marked as sounds, so one can share its name with a block or a mob, which are all in here by bare name.
         bindings.update({f"sound:{feature_id}/{name}": _sound_id(feature_id, name) for name in manifest.get("sounds", [])})
         for ore in manifest.get("ores", []):
@@ -609,6 +656,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
     _write_json(config / "block_models.json", block_models)
     _write_json(config / "machine_inventories.json", machine_inventories)
     _write_json(config / "block_settings.json", block_settings)
+    _write_json(config / "panels.json", panels)
     _write_json(config / "knowledge.json", {"scope": scope, "entries": entries, "gated": gated, "open": sorted(open_recipes),
                                             "machines": machines, "names": names})
     _write_json(out / "recipes.json", recipe_modes)

@@ -8,6 +8,7 @@ import re
 
 from PIL import Image
 
+from broker import bundles
 from broker.bundles import TOKEN
 from broker.gates import GateFailed, balance
 
@@ -37,6 +38,18 @@ NOT_CUBES = {"plant", "glow_plant", "tinted_plant", "crop", "connected", "model"
 MOST_USE_SECONDS = 60
 USE_ANIMATIONS = {"none", "eat", "drink", "block", "bow", "trident", "crossbow", "spyglass", "toot_horn", "brush", "bundle", "spear"}
 MOST_SHADER_CHARACTERS = 16000
+# What fits at the size a small window draws its interface. A vanilla chest is 176 by 222.
+MOST_PANEL_WIDTH = 320
+MOST_PANEL_HEIGHT = 230
+MOST_CHEST_ROWS = 6
+MOST_TYPED = 256
+PLAYER_INVENTORY_WIDTH = 162
+PLAYER_INVENTORY_HEIGHT = 76
+MOST_PANEL_IMAGE = 1024
+# Each kind of widget, and how big it is if it doesn't say.
+PANEL_WIDGETS = {"slot": 18, "label": 0, "icon": 16, "image": 16, "bar": 16, "button": 20, "tabs": 20, "list": 60, "mob": 40, "text_field": 16}
+PANEL_NEEDS_ID = {"button", "list", "text_field", "bar"}
+PANEL_BAR_DIRECTIONS = {"right", "left", "up", "down"}
 MIN_COMPASS_FRAMES = 2
 MAX_COMPASS_FRAMES = 64
 BLOCK_WITH_STATE = re.compile(r"[^\[\]\s]+(\[[a-z0-9_]+=[a-z0-9_]+(,[a-z0-9_]+=[a-z0-9_]+)*\])?")
@@ -44,7 +57,7 @@ BLOCK_WITH_STATE = re.compile(r"[^\[\]\s]+(\[[a-z0-9_]+=[a-z0-9_]+(,[a-z0-9_]+=[
 LOOT_CONTAINERS = re.compile(r"minecraft:(chest|trapped_chest|barrel|dispenser|dropper|hopper|crafter|([a-z]+_)?shulker_box|([a-z]+_)*copper_chest)")
 # Words that would give content away if they appeared in a path players can see.
 SAFE_PATH = re.compile(r"^assets/(gm/(textures/(block/s\d{4}(_(top|bottom|front|back|left|right|side|\d))?|item/i\d{4}(_[cv]\d+)?)\.png(\.mcmeta)?"
-                       r"|models/(block/s\d{4}(_c?\d+)?|item/i\d{4}(_[cv]\d+)?)\.json|items/i\d{4}\.json|lang/en_us\.json|sounds/[0-9a-f]+\.ogg|sounds\.json|shaders/post/p[0-9a-f]+\.fsh|post_effect/p[0-9a-f]+\.json))$")
+                       r"|models/(block/s\d{4}(_c?\d+)?|item/i\d{4}(_[cv]\d+)?)\.json|items/i\d{4}\.json|lang/en_us\.json|sounds/[0-9a-f]+\.ogg|sounds\.json|shaders/post/p[0-9a-f]+\.fsh|post_effect/p[0-9a-f]+\.json|textures/gui/p[0-9a-f]+\.png))$")
 
 
 def _fail(message):
@@ -108,6 +121,10 @@ def check_textures(pack):
                 mode = image.mode
         except Exception as error:  # noqa: BLE001 - Pillow raises many types for a broken file
             _fail(f"{name} isn't a valid PNG: {error}")
+        if path.parent.name == "gui":
+            if max(width, height) > MOST_PANEL_IMAGE:
+                _fail(f"{name} is {width}x{height}. A panel's images can be at most {MOST_PANEL_IMAGE} across.")
+            continue
         if width not in (16, 32, 64) or height % width != 0:
             _fail(f"{name} is {width}x{height}. Textures must be 16, 32 or 64 wide, "
                   "with a height that's a multiple of the width for animations.")
@@ -325,6 +342,88 @@ def check_items(features):
                 _fail(f"{label} has variants {variants!r}. It's names and the texture for each, like {{\"gilded\": \"ledger_gilded\"}}.")
 
 
+def _panel_problems(feature, panel):
+    """Everything that would stop a panel working or fitting, as text, so a builder gets all of it at once."""
+    width, height = panel.get("width"), panel.get("height")
+    if not all(isinstance(number, int) and not isinstance(number, bool) for number in (width, height)) or not (0 < width <= MOST_PANEL_WIDTH and 0 < height <= MOST_PANEL_HEIGHT):
+        return [f"its size is {width} by {height}. It has to fit on a small screen, so it can be at most {MOST_PANEL_WIDTH} by {MOST_PANEL_HEIGHT}."]
+    problems = []
+    images = feature["dir"] / "assets" / "panels"
+
+    def needs_image(name, where):
+        if not (images / f"{name}.png").exists():
+            problems.append(f"{where} uses assets/panels/{name}.png, which doesn't exist.")
+
+    if panel.get("background"):
+        needs_image(panel["background"], "its background")
+    inventory = panel.get("inventory")
+    if inventory is not None and inventory is not False:
+        if not isinstance(inventory, dict) or not all(isinstance(inventory.get(axis), int) for axis in "xy"):
+            problems.append(f"its inventory is {inventory!r}. It's where the player's own slots go, like {{\"x\": 8, \"y\": 84}}, or false to leave them out.")
+        elif inventory["x"] + PLAYER_INVENTORY_WIDTH > width or inventory["y"] + PLAYER_INVENTORY_HEIGHT > height:
+            problems.append(f"the player's inventory at {inventory['x']}, {inventory['y']} takes {PLAYER_INVENTORY_WIDTH} by {PLAYER_INVENTORY_HEIGHT}, which doesn't fit in {width} by {height}.")
+    seen, pages = set(), {tab.get("id") for widget in panel.get("widgets", []) if widget.get("type") == "tabs" for tab in widget.get("tabs", [])}
+    for widget in panel.get("widgets", []):
+        kind, label = widget.get("type"), f"{widget.get('type')} {widget.get('id', '')}".strip()
+        if kind not in PANEL_WIDGETS:
+            problems.append(f"it has a widget of type {kind!r}. Use one of {sorted(PANEL_WIDGETS)}.")
+            continue
+        wide, high = widget.get("width", PANEL_WIDGETS[kind]), widget.get("height", PANEL_WIDGETS[kind])
+        if not all(isinstance(widget.get(axis), int) and not isinstance(widget.get(axis), bool) for axis in "xy") or not all(isinstance(size, int) for size in (wide, high)):
+            problems.append(f"{label} needs whole numbers for x and y, and for width and height if it has them.")
+            continue
+        if widget["x"] < 0 or widget["y"] < 0 or widget["x"] + wide > width or widget["y"] + high > height:
+            problems.append(f"{label} at {widget['x']}, {widget['y']}, {wide} by {high}, goes outside the panel, which is {width} by {height}.")
+        identifier = widget.get("id")
+        if identifier in seen:
+            problems.append(f"two widgets are called {identifier}.")
+        if identifier:
+            seen.add(identifier)
+        elif kind in PANEL_NEEDS_ID:
+            problems.append(f"a {kind} needs an id, so a module can tell which one it is.")
+        if widget.get("page") and widget["page"] not in pages:
+            problems.append(f"{label} is on page {widget['page']!r}, which no tabs have.")
+        for field in bundles.PANEL_IMAGE_FIELDS:
+            if widget.get(field):
+                needs_image(widget[field], label)
+        if kind == "slot" and not (isinstance(widget.get("slot"), int) and not isinstance(widget.get("slot"), bool) and widget["slot"] >= 0):
+            problems.append(f"an item slot at {widget['x']}, {widget['y']} needs \"slot\": which slot of the inventory it shows, from 0.")
+        if kind == "image" and not widget.get("image"):
+            problems.append(f"an image at {widget['x']}, {widget['y']} doesn't say which image.")
+        if kind == "bar" and not widget.get("image") and not widget.get("color"):
+            problems.append(f"{label} needs an image or a color to fill with.")
+        if kind == "bar" and widget.get("direction", "right") not in PANEL_BAR_DIRECTIONS:
+            problems.append(f"{label} has direction {widget.get('direction')!r}. Use one of {sorted(PANEL_BAR_DIRECTIONS)}.")
+        if kind == "icon" and not widget.get("icon") and not identifier:
+            problems.append(f"an icon at {widget['x']}, {widget['y']} needs an item, or an id for a module to set one by.")
+        if kind == "mob":
+            mob = str(widget.get("mob"))
+            if not mob.startswith("minecraft:") and not widget.get("portrait"):
+                problems.append(f"a mob preview of {mob} needs a \"portrait\" image, because only vanilla's mobs can be drawn on a screen. Render one from its model with assetkit.")
+        if kind == "text_field" and not (isinstance(widget.get("max_length"), int) and 0 < widget["max_length"] <= MOST_TYPED):
+            problems.append(f"{label} needs a max_length, from 1 to {MOST_TYPED}.")
+        if kind == "tabs" and not widget.get("tabs"):
+            problems.append(f"{label} has no tabs in it.")
+        if kind == "list" and not (isinstance(widget.get("max_rows", 1), int) and 0 < widget.get("max_rows", 1) <= 45):
+            problems.append(f"{label} has max_rows {widget.get('max_rows')!r}. It's how many rows it can ever have, up to 45.")
+    copied = json.loads(json.dumps(panel))
+    places = bundles.panel_chest_slots(copied)
+    if places > bundles.CHEST_ROW * MOST_CHEST_ROWS:
+        problems.append(f"it would need {places} places in the plain chest someone with no companion sees, and a chest has {bundles.CHEST_ROW * MOST_CHEST_ROWS}. "
+                        "Item slots, buttons, tabs, rows of a list and anything with an id each take one, so use fewer, or leave off some ids.")
+    return problems
+
+
+def check_panels(features):
+    """A panel goes to friends' screens with nothing else looking at it first, so what's wrong has to be found here."""
+    problems = []
+    for feature_id, feature in features.items():
+        for name, panel in feature["manifest"].get("panels", {}).items():
+            problems += [f"Panel {feature_id}/{name}: {problem}" for problem in _panel_problems(feature, panel)]
+    if problems:
+        _fail("\n".join(problems))
+
+
 def check_screen_effects(features):
     """A shader runs for every pixel of every frame on friends' computers, and one that never finishes can hang a graphics card."""
     for feature_id, feature in features.items():
@@ -479,6 +578,7 @@ def run(features, old_ledger, new_ledger, pool, content):
     check_block_kinds(features)
     check_items(features)
     check_screen_effects(features)
+    check_panels(features)
     check_machines(features)
     check_mob_sounds(features)
     check_model_costs(features)

@@ -195,7 +195,17 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				String seen = context.computeOnClient(client -> client.level.getBlockState(pos).toString());
 				LOGGER.info("[M8] the client sees {}", seen);
 			}
-			case "oldcompanion" -> rejoinAsOldCompanion(context);
+			case "oldcompanion" -> rejoinWithout(context, "inventory_hooks");
+			case "nopanels" -> rejoinWithout(context, "panel");
+			case "type" -> context.getInput().typeChars(words[1]);
+			case "panelmouse" -> panelMouse(context, Integer.parseInt(words[1]), Integer.parseInt(words[2]));
+			case "guisize" -> {
+				String size = context.computeOnClient(client -> {
+					AbstractContainerScreenAccessor at = (AbstractContainerScreenAccessor) client.gui.screen();
+					return at.companion$leftPos() + " " + at.companion$topPos() + " " + client.getWindow().getGuiScale();
+				});
+				LOGGER.info("[M8] gui {}", size);
+			}
 			case "screen" -> {
 				String shown = context.computeOnClient(client -> client.gui.screen() == null ? "none" : client.gui.screen().getClass().getSimpleName());
 				LOGGER.info("[M8] the screen is {}", shown);
@@ -242,10 +252,23 @@ public final class KnowledgeTest implements FabricClientGameTest {
 		input.releaseShift();
 	}
 
-	/** Which channels it listens on is all a server can see of a companion, so this looks just like one from before inventory hooks. */
-	private void rejoinAsOldCompanion(ClientGameTestContext context) {
+	/** The real mouse, at a place on the panel that's open, measured from its top left corner. */
+	private void panelMouse(ClientGameTestContext context, int x, int y) {
+		TestInput input = context.getInput();
+		double[] pixel = context.computeOnClient(client -> {
+			AbstractContainerScreenAccessor at = (AbstractContainerScreenAccessor) client.gui.screen();
+			double scale = client.getWindow().getGuiScale();
+			return new double[] {(at.companion$leftPos() + x) * scale, (at.companion$topPos() + y) * scale};
+		});
+		input.setCursorPos(pixel[0], pixel[1]);
+		context.waitTicks(2);
+		input.pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+	}
+
+	/** Which channels it listens on is all a server can see of a companion, so this looks just like one from before that channel. */
+	private void rejoinWithout(ClientGameTestContext context, String channel) {
 		context.runOnClient(client -> {
-			ClientPlayNetworking.unregisterGlobalReceiver(Identifier.fromNamespaceAndPath("gm", "inventory_hooks"));
+			ClientPlayNetworking.unregisterGlobalReceiver(Identifier.fromNamespaceAndPath("gm", channel));
 			client.getConnection().getConnection().disconnect(Component.literal("Leaving"));
 			client.disconnect(new TitleScreen(), false);
 		});

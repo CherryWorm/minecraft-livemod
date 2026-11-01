@@ -6,6 +6,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
+import net.minecraft.world.Container;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
@@ -67,6 +68,18 @@ public interface ServerModuleContext {
 
 	/** Opens a menu made of chest slots, from 1 to 6 rows, which needs nothing on the player's computer. */
 	void openMenu(ServerPlayer player, Component title, int rows, MenuBehavior behavior);
+
+	/**
+	 * Opens one of this feature's "panels", or "other_feature/name", drawn the way feature.json says. Its item slots have an inventory of
+	 * their own, and whatever's left in it goes back to the player when it closes. It stays open however far away they go.
+	 */
+	void openPanel(ServerPlayer player, String name, PanelBehavior behavior);
+
+	/** Opens a panel on this inventory, such as a machine, which closes when the player can no longer reach it. */
+	void openPanel(ServerPlayer player, String name, Container container, PanelBehavior behavior);
+
+	/** Opens a panel about something in the world, such as a mob to trade with, which closes when it dies or the player walks away. */
+	void openPanel(ServerPlayer player, String name, Entity near, PanelBehavior behavior);
 
 	/** Opens a book for a player to read, with no such item existing. A page holds about 230 characters. */
 	void openBook(ServerPlayer player, String title, List<Component> pages);

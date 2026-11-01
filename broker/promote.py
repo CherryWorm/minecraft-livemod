@@ -168,6 +168,18 @@ def new_visuals(old_ledger, new_ledger):
     return blocks, items, mobs
 
 
+def changed_panels(content, old_content):
+    """Panels that would look different from the last release. Their art has names that don't change with it, so new art counts for all of them."""
+    def read(folder):
+        file = folder / "config" / "panels.json"
+        return json.loads(file.read_text(encoding="utf-8")) if file.exists() else {}
+
+    panels = read(content)
+    old = read(old_content)
+    art = bundles.tree_hash(content / "pack/assets/gm/textures/gui") != bundles.tree_hash(old_content / "pack/assets/gm/textures/gui")
+    return sorted(name for name, panel in panels.items() if art or old.get(name) != panel)
+
+
 def fingerprint(content, jars, current):
     """Identifies what a gate run proved: this exact content and these jars, on top of this release."""
     digest = hashlib.sha256(str(current).encode())
@@ -197,7 +209,8 @@ def run_gates(tier, jars, content, old_ledger, new_ledger, old_content, mods, re
 
     blocks, items, mobs = new_visuals(old_ledger, new_ledger)
     report_dir = runtime.REPORTS / release_id
-    shots = stages.run("client", lambda: client.run_gate(blocks, items, mods, report_dir, mobs, client_modules))
+    panels = changed_panels(content, old_content)
+    shots = stages.run("client", lambda: client.run_gate(blocks, items, mods, report_dir, mobs, client_modules, panels))
     report["screenshots"] = [str(path) for path in shots]
     passed_file.parent.mkdir(parents=True, exist_ok=True)
     passed_file.write_text(json.dumps({"fingerprint": proof, "screenshots": report["screenshots"]}), encoding="utf-8")

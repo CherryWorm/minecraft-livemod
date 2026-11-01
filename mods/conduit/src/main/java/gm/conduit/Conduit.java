@@ -15,6 +15,7 @@ import gm.conduit.pack.PackStatus;
 import gm.conduit.provenance.Provenance;
 import gm.conduit.retrogen.BiomePatch;
 import gm.conduit.retrogen.OrePatchQueue;
+import gm.conduit.panels.PanelNetwork;
 import gm.conduit.slots.BlockModels;
 import gm.conduit.slots.BlockSettings;
 import gm.conduit.slots.MachineInventories;
@@ -46,6 +47,7 @@ public final class Conduit implements ModInitializer {
 		BlockModels.register();
 		MachineInventories.register();
 		BlockSettings.register();
+		PanelNetwork.register();
 		LiveAssets.register();
 		PackStatus.register();
 		Knowledge.register();

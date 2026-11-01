@@ -7,7 +7,8 @@
 		"GameRendererMixin",
 		"KeyboardHandlerMixin",
 		"PostPassMixin",
-		"ShaderManagerMixin"
+		"ShaderManagerMixin",
+		"MenuScreensMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

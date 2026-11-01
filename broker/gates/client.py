@@ -20,6 +20,8 @@ FILMED_MOBS = 2
 FILMED_ANIMATIONS = ("walk", "attack", "hurt", "death")
 FILMED_PHASES = (0.0, 0.25, 0.5, 0.75)
 EYE_HEIGHT = 1.62
+# Again each is a real screenshot, and it's rare for a release to change more than this at once.
+MOST_PANEL_SHOTS = 8
 
 
 def _fail(message):
@@ -155,9 +157,22 @@ def motion_sheet(slot, rows, shots_dir, out):
     return target
 
 
-def run_gate(blocks, items, mods_dir, report_dir, mobs=(), client_modules=False):
+def photograph_panels(panels, log, process):
+    """Each new panel opened on the real client, the way a player would see it before anything is driving it."""
+    names = []
+    for panel in panels[:MOST_PANEL_SHOTS]:
+        runtime.rcon("shadow", "conduit", "panel", PLAYER, panel, check=False)
+        time.sleep(1)
+        name = "panel_" + re.sub(r"[^a-z0-9_]", "_", panel)
+        _tell(f"SCENE shot {name}")
+        _wait_log(log, rf"\[SCENE\] took {name}$", SHOT_TIMEOUT, process)
+        names.append(name)
+    return names
+
+
+def run_gate(blocks, items, mods_dir, report_dir, mobs=(), client_modules=False, panels=()):
     """Returns the screenshots taken. Skips when there's nothing new to look at."""
-    if not blocks and not items and not mobs and not client_modules:
+    if not blocks and not items and not mobs and not client_modules and not panels:
         return []
     report_dir.mkdir(parents=True, exist_ok=True)
     log = report_dir / "client.log"
@@ -196,6 +211,7 @@ def run_gate(blocks, items, mods_dir, report_dir, mobs=(), client_modules=False)
         runtime.rcon("shadow", "time", "set", "noon", check=False)
         check_screen_effects(log, process)
         filmed = film(mobs, log, process)
+        shots.extend(photograph_panels(list(panels), log, process))
         _tell("SCENE done")
         process.wait(timeout=120)
     finally:

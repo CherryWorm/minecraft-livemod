@@ -875,13 +875,107 @@ def _class_name(feature_id):
     return "".join(part.capitalize() for part in feature_id.split("_")) + "Module"
 
 
-def _module_files(draft, name, display):
+PANEL_MODULE = """package gm.feature.@ID@;
+
+import gm.conduit.api.BlockBehavior;
+import gm.conduit.api.MachineAttempt;
+import gm.conduit.api.PanelBehavior;
+import gm.conduit.api.PanelView;
+import gm.conduit.api.ServerModule;
+import gm.conduit.api.ServerModuleContext;
+import gm.conduit.slots.SlotBlockEntity;
+import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+
+import java.util.List;
+
+/** A starting point: a screen with an input, an output and a button. Pressing it starts the machine on what's in the input, and it finishes by itself. */
+public final class @CLASS@ implements ServerModule {
+	private static final String MACHINE = "@MACHINE@";
+	private static final int WORK_TICKS = 100;
+	private static final int INPUT = 0;
+	private static final int OUTPUT = 1;
+	private ServerModuleContext context;
+
+	@Override
+	public void enable(ServerModuleContext context) {
+		this.context = context;
+		context.bindMachine(MACHINE, this::tick);
+		context.bindBlock(MACHINE, new BlockBehavior() {
+			@Override
+			public InteractionResult use(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
+				if (level.getBlockEntity(pos) instanceof SlotBlockEntity machine && player instanceof ServerPlayer serverPlayer) {
+					context.openPanel(serverPlayer, MACHINE, machine, new Screen(machine));
+				}
+				return InteractionResult.SUCCESS;
+			}
+		});
+	}
+
+	private void tick(SlotBlockEntity machine) {
+		CompoundTag data = machine.data();
+		int left = data.getIntOr("left", 0);
+		if (left == 0) {
+			return;
+		}
+		data.putInt("left", left - 1);
+		if (left == 1) {
+			finish(machine);
+		}
+		machine.setChanged();
+	}
+
+	private void finish(SlotBlockEntity machine) {
+		List<ItemStack> inputs = List.of(machine.getItem(INPUT));
+		MachineAttempt attempt = this.context.attemptRecipe(null, MACHINE, inputs);
+		if (attempt.succeeded() && machine.getItem(OUTPUT).isEmpty()) {
+			attempt.consume(inputs);
+			machine.setItem(OUTPUT, attempt.outputs().get(0).copy());
+		}
+	}
+
+	/** One of these for each player looking at it. What's true is kept on the machine, and this only shows it. */
+	private final class Screen implements PanelBehavior {
+		private final SlotBlockEntity machine;
+
+		Screen(SlotBlockEntity machine) {
+			this.machine = machine;
+		}
+
+		@Override
+		public void tick(PanelView panel) {
+			int left = this.machine.data().getIntOr("left", 0);
+			panel.setValue("progress", left == 0 ? 0 : 1 - (float) left / WORK_TICKS);
+			panel.setText("state", left == 0 ? "Idle" : "Working");
+			panel.setEnabled("start", left == 0 && !this.machine.getItem(INPUT).isEmpty());
+		}
+
+		@Override
+		public void clicked(PanelView panel, String id, int row, boolean rightClick, boolean shift) {
+			if (id.equals("start") && this.machine.data().getIntOr("left", 0) == 0) {
+				this.machine.data().putInt("left", WORK_TICKS);
+				this.machine.setChanged();
+			}
+		}
+	}
+}
+"""
+
+
+def _module_files(draft, name, display, template=MODULE):
     if draft.id in JAVA_WORDS or draft.id[0].isdigit():
         raise TemplateError(f"A module's package is gm.feature.<id>, and {draft.id} can't be a Java package name. Give the feature another id.")
     class_name = _class_name(draft.id)
     # json.dumps gives an escaped Java string too. It's quoted in the template, so the outer quotes go.
     spoken = json.dumps(display)[1:-1]
-    source = (MODULE.replace("@ID@", draft.id).replace("@CLASS@", class_name).replace("@MACHINE@", name).replace("@DISPLAY@", spoken))
+    source = (template.replace("@ID@", draft.id).replace("@CLASS@", class_name).replace("@MACHINE@", name).replace("@DISPLAY@", spoken))
     draft.file(f"server/src/main/java/gm/feature/{draft.id}/{class_name}.java", source.encode())
     draft.file("server/src/main/resources/module.properties", f"entry=gm.feature.{draft.id}.{class_name}\n".encode())
     return class_name
@@ -897,12 +991,32 @@ def _automation(entries):
     return [dict(entry) for entry in entries]
 
 
+def _machine_panel(draft, name, display, casing, accent):
+    """A working screen to start from: an input, an output, how far along it is, and a button. Its background is plain, and is there to be drawn over."""
+    width, height = 176, 166
+    buffer = io.BytesIO()
+    tx.panel_back(casing, width, height, slots=[(56, 35), (116, 35)]).save(buffer, "PNG")
+    draft.file(f"assets/panels/{name}_back.png", buffer.getvalue())
+    accent_text = "#%02x%02x%02x" % tx.rgb(accent)
+    draft.manifest.setdefault("panels", {})[name] = {
+        "title": display, "width": width, "height": height, "background": f"{name}_back", "inventory": {"x": 8, "y": 84},
+        "widgets": [
+            {"type": "slot", "x": 56, "y": 35, "slot": 0},
+            {"type": "slot", "x": 116, "y": 35, "slot": 1},
+            {"type": "bar", "id": "progress", "x": 78, "y": 36, "width": 28, "height": 14, "color": accent_text, "text": "Progress"},
+            {"type": "label", "id": "state", "x": 8, "y": 20, "text": "Idle"},
+            {"type": "button", "id": "start", "x": 8, "y": 58, "width": 40, "height": 18, "text": "Start", "tooltip": "Starts it working"},
+        ],
+    }
+
+
 def new_machine(folder, *, name, display, casing, accent, recipe_ingredients=None, automation=None, seed=1, mode="open", route=None,
-                tool_level=None, model=None, node=None, phase=None):
+                tool_level=None, model=None, node=None, phase=None, panel=False):
     """A machine block with art, and a server module under server/ that binds it, ticks lightly, keeps state in machine.data() and tries
     recipes when used. recipe_ingredients is a list of up to 9 tokens for a shapeless recipe; with none it has no source until you add one.
     automation is a list like [{"what": "machining", "per_minute": 20}]. Add its recipes to feature.json with "machine": "<name>".
-    It's a textured cube unless you pass model with the name of one you've sculpted in assets/models, for one with moving parts."""
+    It's a textured cube unless you pass model with the name of one you've sculpted in assets/models, for one with moving parts.
+    With panel=True it has an inventory, and a screen of its own to use it with, in place of trying what a player holds."""
     draft = _Draft(folder, node, phase)
     _check_name(name)
     _check_text(display, "display")
@@ -924,6 +1038,9 @@ def new_machine(folder, *, name, display, casing, accent, recipe_ingredients=Non
         if not (draft.folder / "assets" / "models" / f"{model}.bbmodel").exists():
             raise TemplateError(f"There's no assets/models/{model}.bbmodel yet. Sculpt it first, or leave model out for a cube.")
         block.update(family="model", model=model)
+    if panel:
+        block["inventory"] = {"inputs": 1, "outputs": 1}
+        _machine_panel(draft, name, display, casing, accent)
     draft.thing("blocks", name, block)
     source = "It needs a source before it can pass, so add a recipe. "
     if recipe_ingredients:
@@ -937,9 +1054,10 @@ def new_machine(folder, *, name, display, casing, accent, recipe_ingredients=Non
     if (draft.folder / "server" / "src").exists():
         module = f"The module that's already in server/ needs its own context.bindMachine(\"{name}\", ...)."
     else:
-        module = f"{_module_files(draft, name, display)} is its module, in server/."
+        module = f"{_module_files(draft, name, display, PANEL_MODULE if panel else MODULE)} is its module, in server/."
+    screen = f"Its screen is the panel {name} in feature.json, with assets/panels/{name}_back.png as a plain background for you to draw over. " if panel else ""
     return draft.commit(f"{display}: a machine.",
-                        f"Added {display}. {module} {source}"
+                        f"Added {display}. {module} {screen}{source}"
                         f"Left to decide: its recipes, with \"machine\": \"{name}\", and what its tick does. If it does anything by itself, declare that in automation.")
 
 

@@ -19,7 +19,7 @@ import pathlib
 import sys
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 SIZE = 16
 
@@ -603,6 +603,23 @@ def machine(face="side", casing=(112, 112, 122), accent=(232, 142, 54), on=False
 
 
 # ---------------------------------------------------------------- item sprites
+
+def panel_back(casing=(112, 112, 122), width=176, height=166, slots=(), inventory=(8, 84)):
+    """A plain background for a panel: its colour, with an edge and a frame for each slot, for where the item goes at (x, y) in the panel.
+    The frames for a player's inventory go at inventory, unless that's None. It's a start to draw over."""
+    light, frame, dark = mix(casing, (255, 255, 255), 0.55), mix(casing, (255, 255, 255), 0.25), mix(casing, (0, 0, 0), 0.5)
+    image = Image.new("RGBA", (width, height), (*light, 255))
+    pen = ImageDraw.Draw(image)
+    pen.rectangle((0, 0, width - 1, height - 1), outline=(*dark, 255))
+    places = list(slots)
+    if inventory is not None:
+        for row in range(4):
+            y = inventory[1] + row * 18 + (4 if row == 3 else 0)
+            places += [(inventory[0] + column * 18, y) for column in range(9)]
+    for x, y in places:
+        pen.rectangle((x - 1, y - 1, x + 16, y + 16), fill=(*frame, 255), outline=(*dark, 255))
+    return image
+
 
 def _item_ramp(color):
     """Outline first, then five fill tones. The outline is dark in the same hue, never pure black."""

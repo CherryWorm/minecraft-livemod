@@ -29,6 +29,7 @@ What the engine can do today, so your specs can be built quickly. Each of these 
 - Mobs of any shape, each modelled and animated from scratch: hostile, neutral, passive or skittish, spawning by light, height and biome. There's room for hundreds, so a world can be all about its creatures.
 - Machines and other blocks drawn as 3D models with moving parts, and gauges that show a value. A machine can have an inventory that hoppers and players use like a furnace's, and recipes with several outputs.
 - Menus made of chest slots, and books, which a module can open for a player.
+- Full custom screens for machines, items and mobs: drawn art, item slots anywhere, moving bars, buttons, tabs, scrolling lists, a mob and text fields. Conversation and trading with mobs are built from these.
 - Creatures with minds of their own, which players can talk to, befriend or anger. They remember, gossip, and can trade or teach what they know, and bosses can read a fight. Each is cheap, but use them for characters that matter.
 - New biomes, as a variation of a vanilla one, which do need a restart.
 - Crafting and machine recipes, and knowledge entries learned by obtaining, examining, killing, reading or collecting pieces.

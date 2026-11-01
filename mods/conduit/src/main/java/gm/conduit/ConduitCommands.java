@@ -6,6 +6,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import gm.conduit.bridge.SafeMoment;
 import gm.conduit.mobs.SlotMob;
 import gm.conduit.modules.ServerModuleHost;
+import gm.conduit.panels.PanelMenu;
 import gm.conduit.retrogen.OrePatchQueue;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.commands.CommandSourceStack;
@@ -49,6 +50,11 @@ final class ConduitCommands {
 							context.getSource().sendSuccess(() -> Component.literal("Posed: " + count), false);
 							return count;
 						})))))
+				.then(Commands.literal("panel").then(Commands.argument("player", EntityArgument.player())
+						.then(Commands.argument("name", StringArgumentType.greedyString()).executes(context -> {
+							PanelMenu.preview(EntityArgument.getPlayer(context, "player"), StringArgumentType.getString(context, "name"));
+							return 1;
+						}))))
 				.then(Commands.literal("modules").then(Commands.literal("reload").executes(context -> {
 					int changed = ServerModuleHost.instance().reloadAll();
 					context.getSource().sendSuccess(() -> Component.literal("Server modules changed: " + changed

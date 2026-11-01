@@ -375,10 +375,14 @@ context.screenEffect(null);
 
 It goes by itself when the module unloads. Needing a client module, it won't show for anyone without the companion. The release gates compile it on a real client, and one that won't compile is refused. If someone's graphics card ever can't run one that passed, it just doesn't appear for them. Test clients render in software, so it hasn't been seen on a real graphics card until a real player sees it.
 
+## Panels
+
+A machine, an item or a mob can have a screen of its own, with drawn art, item slots placed anywhere, bars that move while it's open, buttons, tabs, scrolling lists, a mob and somewhere to type. Mob conversation and trading are built from these too. It's all described in `"panels"` in `feature.json`, and a server module opens it and runs it. Nothing runs on anyone's computer. Someone with no companion gets the same thing as a plain chest. See 'Panels' in `docs/feature-format.md`. For a few buttons with no art, a menu made of chest slots is less work.
+
 ## Using your content from a module
 
 `context.block("name")`, `context.item("name")`, `context.mob("name")` and `context.sound("name")` give you the real objects for names in `feature.json`, or `"other_feature/name"` for another feature's.
 
 ## What the engine doesn't do yet
 
-Structures larger than a chunk, new dimensions, and screens beyond chest-style menus, books and drawing on inventory screens. A screen effect covers the whole screen, so there's no drawing a shader on one thing in the world. Armor can only look like vanilla's when worn, and custom tools can't take enchantments at an enchanting table. Build the closest thing that works, and say what you wanted in `host_requests`.
+Structures larger than a chunk, and new dimensions. A panel can only draw vanilla's mobs moving, so one of this world's is a picture there. A screen effect covers the whole screen, so there's no drawing a shader on one thing in the world. Armor can only look like vanilla's when worn, and custom tools can't take enchantments at an enchanting table. Build the closest thing that works, and say what you wanted in `host_requests`.

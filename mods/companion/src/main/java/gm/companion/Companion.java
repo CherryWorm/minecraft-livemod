@@ -34,6 +34,7 @@ public final class Companion implements ClientModInitializer {
 		PayloadTypeRegistry.clientboundPlay().register(ModulePayloads.InventoryHooksSupported.TYPE, ModulePayloads.InventoryHooksSupported.CODEC);
 		ClientPlayNetworking.registerGlobalReceiver(ModulePayloads.InventoryHooksSupported.TYPE, (payload, context) -> {});
 		ClientPlayNetworking.registerGlobalReceiver(KnownRecipes.Part.TYPE, (payload, context) -> KnownRecipes.receive(payload));
+		PanelClient.register();
 
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("gm", "modules"), HOST::renderHud);
 		ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> InventoryScreens.attach(HOST, screen));
@@ -41,6 +42,7 @@ public final class Companion implements ClientModInitializer {
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
 			HOST.unloadAll();
 			KnownRecipes.forget();
+			PanelClient.forget();
 		});
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> HOST.unloadAll());
 

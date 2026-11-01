@@ -11,6 +11,9 @@ import gm.conduit.api.ServerModule;
 import gm.conduit.api.ServerModuleContext;
 import gm.conduit.api.WorldEvents;
 import gm.conduit.api.MenuBehavior;
+import gm.conduit.api.PanelBehavior;
+import gm.conduit.panels.PanelDefinition;
+import gm.conduit.panels.PanelMenu;
 import gm.conduit.knowledge.Codex;
 import gm.conduit.knowledge.Knowledge;
 import gm.conduit.provenance.Provenance;
@@ -29,6 +32,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.Filterable;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.Container;
 import net.minecraft.world.SimpleMenuProvider;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -52,6 +56,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
@@ -270,12 +275,15 @@ public final class ServerModuleHost {
 	}
 
 	private final class LoadedModule implements ServerModuleContext {
+		private static final double PANEL_REACH = 8.0;
+
 		private final String moduleId;
 		private final byte[] jar;
 		private final ServerModule module;
 		private final List<Consumer<MinecraftServer>> ticks = new ArrayList<>();
 		private final List<WorldEvents> events = new ArrayList<>();
 		private final List<ButtonMenu> menus = new ArrayList<>();
+		private final List<PanelMenu> panels = new ArrayList<>();
 		private final Map<String, List<Consumer<CompoundTag>>> subscriptions = new HashMap<>();
 		private int failures;
 
@@ -397,6 +405,11 @@ public final class ServerModuleHost {
 					menu.close();
 				}
 			}
+			for (PanelMenu panel : List.copyOf(this.panels)) {
+				if (panel.player().containerMenu == panel) {
+					panel.close();
+				}
+			}
 		}
 
 		@Override
@@ -427,6 +440,31 @@ public final class ServerModuleHost {
 		@Override
 		public void subscribe(String topic, Consumer<CompoundTag> listener) {
 			this.subscriptions.computeIfAbsent(topic, key -> new ArrayList<>()).add(listener);
+		}
+
+		@Override
+		public void openPanel(ServerPlayer player, String name, PanelBehavior behavior) {
+			open(player, name, null, who -> true, behavior);
+		}
+
+		@Override
+		public void openPanel(ServerPlayer player, String name, Container container, PanelBehavior behavior) {
+			open(player, name, container, container::stillValid, behavior);
+		}
+
+		@Override
+		public void openPanel(ServerPlayer player, String name, Entity near, PanelBehavior behavior) {
+			open(player, name, null, who -> near.isAlive() && who.closerThan(near, PANEL_REACH), behavior);
+		}
+
+		private void open(ServerPlayer player, String name, Container container, Predicate<Player> stillThere, PanelBehavior behavior) {
+			PanelDefinition definition = PanelDefinition.find(this.moduleId, name);
+			player.openMenu(new SimpleMenuProvider((id, inventory, who) -> {
+				PanelMenu panel = new PanelMenu(id, inventory, player, definition, container, stillThere, behavior, action -> guard(this, action));
+				this.panels.removeIf(open -> open.player().containerMenu != open);
+				this.panels.add(panel);
+				return panel;
+			}, Component.literal(definition.title())));
 		}
 
 		@Override
