@@ -1,5 +1,8 @@
 package gm.conduit.api;
 
+import gm.conduit.entities.SlotProjectile;
+import gm.conduit.entities.SlotProp;
+import gm.conduit.entities.SlotVehicle;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.nbt.CompoundTag;
@@ -13,6 +16,7 @@ import net.minecraft.world.Container;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -20,6 +24,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluid;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.List;
 import java.util.function.Consumer;
@@ -43,6 +48,12 @@ public interface ServerModuleContext {
 
 	void bindEffect(String name, EffectBehavior behavior);
 
+	void bindProjectile(String name, ProjectileBehavior behavior);
+
+	void bindVehicle(String name, VehicleBehavior behavior);
+
+	void bindProp(String name, PropBehavior behavior);
+
 	void onServerTick(Consumer<MinecraftServer> tick);
 
 	/** Hears about things that happen anywhere in the world, so there's no need to poll for them each tick. */
@@ -65,6 +76,31 @@ public interface ServerModuleContext {
 	 * {@code entity.addEffect(new MobEffectInstance(context.effect("name"), ticks, level))}.
 	 */
 	Holder<MobEffect> effect(String name);
+
+	/**
+	 * Fires a projectile from this feature's manifest, or "other_feature/name", the way they're looking, from their eyes. Its damage and speed are its
+	 * definition's. Returns null if they fired this one too recently for its shots_per_second, or too many are in the air already.
+	 */
+	SlotProjectile shoot(String name, LivingEntity shooter);
+
+	/** The same, aimed at a target's middle, with no allowance for gravity or for where it's going. */
+	SlotProjectile shoot(String name, LivingEntity shooter, Entity target);
+
+	/** The same, from anywhere in any direction, such as a machine firing. The owner is who gets the credit, and may be null. */
+	SlotProjectile shoot(String name, Level level, Vec3 from, Vec3 direction, Entity owner);
+
+	/** Puts one of this feature's vehicles in the world, or "other_feature/name". */
+	SlotVehicle placeVehicle(String name, Level level, Vec3 position, float yaw);
+
+	/** Puts one of this feature's props in the world, or "other_feature/name", where it stays until {@code discard()}. It lasts through a restart. */
+	SlotProp placeProp(String name, Level level, Vec3 position, float yaw);
+
+	/**
+	 * Draws a straight line of light between two spots, for this many seconds or until it's removed with 0 or less. It's a stretched block, of any block
+	 * at all, always at full brightness. Anyone whose client has the chunks it crosses can see it, and it can't be seen from any further than that.
+	 * It's gone when this module unloads, which includes a restart. Returns null if there are too many in the world already.
+	 */
+	Beam beam(Level level, Vec3 from, Vec3 to, float thickness, BlockState looks, int seconds);
 
 	/** The sound for a name in this feature's "sounds", or for "other_feature/name". */
 	SoundEvent sound(String name);

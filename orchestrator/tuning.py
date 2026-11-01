@@ -12,6 +12,8 @@ MODIFIER_BASE = {"attack_damage": BASE_ATTACK_DAMAGE, "attack_speed": BASE_ATTAC
 ITEM_FIELDS = {"durability", "mining_speed", "nutrition", "saturation", *MODIFIER_BASE}
 MOB_FIELDS = {"health", "damage", "speed", "armor", "followRange", "spawn.weight", "spawn.cap", "drops.count"}
 BLOCK_FIELDS = {"drops.count"}
+PROJECTILE_FIELDS = {"damage", "speed", "gravity", "lifetime", "shots_per_second"}
+VEHICLE_FIELDS = {"speed", "reverse", "acceleration", "turn", "climb", "health"}
 RECIPE_FIELDS = {"output.count", "json.result.count", "json.cookingtime"}
 ADDITIVE_FIELD = {"ores": "veinsPerChunk", "plants": "perChunk"}
 # Chunks remember the ids they've had, so more of something in the world has to be a new entry.
@@ -132,8 +134,8 @@ def apply(manifest, table, name, field, value, reason):
         if name not in manifest.get("items", {}):
             raise TuneError(f"This feature has no item called {name}.")
         _tune_item(manifest, name, field, value)
-    elif table in ("mobs", "blocks", "recipes"):
-        allowed = {"mobs": MOB_FIELDS, "blocks": BLOCK_FIELDS, "recipes": RECIPE_FIELDS}[table]
+    elif table in ("mobs", "blocks", "recipes", "projectiles", "vehicles"):
+        allowed = {"mobs": MOB_FIELDS, "blocks": BLOCK_FIELDS, "recipes": RECIPE_FIELDS, "projectiles": PROJECTILE_FIELDS, "vehicles": VEHICLE_FIELDS}[table]
         if field not in allowed:
             raise TuneError(f"A {table[:-1]}'s numbers are {', '.join(sorted(allowed))}. Anything else needs a builder.")
         entry = manifest.get(table, {}).get(name)
@@ -141,7 +143,7 @@ def apply(manifest, table, name, field, value, reason):
             raise TuneError(f"This feature has no {table[:-1]} called {name}.")
         _set_path(entry, field, _count(field, value))
     else:
-        raise TuneError("Numbers can be changed in items, blocks, mobs, recipes, ores and plants.")
+        raise TuneError("Numbers can be changed in items, blocks, mobs, projectiles, vehicles, recipes, ores and plants.")
     if table != "recipes":
         manifest.setdefault("changes_reached", {})[name] = reason
     else:

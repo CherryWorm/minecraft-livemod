@@ -3,17 +3,26 @@ package gm.conduit.modules;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import gm.conduit.api.BlockBehavior;
+import gm.conduit.api.Beam;
 import gm.conduit.api.EffectBehavior;
 import gm.conduit.api.ItemBehavior;
 import gm.conduit.api.MachineAttempt;
 import gm.conduit.api.MachineBehavior;
 import gm.conduit.api.MobBehavior;
 import gm.conduit.api.PlayerKey;
+import gm.conduit.api.ProjectileBehavior;
+import gm.conduit.api.PropBehavior;
+import gm.conduit.api.VehicleBehavior;
 import gm.conduit.api.ServerModule;
 import gm.conduit.api.ServerModuleContext;
 import gm.conduit.api.WorldEvents;
 import gm.conduit.api.MenuBehavior;
 import gm.conduit.api.PanelBehavior;
+import gm.conduit.entities.Beams;
+import gm.conduit.entities.SlotEntities;
+import gm.conduit.entities.SlotProjectile;
+import gm.conduit.entities.SlotProp;
+import gm.conduit.entities.SlotVehicle;
 import gm.conduit.pack.ServerNames;
 import gm.conduit.pack.Words;
 import gm.conduit.panels.PanelDefinition;
@@ -49,6 +58,7 @@ import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.SimpleMenuProvider;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Input;
@@ -59,6 +69,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluid;
+import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -106,6 +117,9 @@ public final class ServerModuleHost {
 	private final Map<String, MachineBehavior> machines = new HashMap<>();
 	private final Map<String, MobBehavior> mobs = new HashMap<>();
 	private final Map<String, EffectBehavior> effects = new HashMap<>();
+	private final Map<String, ProjectileBehavior> projectiles = new HashMap<>();
+	private final Map<String, VehicleBehavior> vehicles = new HashMap<>();
+	private final Map<String, PropBehavior> props = new HashMap<>();
 	private final List<ServerPlayer> joining = new ArrayList<>();
 	private Map<String, String> slotsByName = Map.of();
 	private MinecraftServer server;
@@ -137,6 +151,18 @@ public final class ServerModuleHost {
 
 	public EffectBehavior effectBehavior(String slotId) {
 		return this.effects.get(slotId);
+	}
+
+	public ProjectileBehavior projectileBehavior(String slotId) {
+		return this.projectiles.get(slotId);
+	}
+
+	public VehicleBehavior vehicleBehavior(String slotId) {
+		return this.vehicles.get(slotId);
+	}
+
+	public PropBehavior propBehavior(String slotId) {
+		return this.props.get(slotId);
 	}
 
 	public static void register() {
@@ -350,6 +376,7 @@ public final class ServerModuleHost {
 			return;
 		}
 		module.closeMenus();
+		module.removeBeams();
 		guard(module, module.module::disable);
 		this.states.save(moduleId);
 		this.ownerBySlot.entrySet().removeIf(entry -> {
@@ -359,6 +386,9 @@ public final class ServerModuleHost {
 				this.machines.remove(entry.getKey());
 				this.mobs.remove(entry.getKey());
 				this.effects.remove(entry.getKey());
+				this.projectiles.remove(entry.getKey());
+				this.vehicles.remove(entry.getKey());
+				this.props.remove(entry.getKey());
 				return true;
 			}
 			return false;
@@ -418,6 +448,7 @@ public final class ServerModuleHost {
 		private final List<WorldEvents> events = new ArrayList<>();
 		private final List<ButtonMenu> menus = new ArrayList<>();
 		private final List<PanelMenu> panels = new ArrayList<>();
+		private final List<Beam> beams = new ArrayList<>();
 		private final Map<String, List<Consumer<CompoundTag>>> subscriptions = new HashMap<>();
 		private int failures;
 
@@ -491,6 +522,21 @@ public final class ServerModuleHost {
 		}
 
 		@Override
+		public void bindProjectile(String name, ProjectileBehavior behavior) {
+			ServerModuleHost.this.projectiles.put(slot(name), behavior);
+		}
+
+		@Override
+		public void bindVehicle(String name, VehicleBehavior behavior) {
+			ServerModuleHost.this.vehicles.put(slot(name), behavior);
+		}
+
+		@Override
+		public void bindProp(String name, PropBehavior behavior) {
+			ServerModuleHost.this.props.put(slot(name), behavior);
+		}
+
+		@Override
 		public void onServerTick(Consumer<MinecraftServer> tick) {
 			this.ticks.add(tick);
 		}
@@ -527,6 +573,57 @@ public final class ServerModuleHost {
 		@Override
 		public EntityType<?> mob(String name) {
 			return BuiltInRegistries.ENTITY_TYPE.getValue(idOf(name));
+		}
+
+		@Override
+		public SlotProjectile shoot(String name, LivingEntity shooter) {
+			return shoot(name, shooter.level(), shooter.getEyePosition(), shooter.getViewVector(1.0F), shooter);
+		}
+
+		@Override
+		public SlotProjectile shoot(String name, LivingEntity shooter, Entity target) {
+			Vec3 from = shooter.getEyePosition();
+			return shoot(name, shooter.level(), from, target.getBoundingBox().getCenter().subtract(from), shooter);
+		}
+
+		@Override
+		public SlotProjectile shoot(String name, Level level, Vec3 from, Vec3 direction, Entity owner) {
+			return SlotEntities.shoot(BuiltInRegistries.ENTITY_TYPE.getValue(idOf(name)), (ServerLevel) level, from, direction, owner);
+		}
+
+		@Override
+		public SlotVehicle placeVehicle(String name, Level level, Vec3 position, float yaw) {
+			return place(name, level, position, yaw) instanceof SlotVehicle vehicle ? vehicle : null;
+		}
+
+		@Override
+		public SlotProp placeProp(String name, Level level, Vec3 position, float yaw) {
+			return place(name, level, position, yaw) instanceof SlotProp prop ? prop : null;
+		}
+
+		private Entity place(String name, Level level, Vec3 position, float yaw) {
+			Entity entity = BuiltInRegistries.ENTITY_TYPE.getValue(idOf(name)).create(level, EntitySpawnReason.TRIGGERED);
+			if (entity == null) {
+				return null;
+			}
+			entity.snapTo(position.x, position.y, position.z, yaw, 0.0F);
+			level.addFreshEntity(entity);
+			return entity;
+		}
+
+		@Override
+		public Beam beam(Level level, Vec3 from, Vec3 to, float thickness, BlockState looks, int seconds) {
+			Beam beam = Beams.create((ServerLevel) level, from, to, thickness, looks, seconds);
+			if (beam != null) {
+				this.beams.removeIf(Beam::isRemoved);
+				this.beams.add(beam);
+			}
+			return beam;
+		}
+
+		void removeBeams() {
+			this.beams.forEach(Beam::remove);
+			this.beams.clear();
 		}
 
 		@Override

@@ -1,6 +1,6 @@
 # Feature bundle format
 
-Knowledge, machine recipes, mobs, plants, ruins, biomes, dimensions and sounds are in `docs/content-types.md`.
+Knowledge, machine recipes, mobs, projectiles, vehicles, props, beams, plants, ruins, biomes, dimensions and sounds are in `docs/content-types.md`.
 
 Each feature is one folder, `mods/genesis/features/<id>/`, where `<id>` is lowercase letters, digits and underscores.
 
@@ -402,6 +402,7 @@ What each behaviour can do is in `/reference/conduit-api/`, and all of it is opt
 - `ItemBehavior.useOnEntity(stack, player, target, hand)` is this item used on a mob, if the mob itself had nothing to do with it. `ItemBehavior.mineBlock(stack, level, state, pos, miner)` is this item having just broken a block, which vanilla doesn't report for a player in creative mode.
 - `ItemBehavior.finishUsing(stack, level, user)` is a timed use running its full length. See "What an item is" in `docs/content-types.md`.
 - `mob.setTint(0xFF8800)` colours one mob's model, and `mob.makeBaby(600)` makes one half the size until it grows up that many seconds later, or for good with 0. Both last through a restart. A module can spawn one with `context.mob("name").create(...)` and call these on it as a `SlotMob`. A tint multiplies the model's colours, so paint a mob that's meant to be tinted in light greys.
+- `context.shoot("name", player)` fires a projectile, and `context.bindProjectile`, `context.bindVehicle` and `context.bindProp` give yours behaviour. `context.placeVehicle`, `context.placeProp` and `context.beam` put things in the world. See "Projectiles", "Vehicles", "Props" and "Beams" in `docs/content-types.md`. Draw a shot with a projectile rather than a line of particles, because a projectile has a hitbox and damage the gates can check.
 - `context.isNatural(level, pos)` says whether a block is as the world made it, which is how to leave anyone's building alone. Anything changed since doesn't count, whoever or whatever changed it, so grass spreading isn't natural either.
 - `context.examine(player, state)` or `context.examine(player, entity)` examines something for a player, so a tool can teach what any feature teaches for looking closely at it.
 

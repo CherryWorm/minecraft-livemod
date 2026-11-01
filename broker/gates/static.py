@@ -23,7 +23,7 @@ MIXIN_SOURCE_REFUSALS[re.compile(r"require\s*=\s*0\b")] = "lets an injection fin
 RESERVE = 0.2
 RECIPE_MODES = {"open", "known", "guessable"}
 ROUTE_TYPES = {"obtain", "examine", "kill", "read", "fragments"}
-LEDGER_TABLES = ("blocks", "items", "mobs", "dimensions", "effects", "fluids")
+LEDGER_TABLES = ("blocks", "items", "mobs", "dimensions", "effects", "fluids", *bundles.ENTITY_TABLES)
 FLUID_LOOKS = {"water", "lava"}
 MOST_FLUID_REACH = 8
 MOST_FLUID_THINS = 8
@@ -38,6 +38,10 @@ MACHINE_RECIPE_TYPES = {"gm:machine"}
 MAX_BONES_ROAMING = 16
 MAX_BONES_ONE_OFF = 48
 MAX_BONES_BLOCK = 16
+# A shot is one of many in the air, and nobody looks at it for long.
+MAX_BONES_PROJECTILE = 4
+MAX_BONES_VEHICLE = 32
+MAX_BONES_PROP = 16
 MAX_MODEL_CUBES = 3000
 # Each one open costs the server a little all the time, whether or not anyone's in it.
 MOST_DIMENSIONS = 8
@@ -48,6 +52,31 @@ MIND_VOICES = {"words", "cries", "silent"}
 MAX_CHARACTER = 800
 MAX_STASH = 8
 MOB_SOUNDS = {"idle", "hurt", "death"}
+PROJECTILE_SOUNDS = {"shoot", "hit"}
+VEHICLE_SOUNDS = {"move", "hurt", "break"}
+# In blocks a second. At 100 a shot would cross a client's whole view in a couple of seconds, and well past 60 a vehicle outruns the world loading.
+MOST_PROJECTILE_SPEED = 100
+MOST_VEHICLE_SPEED = 60
+MOST_GRAVITY = 100
+MOST_LIFETIME_SECONDS = 30
+MOST_SHOTS_PER_SECOND = 20
+MOST_PROJECTILE_SIZE = 4
+MOST_VEHICLE_SIZE = 8
+MOST_PROP_SIZE = 16
+MOST_TURN_RATE = 720
+MOST_STEP_HEIGHT = 2
+VEHICLE_MOVES = {"ground", "water", "air"}
+VEHICLE_STEERING = {"keys", "look"}
+# Every particle the game can make from its name alone. The rest need more to say what they look like, such as a colour, which a trail has no way to give.
+TRAIL_PARTICLES = set("""angry_villager bubble sulfur_bubbles noxious_gas noxious_gas_cloud cloud copper_fire_flame crit damage_indicator dripping_lava falling_lava landing_lava
+    dripping_water falling_water elder_guardian enchanted_hit enchant end_rod explosion_emitter explosion gust small_gust gust_emitter_large gust_emitter_small sonic_boom firework
+    fishing flame infested cherry_leaves pale_oak_leaves red_poplar_leaves orange_poplar_leaves yellow_poplar_leaves sculk_soul sculk_charge_pop soul_fire_flame soul happy_villager
+    composter heart pause_mob_growth reset_mob_growth item_slime item_cobweb item_snowball large_smoke lava mycelium note poof portal rain smoke white_smoke sneeze spit squid_ink
+    sweep_attack totem_of_undying underwater splash witch bubble_pop current_down bubble_column_up nautilus dolphin campfire_cosy_smoke campfire_signal_smoke dripping_honey
+    falling_honey landing_honey falling_nectar falling_spore_blossom ash crimson_spore warped_spore spore_blossom_air dripping_obsidian_tear falling_obsidian_tear
+    landing_obsidian_tear reverse_portal white_ash small_flame snowflake dripping_dripstone_lava falling_dripstone_lava dripping_dripstone_water falling_dripstone_water
+    glow_squid_ink glow wax_on wax_off electric_spark scrape egg_crack dust_plume trial_spawner_detection trial_spawner_detection_ominous vault_connection ominous_spawning
+    raid_omen trial_omen firefly sulfur_cube_goo""".split())
 INVENTORY_KINDS = {"inputs", "fuel", "outputs"}
 MACHINE_FAMILIES = {"machine", "facing_machine", "model"}
 TURNING_FAMILIES = {"facing", "facing_machine", "model"}
@@ -154,6 +183,11 @@ def check_slot_budget(ledger, pool):
         count = sum(1 for entry in ledger.get("mobs", {}).values() if entry["category"] == category)
         if count > int(available * (1 - RESERVE)):
             _fail(f"{count} {category} mobs would be in use, over the limit of {int(available * (1 - RESERVE))}. "
+                  "Reuse or replace one, or raise the pool in a conduit release.")
+    for table, available in pool.get("entities", {}).items():
+        count = len(ledger.get(table, {}))
+        if count > int(available * (1 - RESERVE)):
+            _fail(f"{count} {table} would be in use, over the limit of {int(available * (1 - RESERVE))}. "
                   "Reuse or replace one, or raise the pool in a conduit release.")
 
 
@@ -854,22 +888,26 @@ def check_mobs(features):
                 _fail(f"{label} has glowing parts {sorted(missing)}, which its model doesn't have.")
 
 
+def _check_sounds(label, own, allowed, sounds, feature_id):
+    if not isinstance(own, dict) or not set(own) <= allowed:
+        _fail(f"{label} has sounds {own!r}. It's an object with any of {sorted(allowed)}, like {{\"hurt\": \"$sound:yelp\"}}.")
+    for kind, sound in own.items():
+        found = TOKEN.fullmatch(str(sound))
+        if found and found.group(1) == "sound":
+            if balance._key(feature_id, found.group(2)) not in sounds:
+                _fail(f"{label} has {kind} sound {sound}, which no feature lists in its sounds.")
+        elif not str(sound).startswith("minecraft:"):
+            _fail(f"{label} has {kind} sound {sound!r}. Use one of this world's as $sound:name, or vanilla's as minecraft:name.")
+
+
 def check_mob_sounds(features):
     """A sound the pack doesn't have plays nothing, and a kind of sound nothing asks for never plays, and neither says so."""
     sounds = {f"{feature_id}/{name}" for feature_id, feature in features.items() for name in feature["manifest"].get("sounds", [])}
+    kinds = {"mobs": ("Mob", MOB_SOUNDS), "projectiles": ("Projectile", PROJECTILE_SOUNDS), "vehicles": ("Vehicle", VEHICLE_SOUNDS)}
     for feature_id, feature in features.items():
-        for name, mob in feature["manifest"].get("mobs", {}).items():
-            label = f"Mob {feature_id}/{name}"
-            own = mob.get("sounds", {})
-            if not isinstance(own, dict) or not set(own) <= MOB_SOUNDS:
-                _fail(f"{label} has sounds {own!r}. It's an object with any of {sorted(MOB_SOUNDS)}, like {{\"hurt\": \"$sound:yelp\"}}.")
-            for kind, sound in own.items():
-                found = TOKEN.fullmatch(str(sound))
-                if found and found.group(1) == "sound":
-                    if balance._key(feature_id, found.group(2)) not in sounds:
-                        _fail(f"{label} has {kind} sound {sound}, which no feature lists in its sounds.")
-                elif not str(sound).startswith("minecraft:"):
-                    _fail(f"{label} has {kind} sound {sound!r}. Use one of this world's as $sound:name, or vanilla's as minecraft:name.")
+        for table, (word, allowed) in kinds.items():
+            for name, thing in feature["manifest"].get(table, {}).items():
+                _check_sounds(f"{word} {feature_id}/{name}", thing.get("sounds", {}), allowed, sounds, feature_id)
 
 
 def _model_cost(path):
@@ -893,6 +931,8 @@ def check_model_costs(features):
                  for name, mob in feature["manifest"].get("mobs", {}).items()]
         drawn += [(name, block["model"], MAX_BONES_BLOCK) for name, block in feature["manifest"].get("blocks", {}).items() if block.get("model")]
         drawn += [(target, model, MAX_BONES_ROAMING) for target, model in feature["manifest"].get("reskins", {}).items()]
+        for table, limit in (("projectiles", MAX_BONES_PROJECTILE), ("vehicles", MAX_BONES_VEHICLE), ("props", MAX_BONES_PROP)):
+            drawn += [(name, entity.get("model", name), limit) for name, entity in feature["manifest"].get(table, {}).items()]
         for name, model, limit in drawn:
             path = models / f"{model}.bbmodel"
             if not path.exists():
@@ -903,6 +943,115 @@ def check_model_costs(features):
                       "for players' computers to draw, so merge some. A boss that only a module summons is allowed more.")
             if cubes > MAX_MODEL_CUBES:
                 _fail(f"{feature_id}/{name} has {cubes} cubes, over the limit of {MAX_MODEL_CUBES}. Use a coarser grain.")
+
+
+def _within(value, low, high):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and low <= value <= high
+
+
+def _above_zero(value, high):
+    return _within(value, 0, high) and value > 0
+
+
+def _entity_problems(feature, name, thing, sizes):
+    """What every kind of entity needs, as text, so a builder gets all of it at once."""
+    problems = []
+    if not isinstance(thing.get("display"), str) or not thing["display"]:
+        problems.append("needs a \"display\" name, which is what a kill message and a tooltip call it.")
+    if not (feature["dir"] / "assets" / "models" / f"{thing.get('model', name)}.bbmodel").exists():
+        problems.append(f"needs assets/models/{thing.get('model', name)}.bbmodel.")
+    if not _above_zero(thing.get("width"), sizes) or not _above_zero(thing.get("height"), sizes):
+        problems.append(f"has width {thing.get('width')!r} and height {thing.get('height')!r}. Both are in blocks, above 0 and up to {sizes}.")
+    return problems
+
+
+def check_projectiles(features):
+    """A projectile goes everywhere it's fired, with no menu or recipe to catch a mistake on the way, and what it's able to do is all in these numbers."""
+    problems = []
+    for feature_id, feature in features.items():
+        for name, shot in feature["manifest"].get("projectiles", {}).items():
+            found = _entity_problems(feature, name, shot, MOST_PROJECTILE_SIZE)
+            if not _above_zero(shot.get("speed"), MOST_PROJECTILE_SPEED):
+                found.append(f"has speed {shot.get('speed')!r}. It's in blocks a second, above 0 and up to {MOST_PROJECTILE_SPEED}. An arrow from a full draw is 60, and a snowball 30.")
+            if not _within(shot.get("gravity", 0), 0, MOST_GRAVITY):
+                found.append(f"has gravity {shot.get('gravity')!r}. It's in blocks a second each second, from 0 for a straight line up to {MOST_GRAVITY}. An arrow is 20, and a snowball 12.")
+            if not _above_zero(shot.get("lifetime"), MOST_LIFETIME_SECONDS):
+                found.append(f"has lifetime {shot.get('lifetime')!r}. It's how many seconds it flies before it goes out by itself, above 0 and up to {MOST_LIFETIME_SECONDS}.")
+            if not _above_zero(shot.get("shots_per_second", 1), MOST_SHOTS_PER_SECOND):
+                found.append(f"has shots_per_second {shot.get('shots_per_second')!r}. It's above 0 and up to {MOST_SHOTS_PER_SECOND}.")
+            trail = str(shot.get("trail", "minecraft:smoke"))
+            if trail.removeprefix("minecraft:") not in TRAIL_PARTICLES or not trail.startswith("minecraft:"):
+                found.append(f"has trail {trail!r}. It's a vanilla particle that needs nothing more said about it, like minecraft:flame or minecraft:end_rod, not dust or block.")
+            problems += [f"Projectile {feature_id}/{name} {problem}" for problem in found]
+    if problems:
+        _fail("\n".join(problems))
+
+
+def check_vehicles(features):
+    """A rider is stuck with what a vehicle does, so one that can't move, or one a player can never get, is worth stopping here."""
+    vehicles = {f"{feature_id}/{name}" for feature_id, feature in features.items() for name in feature["manifest"].get("vehicles", {})}
+    problems, placed = [], {}
+    for feature_id, feature in features.items():
+        for name, item in feature["manifest"].get("items", {}).items():
+            if "places_vehicle" in item:
+                key = balance._key(feature_id, str(item["places_vehicle"]))
+                if key not in vehicles:
+                    problems.append(f"Item {feature_id}/{name} places the vehicle {item['places_vehicle']!r}, which no feature declares.")
+                if key in placed:
+                    problems.append(f"Items {placed[key]} and {feature_id}/{name} both place the vehicle {key}, and it breaks back into what placed it, so only one can.")
+                if "places" in item or "use" in item:
+                    problems.append(f"Item {feature_id}/{name} places a vehicle and also has places or use, and using it can only do one thing.")
+                placed[key] = f"{feature_id}/{name}"
+        for name, vehicle in feature["manifest"].get("vehicles", {}).items():
+            found = _entity_problems(feature, name, vehicle, MOST_VEHICLE_SIZE)
+            moves, speed = vehicle.get("moves"), vehicle.get("speed")
+            if moves not in VEHICLE_MOVES:
+                found.append(f"has moves {moves!r}. Use one of {sorted(VEHICLE_MOVES)}.")
+            if vehicle.get("steering", "keys") not in VEHICLE_STEERING:
+                found.append(f"has steering {vehicle.get('steering')!r}. Use keys, to turn with left and right like a boat, or look, to go where its rider looks.")
+            if not _above_zero(speed, MOST_VEHICLE_SPEED):
+                found.append(f"has speed {speed!r}. It's in blocks a second, above 0 and up to {MOST_VEHICLE_SPEED}. A boat is 8, and the fastest horse about 14.")
+            if not _within(vehicle.get("seat"), 0, MOST_VEHICLE_SIZE):
+                found.append(f"has seat {vehicle.get('seat')!r}. It's how high above its base its rider's hips are, in blocks.")
+            limits = {"reverse": MOST_VEHICLE_SPEED, "acceleration": MOST_VEHICLE_SPEED * 20, "climb": MOST_VEHICLE_SPEED, "turn": MOST_TURN_RATE, "gravity": MOST_GRAVITY,
+                      "step_height": MOST_STEP_HEIGHT, "land_speed": 1, "water_speed": 1, "health": 1000}
+            for field, limit in limits.items():
+                if field in vehicle and not _within(vehicle[field], 0, limit):
+                    found.append(f"has {field} {vehicle[field]!r}, which has to be a number from 0 to {limit}.")
+            if "acceleration" in vehicle and vehicle["acceleration"] == 0:
+                found.append("has acceleration 0, so it could never start moving.")
+            if "climb" in vehicle and moves != "air":
+                found.append("has climb, which only means something for one that flies.")
+            if "land_speed" in vehicle and moves != "water":
+                found.append("has land_speed, which only means something for a water vehicle.")
+            if "water_speed" in vehicle and moves != "ground":
+                found.append("has water_speed, which only means something for a ground vehicle.")
+            problems += [f"Vehicle {feature_id}/{name} {problem}" for problem in found]
+    if problems:
+        _fail("\n".join(problems))
+
+
+def check_entity_names(features):
+    """A module asks for all of these by bare name, so one vehicle called the same as the item that places it would quietly lose one of them."""
+    tables = ("blocks", "items", "mobs", *bundles.ENTITY_TABLES)
+    for feature_id, feature in features.items():
+        for table in bundles.ENTITY_TABLES:
+            for name in feature["manifest"].get(table, {}):
+                other = next((other for other in tables if other != table and name in feature["manifest"].get(other, {})), None)
+                if other:
+                    _fail(f"{feature_id} has {name} in both {table} and {other}. These all share one set of names, so call one something else.")
+
+
+def check_props(features):
+    problems = []
+    for feature_id, feature in features.items():
+        for name, prop in feature["manifest"].get("props", {}).items():
+            found = _entity_problems(feature, name, prop, MOST_PROP_SIZE)
+            if "clickable" in prop and not isinstance(prop["clickable"], bool):
+                found.append(f"has clickable {prop['clickable']!r}, which is true or false.")
+            problems += [f"Prop {feature_id}/{name} {problem}" for problem in found]
+    if problems:
+        _fail("\n".join(problems))
 
 
 def check_minds(features):
@@ -1037,6 +1186,10 @@ def run(features, old_ledger, new_ledger, pool, content):
     check_fluids(features)
     check_effects(features)
     check_mobs(features)
+    check_entity_names(features)
+    check_projectiles(features)
+    check_vehicles(features)
+    check_props(features)
     check_mob_sounds(features)
     check_model_costs(features)
     check_minds(features)

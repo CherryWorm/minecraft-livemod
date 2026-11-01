@@ -31,7 +31,7 @@ POOL = {"families": {"stone": {"first": 1000, "count": 150}, "ore": {"first": 12
                      "plant": {"first": 2100, "count": 5}, "glow_plant": {"first": 2110, "count": 2}, "tinted_plant": {"first": 2150, "count": 12},
                      "model": {"first": 2300, "count": 200}, "glow_ore": {"first": 2500, "count": 20}, "crop": {"first": 2200, "count": 7},
                      "connected": {"first": 2600, "count": 2}, "ladder": {"first": 2700, "count": 10}, "facing": {"first": 3000, "count": 40}, "facing_machine": {"first": 3100, "count": 40}},
-        "item_count": 1200, "effect_count": 100, "fluid_count": 16, "mobs": {"monster": 240, "creature": 480}}
+        "item_count": 1200, "effect_count": 100, "fluid_count": 16, "mobs": {"monster": 240, "creature": 480}, "entities": {"projectiles": 240, "vehicles": 120, "props": 480}}
 DATA_FORMAT = 88
 TIERS = balance.TIERS
 VANILLA_TIERS = tuple(balance.TOOLS)

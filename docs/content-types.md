@@ -717,10 +717,141 @@ That's `raw/data/gm/jukebox_song/ember_song.json`, with `"sounds": ["ember_song"
 
 **Paintings and the rest.** `raw/data/gm/painting_variant/view.json` is `{"asset_id": "$texture:view", "width": 2, "height": 1, "title": {"text": "The View"}}`, with `raw/assets/gm/textures/painting/view.png`. Add it to `data/minecraft/tags/painting_variant/placeable.json` to have paintings pick it by themselves. A `banner_pattern` needs a picture in both `textures/entity/banner` and `textures/entity/shield`. A `damage_type` is for a module to hurt things with. Mob variants, like `cow_variant`, take their art from `textures/entity/cow/` and friends, and name it as `gm:entity/cow/$name:my_cow`. Give one `"spawn_conditions": []` for something only a module or a command makes, because otherwise it can turn up among vanilla's cows, and vanilla stays vanilla.
 
+## Projectiles
+
+A shot with a model of its own, instead of particles pretending to be one. Nothing can pick one up, and whatever block it lands on stays exactly as it was: no broken pots or chorus flowers, no lit TNT, no fire.
+
+```json
+"projectiles": {
+  "ember_bolt": {
+    "display": "Ember Bolt",
+    "model": "ember_bolt",
+    "tier": "iron",
+    "damage": 5,
+    "speed": 30, "gravity": 12, "lifetime": 5,
+    "width": 0.4, "height": 0.4,
+    "trail": "minecraft:flame",
+    "shots_per_second": 2,
+    "sounds": {"shoot": "$sound:bolt_fire", "hit": "minecraft:entity.arrow.hit"}
+  }
+}
+```
+
+- `model` is `assets/models/<model>.bbmodel`, with the front at -Z as for a mob, which points the way it's flying. It can have at most 4 moving parts, because many of these fly at once. If it has an animation called `idle`, that plays by itself.
+- `damage` is what it does to anything it hits, and with any at all it needs a `tier`. It can do no more than that tier's hardest single hit, and no more than the strongest mob in the node's stage, because a mob can fire it too. In the early game that's 6. Use 0 for one that only has an effect in a module, and that needs no tier.
+- `shots_per_second` is how often anyone can fire this one, 1 if you leave it out. `damage` times this, up to 2, is held to that tier's damage per second. Anything hit can't be hurt again for half a second, so 2 is all that ever lands on one target.
+- `speed` is in blocks a second, up to 100. A snowball is 30 and an arrow at full draw 60. `gravity` is how much that changes each second, 12 for a snowball, 20 for an arrow, and 0 or left out for a straight line. It doesn't slow down in air, and in water it soon does.
+- `lifetime` is how many seconds it can fly, up to 30. They aren't saved, so a restart takes any that are in the air.
+- `width` and `height` are its hitbox in blocks, up to 4, for what it hits.
+- `trail` is a vanilla particle, one each tick. It can be seen from far away. It has to be one the game can make from its name alone, like `minecraft:flame`, `minecraft:end_rod` or `minecraft:smoke`, not `dust`.
+- `sounds` is optional, with `shoot` and `hit`, each one of this world's or vanilla's, as for a mob.
+
+Firing one and hearing what it hit are both for a module:
+
+```java
+context.bindItem("ember_wand", new ItemBehavior() {
+    @Override
+    public InteractionResult use(Level level, Player player, InteractionHand hand) {
+        // Null means it's too soon for its shots_per_second, or more than 300 are in the air.
+        return context.shoot("ember_bolt", player) == null ? InteractionResult.PASS : InteractionResult.SUCCESS;
+    }
+});
+context.bindProjectile("ember_bolt", new ProjectileBehavior() {
+    @Override
+    public void hitEntity(SlotProjectile bolt, Entity target, boolean hurt) {
+        if (hurt) {
+            target.igniteForSeconds(3);
+        }
+    }
+});
+```
+
+`context.shoot("name", shooter)` goes the way they're looking, and `context.shoot("name", mob, target)` straight at a target, which is what a mob's fight move wants. `context.shoot("name", level, from, direction, owner)` is from anywhere, with an owner to take the credit, or null. A behaviour also has `tick(bolt)`, `hitBlock(bolt, hit)` and `expired(bolt)`, and the projectile is gone after any of the last three. `bolt.weaken(0.5F)` halves one shot's damage, say for a bow only half drawn, and nothing makes it stronger.
+
+## Vehicles
+
+Something a player rides and steers, with its own model and its own speed, on land, on water or in the air. To make a boat better than vanilla's, this is what you want, because a vanilla boat can't go any faster. A rider's own game moves it, with its speed written into the code, and nothing here can change that.
+
+```json
+"vehicles": {
+  "reed_skiff": {
+    "display": "Reed Skiff",
+    "model": "reed_skiff",
+    "tier": "iron",
+    "moves": "water",
+    "steering": "keys",
+    "speed": 14, "acceleration": 10, "turn": 90,
+    "seat": 0.5, "width": 1.6, "height": 0.6,
+    "health": 8, "land_speed": 0.1,
+    "sounds": {"move": "$sound:skiff_lap", "hurt": "minecraft:block.wood.hit", "break": "minecraft:block.wood.break"}
+  }
+},
+"items": {
+  "reed_skiff_kit": {"display": "Reed Skiff", "texture": "reed_skiff_kit", "places_vehicle": "reed_skiff"}
+}
+```
+
+- `tier` is required, and `speed` answers to it: at most 8.8 blocks a second for wood, 12.1 for stone, 15.9 for iron, 24.2 for diamond, 36.3 for netherite, 49.5 for beyond, and 60 for mythic, because the world has to keep loading ahead of it. A vanilla boat does 8, and the fastest horse about 14. It's held to the stage the same way as everything else, so an upgraded boat in the early game can go up to twice as fast as a plain one and no more.
+- `moves` is `ground`, `water` or `air`.
+  - `ground` falls, drives over a step as high as `step_height` (1 unless you say) and in water sinks and slows to `water_speed` of its speed, a quarter unless you say.
+  - `water` floats on any water with a bit over a third of its `height` under, and on land slows to `land_speed` of its speed, a tenth unless you say. Set that to 1 for one that goes on both.
+  - `air` stays where it is unless told otherwise: jump goes up and sprint goes down, at `climb` blocks a second, half its speed unless you say. With nobody in it, it sinks gently to the ground.
+- `steering` is `keys`, where left and right turn it and turn the rider's view with it, like a boat, or `look`, where it turns toward wherever its rider's looking. Forward and back are the same in both. `turn` is how fast it turns, in degrees a second, 120 unless you say. `reverse` is how fast it backs up, a third of its speed unless you say. `acceleration` is in blocks a second each second, and unless you say it gets up to speed in a second.
+- `seat` is how high above its base its rider's hips are. One rider only, on the model's middle, because that's the only place a client can be told to put one, so build the model around the seat. Sneaking gets off, as usual. After a turn with `keys`, a rider's body can sit at an angle to the vehicle, because their own game decides that part.
+- `width` and `height` are its hitbox, up to 8. Players use it and hit it there, and for its rider it's out of the way. Put `gravity` in if it should fall at something other than the normal 32.
+- `health` is how much hitting it takes, 8 unless you say, and fists do 1. Its rider can't hurt it, and it can't do damage itself.
+- The model can have animations called `idle`, `walk` for when it's moving, and `hurt`. It can have up to 32 moving parts.
+- `sounds` is optional, with `move` every second that it's going, `hurt` and `break`.
+
+An item with `places_vehicle` is all it takes to get one in the world, with no code. It goes wherever the player's looking, on water or land, and uses one up. Breaking the vehicle gives that item back, and nothing but that item, so only one item can place each vehicle. A module can place one too with `context.placeVehicle("name", level, position, yaw)`.
+
+A rider's keys take one trip to the server and back before they show, because the server's doing the moving. On a good connection that's a few hundredths of a second, but it can't be better than the connection is, and a real boat in the rider's own game has no such delay. That's the price of a vehicle having any speed you like, so don't design around a racing line. A moment of `acceleration` feels better than instant top speed, because it hides that delay.
+
+For anything more, like fuel, bind code to it: `context.bindVehicle("reed_skiff", new VehicleBehavior() { ... })`, with `tick(vehicle)`, `interact(vehicle, player, hand)`, `boarded(vehicle, rider)`, `left(vehicle, rider)` and `hurt(vehicle, source)`. `interact` runs before anyone gets in, so anything but `PASS` stops them, and it runs once for each hand. `vehicle.rider()` is who's in it. `vehicle.limitSpeed(0.5F)` holds it to a share of its speed, 0 for out of fuel, and nothing makes it faster than its definition.
+
+## Props
+
+A model a module puts in the world, with no block under it, anywhere and at any angle, facing any way. Use it for scenery that moves, a marker, a floating thing to look at. It stays through a restart, and it can't be hurt.
+
+```json
+"props": {
+  "watching_idol": {"display": "Watching Idol", "model": "watching_idol", "width": 1, "height": 2, "clickable": true}
+}
+```
+
+- `model` can have up to 16 moving parts. An `idle` animation plays by itself. If it stands in one spot and takes up one block, use a `model` block instead, which is cheaper and can be broken.
+- `width` and `height` are in blocks, up to 16.
+- `clickable` gives it a hitbox for players to use, which goes to `interact`. Leave it out, and it's something players can see through and walk through, which also costs less.
+
+```java
+SlotProp idol = context.placeProp("watching_idol", level, position, yaw);
+idol.play("wake");                      // one of its animations, once
+idol.place(newPosition, yaw, pitch);    // moves it, smoothly over a couple of ticks
+idol.setScale(1.5F);
+idol.setTint(0xFF8800);                 // these two last until a restart
+idol.discard();                         // takes it away
+```
+
+`context.bindProp("watching_idol", new PropBehavior() { ... })` has `tick(prop)` and `interact(prop, player, hand)`.
+
+## Beams
+
+A straight line of light between two spots, for long-range signals and for showing something's connected: a shaft of light over a place, a laser, a long streak behind a shot. There's nothing to declare. It's a stretched block of any kind, always at full brightness, so its look is whatever that block looks like, and that includes your own. It can run through anything.
+
+```java
+Beam shaft = context.beam(level, base, base.add(0, 200, 0), 0.4F, Blocks.SEA_LANTERN.defaultBlockState(), 60);
+shaft.moveTo(from, to);
+shaft.remove();
+```
+
+The number at the end is how many seconds it lasts, or 0 or less for until it's removed. It returns null when too many are in the world already, and a long beam is one piece per 16 blocks, with 2048 pieces allowed at once. `moveTo` sends the whole line again, so call it now and then, not every tick. It lasts as long as its module, so it goes at a restart, and you draw it again in `enable`.
+
+It can be seen from anywhere in a player's render distance, and that's a real limit: a player's game won't draw anything in a chunk it hasn't loaded. A beam can only reach further than that if a client module draws it.
+
 ## Using your content from a module
 
-`context.block("name")`, `context.item("name")`, `context.mob("name")` and `context.sound("name")` give you the real objects for names in `feature.json`, or `"other_feature/name"` for another feature's.
+`context.block("name")`, `context.item("name")`, `context.mob("name")` and `context.sound("name")` give you the real objects for names in `feature.json`, or `"other_feature/name"` for another feature's. In text, use `$projectile:name`, `$vehicle:name` and `$prop:name` the same way as `$mob:name`.
 
 ## What the engine doesn't do yet
 
-Structures larger than a chunk. A fluid can only flow and swim as water or lava does on a player's computer, though a still pool can have a picture of its own. A panel can only draw vanilla's mobs moving, so one of this world's is a picture there. A screen effect covers the whole screen, so there's no drawing a shader on one thing in the world. Armor trims and new villager trades can't be added yet. Build the closest thing that works, and say what you wanted in `host_requests`.
+Structures larger than a chunk. A vehicle has one rider, on the middle of it, and can't respond to its rider's keys any faster than the connection allows. A fluid can only flow and swim as water or lava does on a player's computer, though a still pool can have a picture of its own. A panel can only draw vanilla's mobs moving, so one of this world's is a picture there. A screen effect covers the whole screen, so there's no drawing a shader on one thing in the world. Armor trims and new villager trades can't be added yet. Build the closest thing that works, and say what you wanted in `host_requests`.

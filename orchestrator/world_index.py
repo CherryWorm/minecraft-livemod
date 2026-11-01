@@ -83,6 +83,14 @@ def _describe_feature(feature_id, manifest, reached):
         numbers = {key: mob[key] for key in ("health", "damage", "speed") if key in mob}
         has_mind = ", has a mind" if mob.get("mind") else ""
         lines.append(f"- $mob:{feature_id}/{name}: \"{mob.get('display')}\", {mob.get('behaviour')}, {json.dumps(numbers)}{has_mind}{mark(mob.get('display'))}")
+    for name, shot in manifest.get("projectiles", {}).items():
+        numbers = {key: shot[key] for key in ("tier", "damage", "speed", "shots_per_second") if key in shot}
+        lines.append(f"- $projectile:{feature_id}/{name}: \"{shot.get('display')}\", {json.dumps(numbers)}")
+    for name, vehicle in manifest.get("vehicles", {}).items():
+        numbers = {key: vehicle[key] for key in ("tier", "moves", "speed") if key in vehicle}
+        lines.append(f"- $vehicle:{feature_id}/{name}: \"{vehicle.get('display')}\", {json.dumps(numbers)}{mark(vehicle.get('display'))}")
+    for name, prop in manifest.get("props", {}).items():
+        lines.append(f"- $prop:{feature_id}/{name}: \"{prop.get('display')}\"")
     for ore in manifest.get("ores", []):
         lines.append(f"- ore {ore.get('id')}: {ore.get('block')}, {ore.get('veinsPerChunk')} veins of {ore.get('veinSize')}, Y {ore.get('minY')} to {ore.get('maxY')}")
     for plant in manifest.get("plants", []):
@@ -161,6 +169,10 @@ def _guide_feature(manifest, say, not_out):
         listed = listed if isinstance(listed, list) else [listed]
         drops = f", drops {', '.join(say(drop.get('item')) for drop in listed)}" if listed else ""
         lines.append(f"- {mob.get('display', name)}: {mob.get('behaviour')} creature, {places(mob.get('spawn') or {})}{drops}")
+    for name, vehicle in manifest.get("vehicles", {}).items():
+        kit = next((item.get("display", key) for key, item in manifest.get("items", {}).items() if item.get("places_vehicle") == name), None)
+        placed = f", placed with {kit}" if kit else ""
+        lines.append(f"- {vehicle.get('display', name)}: a vehicle for {vehicle.get('moves')}, {vehicle.get('speed')} blocks a second{placed}")
     for plant in manifest.get("plants", []):
         lines.append(f"- {block_name(plant.get('block'))}: grows {places(plant)}")
     for name, ruin in manifest.get("ruins", {}).items():
@@ -192,7 +204,7 @@ def _readable(features_dir):
     manifests = {path.parent.name: json.loads(path.read_text(encoding="utf-8")) for path in sorted(features_dir.glob("*/feature.json"))}
     others.apply_additions(manifests)
     names = {(feature_id, name): thing["display"] for feature_id, manifest in manifests.items()
-             for table in ("blocks", "items", "mobs", "dimensions") for name, thing in manifest.get(table, {}).items() if thing.get("display")}
+             for table in ("blocks", "items", "mobs", "dimensions", "projectiles", "vehicles", "props") for name, thing in manifest.get(table, {}).items() if thing.get("display")}
 
     def saying(feature_id):
         def say(value):
@@ -206,7 +218,7 @@ def _readable(features_dir):
 
 
 def _shown_names(manifest):
-    shown = [thing["display"] for table in ("blocks", "items", "mobs", "dimensions") for thing in manifest.get(table, {}).values() if thing.get("display")]
+    shown = [thing["display"] for table in ("blocks", "items", "mobs", "dimensions", "projectiles", "vehicles", "props") for thing in manifest.get(table, {}).values() if thing.get("display")]
     return shown + [name.replace("_", " ") for table in ("biomes", "ruins") for name in manifest.get(table, {})]
 
 
@@ -242,7 +254,7 @@ def reached_nodes(features_dir, reached):
     nodes = set()
     for path in features_dir.glob("*/feature.json"):
         manifest = json.loads(path.read_text(encoding="utf-8"))
-        displays = {thing.get("display") for table in ("blocks", "items", "mobs") for thing in manifest.get(table, {}).values()}
+        displays = {thing.get("display") for table in ("blocks", "items", "mobs", "projectiles", "vehicles", "props") for thing in manifest.get(table, {}).values()}
         if manifest.get("node") and displays & reached:
             nodes.add(manifest["node"])
     return nodes

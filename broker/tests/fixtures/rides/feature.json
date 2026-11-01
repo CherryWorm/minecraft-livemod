@@ -1,0 +1,26 @@
+{
+  "id": "rides",
+  "node": "first_steps",
+  "summary": "Test fixture for what's alive and isn't a mob: a projectile, vehicles for land, water and air, a prop, and beams.",
+  "items": {
+    "wand": {"display": "Bolt Wand", "texture": "wand", "from_module": true, "retired": true},
+    "show_wand": {"display": "Show Wand", "texture": "wand", "from_module": true, "retired": true},
+    "crowd_wand": {"display": "Crowd Wand", "texture": "wand", "from_module": true, "retired": true},
+    "skiff_kit": {"display": "Skiff", "texture": "kit", "places_vehicle": "skiff", "from_module": true, "retired": true},
+    "rover_kit": {"display": "Rover", "texture": "kit", "places_vehicle": "rover", "from_module": true, "retired": true}
+  },
+  "projectiles": {
+    "bolt": {"display": "Bolt", "model": "bolt", "tier": "iron", "damage": 5, "speed": 12, "gravity": 1, "lifetime": 8, "width": 0.4, "height": 0.4,
+             "trail": "minecraft:end_rod", "shots_per_second": 2, "sounds": {"shoot": "minecraft:entity.arrow.shoot", "hit": "minecraft:entity.arrow.hit"}},
+    "swarm": {"display": "Swarm Bolt", "model": "bolt", "damage": 0, "speed": 12, "lifetime": 8, "width": 0.4, "height": 0.4, "trail": "minecraft:smoke", "shots_per_second": 20}
+  },
+  "vehicles": {
+    "skiff": {"display": "Skiff", "model": "skiff", "tier": "iron", "moves": "water", "speed": 14, "seat": 0.5, "width": 1.6, "height": 0.6, "turn": 90,
+              "land_speed": 0.1, "sounds": {"hurt": "minecraft:block.wood.hit", "break": "minecraft:block.wood.break"}},
+    "rover": {"display": "Rover", "model": "rover", "tier": "iron", "moves": "ground", "steering": "look", "speed": 12, "seat": 0.8, "width": 1.4, "height": 1.2, "health": 6},
+    "glider": {"display": "Glider", "model": "glider", "tier": "iron", "moves": "air", "steering": "look", "speed": 15, "climb": 6, "seat": 0.5, "width": 1.8, "height": 0.8}
+  },
+  "props": {
+    "totem": {"display": "Totem", "model": "totem", "width": 1, "height": 2, "clickable": true}
+  }
+}

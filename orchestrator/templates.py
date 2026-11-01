@@ -19,7 +19,7 @@ TOKEN = re.compile(r"\$(block|item):([a-z0-9_]+)(?:/([a-z0-9_]+))?")
 VANILLA = re.compile(r"#?minecraft:[a-z0-9_./-]+")
 PLAIN_ID = re.compile(r"[a-z0-9_.-]+:[a-z0-9_./-]+")
 OWN_BIOME = re.compile(r"\$biome:[a-z0-9_]+(/[a-z0-9_]+)?")
-THINGS = ("blocks", "items", "mobs")
+THINGS = ("blocks", "items", "mobs", "projectiles", "vehicles", "props")
 
 # These are a copy of the numbers in broker/gates/balance.py, because broker/ isn't in the agent's container.
 # test_templates compares the two, so they can't drift apart quietly.

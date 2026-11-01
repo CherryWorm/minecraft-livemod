@@ -114,6 +114,9 @@ def _check_tiers(features, doc, recipes):
     for recipe in recipes:
         check(f"Recipe {recipe['source']}", recipe["tier"], features[recipe["source"].split("/")[0]]["manifest"].get("node"))
     for feature_id, feature in features.items():
+        for word, table in (("Projectile", "projectiles"), ("Vehicle", "vehicles")):
+            for name, thing in feature["manifest"].get(table, {}).items():
+                check(f"{word} {feature_id}/{name}", thing.get("tier"), feature["manifest"].get("node"))
         for name, enchantment in feature["manifest"].get("enchantments", {}).items():
             check(f"Enchantment {feature_id}/{name}", enchantment.get("tier"), feature["manifest"].get("node"))
     return problems
@@ -145,6 +148,11 @@ def _check_mobs(features, doc):
                 stage = doc["nodes"][node]["stage"]
                 problems.append(f"Mob {feature_id}/{name} has {mob.get('health', 0)} health and {mob.get('damage', 0)} damage, over the "
                                 f"{stage} game's limit of {limit[0]} and {limit[1]}. Weaken it, or move it to a later node.")
+        # A mob can fire any of these, and it would be no fair to let a shot do what the mob itself isn't allowed to.
+        for name, shot in feature["manifest"].get("projectiles", {}).items():
+            if limit and isinstance(shot.get("damage"), (int, float)) and shot["damage"] > limit[1]:
+                stage = doc["nodes"][node]["stage"]
+                problems.append(f"Projectile {feature_id}/{name} has {shot['damage']} damage, over the {stage} game's limit of {limit[1]}, because a mob could fire it. Weaken it, or move it to a later node.")
     return problems
 
 
@@ -208,6 +216,7 @@ def _mythic_without_a_place(features, recipes):
     """Unlimited power is only fair at the end of a progression, so it can't exist in a world without one."""
     tiers = [thing.get("tier") for thing in balance._things(features).values()] + [recipe["tier"] for recipe in recipes]
     tiers += [enchantment.get("tier") for feature in features.values() for enchantment in feature["manifest"].get("enchantments", {}).values()]
+    tiers += [thing.get("tier") for feature in features.values() for table in ("projectiles", "vehicles") for thing in feature["manifest"].get(table, {}).values()]
     return ["Tier mythic needs an endgame node, but this world has no bible/progression.json."] if balance.UNLIMITED in tiers else []
 
 
@@ -279,7 +288,7 @@ def reached_slots(knowledge_file):
 
 def _check_reached(features, ledger, old_prints, reached, new_prints):
     """Things players already have stay as they are, unless there's a reason that a reviewer can then weigh up."""
-    names = {f"gm:{entry['slot']}": key for table in ("blocks", "items", "mobs") for key, entry in ledger.get(table, {}).items()}
+    names = {f"gm:{entry['slot']}": key for table in ("blocks", "items", "mobs", "projectiles", "vehicles", "props") for key, entry in ledger.get(table, {}).items()}
     problems = []
     for slot in sorted(reached):
         key = names.get(slot)

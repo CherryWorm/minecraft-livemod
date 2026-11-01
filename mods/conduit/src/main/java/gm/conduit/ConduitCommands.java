@@ -4,6 +4,8 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import gm.conduit.bridge.SafeMoment;
+import gm.conduit.entities.SlotProp;
+import gm.conduit.entities.SlotVehicle;
 import gm.conduit.mobs.SlotMob;
 import gm.conduit.modules.ServerModuleHost;
 import gm.conduit.panels.PanelMenu;
@@ -42,7 +44,10 @@ final class ConduitCommands {
 						.then(Commands.argument("fraction", FloatArgumentType.floatArg(0, 1)).executes(context -> {
 							int posed = 0;
 							for (Entity entity : EntityArgument.getEntities(context, "mobs")) {
-								if (entity instanceof SlotMob mob && mob.pose(StringArgumentType.getString(context, "animation"), FloatArgumentType.getFloat(context, "fraction"))) {
+								String animation = StringArgumentType.getString(context, "animation");
+								float fraction = FloatArgumentType.getFloat(context, "fraction");
+								if ((entity instanceof SlotMob mob && mob.pose(animation, fraction)) || (entity instanceof SlotVehicle vehicle && vehicle.pose(animation, fraction))
+										|| (entity instanceof SlotProp prop && prop.pose(animation, fraction))) {
 									posed++;
 								}
 							}

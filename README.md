@@ -81,6 +81,7 @@ Inside the distro:
 | `python3 -m broker.tests.m7_test` | Signed modules run on a real client, and unsigned or unsafe ones are refused |
 | `python3 -m broker.tests.m8_test` | A real client learns recipes, uses a machine, reads the codex and sees mobs |
 | `python3 -m broker.tests.m22_test` | The Codex in Patchouli on a real client: only what a player knows, opened by command, key and link, with new pages arriving live |
+| `python3 -m broker.tests.m28_test` | Projectiles, vehicles, props and beams on a real client, through a release: damage, speed, riding, and what a crowd of them costs. `--before` on an older engine first also checks that a world from before them survives getting them |
 | `python3 -m broker.tests.m10_test` | Templated content goes live with its real numbers, the progression refuses what doesn't fit, what players have is protected, and `tune` and the server icon work |
 | `python3 -m broker.tests.m11_test` | Sculpted creatures and a model block on a real client, then 150 more models at once |
 | `python3 -m broker.tests.m12_test` | Mobs with minds, on a real client with the real fast model: they answer, remember, gossip and keep to their limits. Uses a little of your plan |

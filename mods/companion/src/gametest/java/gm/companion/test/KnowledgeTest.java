@@ -10,7 +10,10 @@ import net.fabricmc.fabric.api.client.gametest.v1.TestInput;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.minecraft.client.CameraType;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.Options;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
@@ -30,6 +33,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.util.context.ContextMap;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.EnchantmentMenu;
 import net.minecraft.world.inventory.Slot;
@@ -52,7 +56,10 @@ import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.function.Function;
 
 /**
  * Plays the discovery system the way a player would. broker/tests/m8_test.py sends instructions as chat
@@ -129,6 +136,30 @@ public final class KnowledgeTest implements FabricClientGameTest {
 					brightness == null ? -1 : brightness.block(), tint == null ? -1 : tint.rgb() & 0xFFFFFF));
 		}
 		return parts.append("]").toString();
+	}
+
+	private static String riding(Minecraft client) {
+		Entity vehicle = client.player.getVehicle();
+		return "%.3f %.3f %.3f yaw %.2f riding %s".formatted(client.player.getX(), client.player.getY(), client.player.getZ(), client.player.getYRot(),
+				vehicle == null ? "nothing" : vehicle.getType().toShortString() + " of " + client.player.getRootVehicle().getType().toShortString());
+	}
+
+	/** Holds a key down and says where the player was every tick, which shows how smooth a ride really is on the client. */
+	private void drive(ClientGameTestContext context, String key, int ticks) {
+		Function<Options, KeyMapping> mapping = switch (key) {
+			case "forward" -> options -> options.keyUp;
+			case "back" -> options -> options.keyDown;
+			case "left" -> options -> options.keyLeft;
+			case "right" -> options -> options.keyRight;
+			case "jump" -> options -> options.keyJump;
+			default -> options -> options.keySprint;
+		};
+		context.getInput().holdKey(mapping);
+		for (int i = 0; i < ticks; i++) {
+			context.waitTick();
+			LOGGER.info("[M8] rode: {}", context.computeOnClient(KnowledgeTest::riding));
+		}
+		context.getInput().releaseKey(mapping);
 	}
 
 	private void act(ClientGameTestContext context, String request) {
@@ -256,6 +287,29 @@ public final class KnowledgeTest implements FabricClientGameTest {
 			case "chat" -> context.runOnClient(client -> client.gui.setScreen(new ChatScreen("", false)));
 			case "press" -> context.getInput().pressKey(Integer.parseInt(words[1]));
 			case "shiftdrag" -> shiftDrag(context, words);
+			case "drive" -> drive(context, words[1], Integer.parseInt(words[2]));
+			case "camera" -> context.runOnClient(client -> client.options.setCameraType(words[1].equals("third") ? CameraType.THIRD_PERSON_BACK : CameraType.FIRST_PERSON));
+			case "riding" -> LOGGER.info("[M8] riding: {}", context.computeOnClient(KnowledgeTest::riding));
+			case "shotnow" -> context.takeScreenshot("m8_" + words[1]);
+			case "hud" -> context.runOnClient(client -> {
+				if (client.gui.hud.isHidden() != words[1].equals("off")) {
+					client.gui.hud.toggle();
+				}
+			});
+			case "look" -> context.getInput().lookAt(Float.parseFloat(words[1]), Float.parseFloat(words[2]));
+			case "hit" -> {
+				for (int i = 0; i < Integer.parseInt(words[1]); i++) {
+					context.getInput().pressKey(options -> options.keyAttack);
+					context.waitTicks(12);
+				}
+			}
+			case "entities" -> {
+				Map<String, Integer> counts = new TreeMap<>();
+				context.runOnClient(client -> client.level.entitiesForRendering().forEach(entity -> counts.merge(entity.getType().toShortString(), 1, Integer::sum)));
+				LOGGER.info("[M8] entities: {}", counts);
+				int chunks = context.computeOnClient(client -> client.options.getEffectiveRenderDistance());
+				LOGGER.info("[M8] render distance: {}", chunks);
+			}
 			case "sneak" -> context.getInput().holdShift();
 			case "unsneak" -> context.getInput().releaseShift();
 			case "hold" -> context.getInput().holdKeyFor(options -> options.keyUse, Integer.parseInt(words[1]));

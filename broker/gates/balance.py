@@ -50,6 +50,12 @@ ARMOR = {
     "netherite": (37, (3, 8, 6, 3, 19), 3, 0.1),
 }
 ARMOR_DURABILITY = (11, 16, 15, 13, 16)
+# A shot lands at most this often on one target, because of the half second a mob or player can't be hurt again after a hit. So firing
+# faster than this only spreads the damage around.
+MOST_HITS_PER_SECOND = 2
+# How fast a vehicle can go, in blocks a second, from what vanilla has at each stage. Wood is a boat (0.04 a tick with 0.9 friction, from
+# AbstractBoat), iron the fastest horse, and netherite an elytra in level flight. Stone and diamond are about halfway between.
+VEHICLE_SPEEDS = {"wood": 8.0, "stone": 11.0, "iron": 14.5, "diamond": 22.0, "netherite": 33.0}
 # Tier: hardness and blast resistance of the matching block (planks, stone, then the metal blocks).
 BLOCKS = {"wood": (2.0, 3.0), "stone": (1.5, 6.0), "iron": (5.0, 6.0), "diamond": (5.0, 6.0), "netherite": (50.0, 1200.0)}
 
@@ -450,6 +456,49 @@ def check_repairs(features):
     return problems
 
 
+def check_projectiles(features):
+    """A shot from an item is as much a weapon as a sword, so it answers to the same curve: its damage to the hardest single hit,
+    and how fast that damage lands to a sword's damage per second. A mob's own shot has to be fair too, which progression checks."""
+    problems = []
+    for feature_id, feature in features.items():
+        for name, shot in feature["manifest"].get("projectiles", {}).items():
+            label, tier, damage = f"Projectile {feature_id}/{name}", shot.get("tier"), shot.get("damage")
+            if not _is_number(damage) or math.isnan(damage) or damage < 0:
+                problems.append(f"{label} needs a number for damage, which is how much it does to whatever it hits. 0 is fine for one that only has its effect in a module.")
+                continue
+            if tier is None and damage > 0:
+                problems.append(f"{label} does damage but has no tier. Add \"tier\": one of {', '.join(TIERS)}.")
+            elif tier is not None and tier not in TIERS:
+                problems.append(f"{label} declares tier {tier!r}, but a tier must be one of {', '.join(TIERS)}.")
+            elif tier is not None and tier != UNLIMITED and damage > 0:
+                limits = _limits(tier, None, False)
+                rate = min(shot.get("shots_per_second", 1), MOST_HITS_PER_SECOND) if _is_number(shot.get("shots_per_second", 1)) else math.inf
+                if not damage <= limits["attack_damage"] + 1e-9:
+                    problems.append(f"{label} (tier {tier}) has damage {damage:g}, over its limit of {limits['attack_damage']:g}. Lower it, or use a higher tier if it's meant to be late-game.")
+                if not damage * rate <= limits["damage_per_second"] + 1e-9:
+                    problems.append(f"{label} (tier {tier}) does {damage * rate:g} damage a second, over its limit of {limits['damage_per_second']:g}. That's damage times "
+                                    f"shots_per_second, up to the {MOST_HITS_PER_SECOND} hits a second one target can take. Lower one, or use a higher tier.")
+    return problems
+
+
+def check_vehicles(features):
+    """Getting around faster is a real power, and one vanilla makes players earn, so a vehicle's speed has a curve of its own."""
+    problems = []
+    for feature_id, feature in features.items():
+        for name, vehicle in feature["manifest"].get("vehicles", {}).items():
+            label, tier, speed = f"Vehicle {feature_id}/{name}", vehicle.get("tier"), vehicle.get("speed")
+            if tier not in TIERS:
+                problems.append(f"{label} needs a \"tier\": one of {', '.join(TIERS)}. Its speed answers to that, and it has to fit the stage it's in.")
+            elif tier != UNLIMITED and _is_number(speed):
+                base, margin = ("netherite", BEYOND_MARGIN) if tier == "beyond" else (tier, MARGIN)
+                limit = VEHICLE_SPEEDS[base] * margin
+                # Reverse is held to the same, so one can't go faster backwards.
+                fastest = max(speed, vehicle.get("reverse", 0) if _is_number(vehicle.get("reverse", 0)) else math.inf)
+                if not fastest <= limit + 1e-9:
+                    problems.append(f"{label} (tier {tier}) goes {fastest:g} blocks a second, over its limit of {limit:g}. Slow it down, or use a higher tier if it's meant to be late-game.")
+    return problems
+
+
 # Recipe graph
 
 
@@ -767,7 +816,7 @@ def run(features):
     """Reports every problem at once, so fixing a batch takes one try and not ten."""
     try:
         recipes = _read_recipes(features)
-        problems = (check_power(features, recipes) + _check_cycles(features, recipes) + _check_obtainable(features, recipes)
+        problems = (check_power(features, recipes) + check_projectiles(features) + check_vehicles(features) + _check_cycles(features, recipes) + _check_obtainable(features, recipes)
                     + check_ores(features, recipes) + _check_vanilla_drops(features) + check_repairs(features))
     except (AttributeError, KeyError, TypeError, ValueError) as error:
         # What couldn't be read hasn't been checked, so it can't pass. A crash here would also leave no answer at all.

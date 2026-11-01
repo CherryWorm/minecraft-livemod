@@ -130,7 +130,7 @@ def wanted(manifest, extra=()):
         if isinstance(text, str) and HAS_LETTERS.search(text):
             found.append((part, text, what, room))
 
-    for table, what in (("blocks", "a block"), ("items", "an item"), ("mobs", "a creature")):
+    for table, what in (("blocks", "a block"), ("items", "an item"), ("mobs", "a creature"), ("projectiles", "something fired"), ("vehicles", "a vehicle"), ("props", "an object placed in the world")):
         for thing in (manifest.get(table) or {}).values():
             add(NAMES, thing.get("display"), f"the name of {what}")
     for item in (manifest.get("items") or {}).values():
@@ -174,7 +174,7 @@ def known_names(root, features_dir, language):
     shown = {}
     for path in sorted(pathlib.Path(features_dir).glob("*/feature.json")):
         manifest = json.loads(path.read_text(encoding="utf-8"))
-        for table in ("blocks", "items", "mobs"):
+        for table in ("blocks", "items", "mobs", "projectiles", "vehicles", "props"):
             for thing in (manifest.get(table) or {}).values():
                 english = thing.get("display")
                 if english in store and keeps_codes(english, store[english]) and store[english] != english:

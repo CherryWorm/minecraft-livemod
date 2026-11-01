@@ -411,7 +411,7 @@ def _unused_files(folder, blocks, items, mobs):
 
 
 def render(feature_folder, out, references=None):
-    """Draws a feature's blocks, items and mobs beside vanilla's art to `out`. Returns {"path": str, "notes": [str]}. It
+    """Draws a feature's blocks, items, mobs and other models beside vanilla's art to `out`. Returns {"path": str, "notes": [str]}. It
     always writes an image, so a caller can read it without first checking there was anything to draw."""
     folder = pathlib.Path(feature_folder)
     notes = []
@@ -422,6 +422,8 @@ def render(feature_folder, out, references=None):
                      "colour and items stand alone.")
 
     declared_blocks, declared_items, mobs = (_entries(manifest, key) for key in ("blocks", "items", "mobs"))
+    # Whatever else is alive has a model in just the same way, so it gets drawn and counted as used in the same way.
+    mobs = {**mobs, **{name: entry for table in ("projectiles", "vehicles", "props") for name, entry in _entries(manifest, table).items()}}
     blocks = []
     for name, block in declared_blocks.items():
         label, family = _field(block, "display", name), _field(block, "family", "stone")
@@ -452,7 +454,7 @@ def render(feature_folder, out, references=None):
     modelled = {name: block for name, block in declared_blocks.items() if block.get("model")}
     mob_cells = _mob_cells({**mobs, **modelled}, folder, notes)
     if mob_cells:
-        panels += [_line("Mobs and model blocks", NAME_FONT, sheet.INK), _flow(mob_cells)]
+        panels += [_line("Mobs, model blocks and other models", NAME_FONT, sheet.INK), _flow(mob_cells)]
     title = _field(manifest, "id", folder.name)
     if panels:
         legend = (f"{title}: new art is outlined in yellow. Everything else in a wall or row of slots is vanilla, named under it "

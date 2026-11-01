@@ -10,6 +10,7 @@ import gm.conduit.knowledge.Codex;
 import gm.conduit.knowledge.Knowledge;
 import gm.conduit.knowledge.KnownRecipes;
 import gm.conduit.mobs.Minds;
+import gm.conduit.entities.SlotEntities;
 import gm.conduit.mobs.SlotMobs;
 import gm.conduit.modules.ModulePush;
 import gm.conduit.modules.ServerModuleHost;
@@ -51,6 +52,7 @@ public final class Conduit implements ModInitializer {
 		ItemDefaults.register();
 		SlotMobs.register();
 		SlotEffects.register();
+		SlotEntities.register();
 		Minds.register();
 		BlockModels.register();
 		MachineInventories.register();

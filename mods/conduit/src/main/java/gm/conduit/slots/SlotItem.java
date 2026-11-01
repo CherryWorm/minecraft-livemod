@@ -16,6 +16,9 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -73,6 +76,10 @@ public final class SlotItem extends SimplePolymerItem {
 		Fluid bucketOf = ItemDefaults.bucket(this);
 		if (bucketOf != null && !level.isClientSide()) {
 			return pour(level, player, hand, bucketOf);
+		}
+		EntityType<?> vehicle = ItemDefaults.vehicle(this);
+		if (vehicle != null && level instanceof ServerLevel serverLevel) {
+			return placeVehicle(serverLevel, player, hand, vehicle);
 		}
 		ItemBehavior behavior = ServerModuleHost.instance().itemBehavior(this.slotId);
 		if (behavior != null && !level.isClientSide()) {
@@ -133,6 +140,25 @@ public final class SlotItem extends SimplePolymerItem {
 			return super.useOn(context);
 		}
 		return ServerModuleHost.instance().guarded(this.slotId, InteractionResult.PASS, () -> behavior.useOn(context));
+	}
+
+	/** Like a boat: goes wherever the player's looking, on water or on land, facing the same way they are, and uses one up. */
+	private static InteractionResult placeVehicle(ServerLevel level, Player player, InteractionHand hand, EntityType<?> type) {
+		BlockHitResult hit = getPlayerPOVHitResult(level, player, ClipContext.Fluid.ANY);
+		if (hit.getType() != HitResult.Type.BLOCK) {
+			return InteractionResult.PASS;
+		}
+		Entity vehicle = type.create(level, EntitySpawnReason.SPAWN_ITEM_USE);
+		if (vehicle == null) {
+			return InteractionResult.FAIL;
+		}
+		vehicle.snapTo(hit.getLocation().x, hit.getLocation().y, hit.getLocation().z, player.getYRot(), 0.0F);
+		if (!level.noCollision(vehicle, vehicle.getBoundingBox())) {
+			return InteractionResult.FAIL;
+		}
+		level.addFreshEntity(vehicle);
+		player.getItemInHand(hand).consume(1, player);
+		return InteractionResult.SUCCESS;
 	}
 
 	/** A seed or anything like one: puts its block on top of what was clicked, and uses one up. */

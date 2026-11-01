@@ -10,6 +10,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.RegistryOps;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.material.Fluid;
@@ -34,6 +35,7 @@ public final class ItemDefaults {
 	private static final Map<Item, Placement> PLACEMENTS = new HashMap<>();
 	private static final Set<Item> TIMED_USE = new HashSet<>();
 	private static final Map<Item, Fluid> BUCKETS = new HashMap<>();
+	private static final Map<Item, EntityType<?>> VEHICLES = new HashMap<>();
 
 	/** @param on what it can be placed on, or empty for anything solid */
 	record Placement(Block block, Set<Block> on) {}
@@ -54,6 +56,11 @@ public final class ItemDefaults {
 		return BUCKETS.get(item);
 	}
 
+	/** The vehicle this item puts in the world, if it's one that does. */
+	static EntityType<?> vehicle(Item item) {
+		return VEHICLES.get(item);
+	}
+
 	/** Whether using this runs for a while and then goes to a module, instead of it being eaten. */
 	static boolean isTimedUse(Item item) {
 		return TIMED_USE.contains(item);
@@ -63,6 +70,7 @@ public final class ItemDefaults {
 		PLACEMENTS.clear();
 		TIMED_USE.clear();
 		BUCKETS.clear();
+		VEHICLES.clear();
 		BuiltInRegistries.ITEM.forEach(item -> {
 			if (item instanceof SlotItem slot) {
 				slot.setReleaseComponents(null);
@@ -87,6 +95,9 @@ public final class ItemDefaults {
 					}
 					if (defaults.has("bucket_of")) {
 						BUCKETS.put(item, BuiltInRegistries.FLUID.getValue(Identifier.parse(defaults.get("bucket_of").getAsString())));
+					}
+					if (defaults.has("vehicle")) {
+						VEHICLES.put(item, BuiltInRegistries.ENTITY_TYPE.getValue(Identifier.parse(defaults.get("vehicle").getAsString())));
 					}
 					if (defaults.has("places")) {
 						PLACEMENTS.put(item, readPlacement(defaults.getAsJsonObject("places")));

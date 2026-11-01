@@ -532,11 +532,12 @@ class Workshop:
             return _text(world_index.build(REPO / "mods/genesis/features", self.reached()))
 
         schema = {"type": "object", "required": ["feature", "table", "name", "field", "value", "reason"], "properties": {
-            "feature": {"type": "string"}, "table": {"type": "string", "enum": ["items", "blocks", "mobs", "recipes", "ores", "plants"]},
+            "feature": {"type": "string"}, "table": {"type": "string", "enum": ["items", "blocks", "mobs", "projectiles", "vehicles", "recipes", "ores", "plants"]},
             "name": {"type": "string"}, "field": {"type": "string"}, "value": {}, "reason": {"type": "string"}}}
 
         @tool("tune", ("Changes one number in something already released, and it reaches players in under a minute. Fields: "
                        f"items {sorted(tuning.ITEM_FIELDS)}, mobs {sorted(tuning.MOB_FIELDS)}, blocks {sorted(tuning.BLOCK_FIELDS)}, "
+                       f"projectiles {sorted(tuning.PROJECTILE_FIELDS)}, vehicles {sorted(tuning.VEHICLE_FIELDS)}, "
                        f"recipes {sorted(tuning.RECIPE_FIELDS)}, ores veinsPerChunk, plants perChunk. A drops.count is [lowest, highest]. "
                        "For ores and plants, name is the entry's id and the value can only go up."), schema)
         async def tune(args):

@@ -14,7 +14,7 @@ from broker import guide, rawpack
 from orchestrator import others
 from orchestrator import wording
 
-TOKEN = re.compile(r"\$(block|item|mob|sound|biome|dimension|effect|fluid):([a-z0-9_]+(?:/[a-z0-9_]+)?)")
+TOKEN = re.compile(r"\$(block|item|mob|sound|biome|dimension|effect|fluid|projectile|vehicle|prop):([a-z0-9_]+(?:/[a-z0-9_]+)?)")
 
 TOOL_TAGS = {"pickaxe": "pickaxe", "axe": "axe", "shovel": "shovel", "hoe": "hoe"}
 LEVEL_TAGS = {"stone": "needs_stone_tool", "iron": "needs_iron_tool", "diamond": "needs_diamond_tool"}
@@ -46,6 +46,15 @@ BLOCK_FACES = {"top", "bottom", "front", "back", "left", "right", "side"}
 DIMENSION_TYPE_FIELDS = {"ambient_light", "attributes", "cardinal_light", "coordinate_scale", "default_clock", "has_ceiling", "has_ender_dragon_fight", "has_fixed_time",
                          "has_skylight", "height", "infiniburn", "logical_height", "min_y", "monster_spawn_block_light_limit", "monster_spawn_light_level", "skybox", "timelines"}
 DEFAULT_DIMENSION_TYPE = "minecraft:overworld"
+# Everything alive that isn't a mob, with the letter its slots start with. Each pool numbers its own, so they can grow without moving each other.
+ENTITY_TABLES = {"projectiles": "p", "vehicles": "v", "props": "o"}
+ENTITY_FIELDS = {
+    "projectiles": ("damage", "speed", "gravity", "lifetime", "width", "height", "trail", "shots_per_second"),
+    "vehicles": ("moves", "steering", "speed", "reverse", "acceleration", "turn", "seat", "step_height", "gravity", "climb", "land_speed", "water_speed", "health", "width", "height"),
+    "props": ("width", "height", "clickable"),
+}
+# Shots_per_second is as often as anyone gets to fire one, and one a second is about a bow's pace.
+DEFAULT_SHOTS_PER_SECOND = 1
 
 
 class BundleError(Exception):
@@ -99,10 +108,13 @@ def read_pool(repo):
     mobs = (repo / "mods/conduit/src/main/java/gm/conduit/mobs/SlotMobs.java").read_text(encoding="utf-8")
     effects = (repo / "mods/conduit/src/main/java/gm/conduit/effects/SlotEffects.java").read_text(encoding="utf-8")
     fluids = (repo / "mods/conduit/src/main/java/gm/conduit/fluids/SlotFluids.java").read_text(encoding="utf-8")
+    entities = (repo / "mods/conduit/src/main/java/gm/conduit/entities/SlotEntities.java").read_text(encoding="utf-8")
     return {"families": families, "item_count": item_count, "effect_count": int(re.search(r"EFFECT_COUNT = (\d+)", effects).group(1)),
             "fluid_count": int(re.search(r"FLUID_COUNT = (\d+)", fluids).group(1)), "mobs": {
         "monster": int(re.search(r"MONSTER_COUNT = (\d+)", mobs).group(1)),
         "creature": int(re.search(r"CREATURE_COUNT = (\d+)", mobs).group(1)),
+    }, "entities": {
+        table: int(re.search(rf"{table[:-1].upper()}_COUNT = (\d+)", entities).group(1)) for table in ENTITY_TABLES
     }}
 
 
@@ -133,7 +145,7 @@ def load_features(features_dir):
 
 
 def empty_ledger():
-    return {"blocks": {}, "items": {}, "mobs": {}, "dimensions": {}, "effects": {}, "fluids": {}, "patches": [], "raw": []}
+    return {"blocks": {}, "items": {}, "mobs": {}, "dimensions": {}, "effects": {}, "fluids": {}, **{table: {} for table in ENTITY_TABLES}, "patches": [], "raw": []}
 
 
 def assign_slots(features, ledger, pool):
@@ -177,6 +189,9 @@ def assign_slots(features, ledger, pool):
             _assign_effect(ledger, pool, f"{feature_id}/{name}")
         for name in feature["manifest"].get("fluids", {}):
             _assign_fluid(ledger, pool, f"{feature_id}/{name}")
+        for table in ENTITY_TABLES:
+            for name in feature["manifest"].get(table, {}):
+                _assign_entity(ledger, pool, table, f"{feature_id}/{name}")
     return ledger
 
 
@@ -231,6 +246,17 @@ def _assign_fluid(ledger, pool, key):
     table[key] = {"slot": "%04d" % (index + 1), "index": index}
 
 
+def _assign_entity(ledger, pool, table, key):
+    """The same as a mob, but with only one range to go in."""
+    entries = ledger.setdefault(table, {})
+    if key in entries:
+        return
+    index = len(entries)
+    if index >= pool.get("entities", {}).get(table, 0):
+        raise BundleError(f"{key}: no free {table} slots left")
+    entries[key] = {"slot": "%s%04d" % (ENTITY_TABLES[table], index + 1), "index": index}
+
+
 def _sound_id(feature_id, name):
     return hashlib.sha256(f"{feature_id}/{name}".encode()).hexdigest()[:16]
 
@@ -250,7 +276,8 @@ def _resolver(feature_id, ledger):
             return f"gm:fb{ledger['fluids'][key]['slot']}"
         if kind == "biome":
             return f"gm:{_biome_id(*key.split('/'))}"
-        table = {"block": ledger["blocks"], "item": ledger["items"], "mob": ledger.get("mobs", {}), "dimension": ledger.get("dimensions", {}), "effect": ledger.get("effects", {})}[kind]
+        tables = {"block": "blocks", "item": "items", "mob": "mobs", "dimension": "dimensions", "effect": "effects", "projectile": "projectiles", "vehicle": "vehicles", "prop": "props"}
+        table = ledger.get(tables[kind], {})
         if key not in table:
             raise BundleError(f"{feature_id}: refers to unknown {kind} {key!r}")
         return f"gm:{table[key]['slot']}"
@@ -467,6 +494,18 @@ def _render_mob(feature, feature_id, name, mob, ledger, pack_lang, datapack, con
         definition["mind"] = _render_mind(mob["mind"], feature_id, ledger)
     if mob.get("sounds"):
         definition["sounds"] = _resolve_tokens(mob["sounds"], feature_id, ledger)
+    return slot, definition
+
+
+def _render_entity(feature, feature_id, table, name, entity, ledger, pack_lang, config):
+    """What a slot in one of the entity pools is for this release. It's the same idea as a mob, with a model named by hash and a name for the kill message."""
+    slot = ledger[table][f"{feature_id}/{name}"]["slot"]
+    pack_lang.name(f"entity.gm.{slot}", entity["display"])
+    definition = {"model": _copy_model(feature, feature_id, name, entity.get("model", name), config), **{field: entity[field] for field in ENTITY_FIELDS[table] if field in entity}}
+    if table == "projectiles":
+        definition.setdefault("shots_per_second", DEFAULT_SHOTS_PER_SECOND)
+    if entity.get("sounds"):
+        definition["sounds"] = _resolve_tokens(entity["sounds"], feature_id, ledger)
     return slot, definition
 
 
@@ -777,7 +816,7 @@ def _write_book(features, ledger, entries, machines, names, nodes, pack, lang):
                 key = f"{feature_id}/{name}"
                 resolved = _resolve_tokens(text(entry["text"]), feature_id, ledger)
                 entries[key]["guide"] = guide.flag(key)
-                found.append({"key": key, "title": title(entry["title"]), "text": re.sub(r"gm:[ise]\d{4}", lambda match: shown.get(match[0], match[0]), resolved),
+                found.append({"key": key, "title": title(entry["title"]), "text": re.sub(r"gm:[isepvo]\d{4}", lambda match: shown.get(match[0], match[0]), resolved),
                               "routes": entries[key]["routes"], "recipes": entries[key]["recipes"] + by_machine.get(key, []), "node": manifest.get("node"),
                               "things": things, "icon": _resolve_tokens(entry.get("icon"), feature_id, ledger)})
         return found
@@ -832,6 +871,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
     machines = {}
     names = {}
     mobs = {}
+    entities = {table: {} for table in ENTITY_TABLES}
     sounds_json = {}
     block_models = {}
     machine_inventories = {}
@@ -923,6 +963,8 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
                     "consume_seconds": item["use"].get("seconds", 1), "animation": item["use"].get("animation", "none"),
                     "sound": USE_SOUND, "has_consume_particles": False}}
                 defaults["timed_use"] = True
+            if "places_vehicle" in item:
+                defaults["vehicle"] = _resolve_tokens(f"$vehicle:{item['places_vehicle']}", feature_id, ledger)
             if "tooltip" in item:
                 # As keys, because a stack keeps what it was made with, whichever language whoever's holding it plays in.
                 for index, line in enumerate(item["tooltip"]):
@@ -1000,6 +1042,12 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
                             "reach": fluid.get("reach", 2 if looks == "lava" else 4), "drop_off": fluid.get("thins", 2 if looks == "lava" else 1),
                             "ticks": fluid.get("ticks", 30 if looks == "lava" else 5), "light": fluid.get("light", 15 if looks == "lava" else 0), "surface": bool(fluid.get("surface"))}
             tags.setdefault(("fluid", looks), []).extend([f"gm:fl{number}", f"gm:fl{number}_flowing"])
+        for table in ENTITY_TABLES:
+            for name, entity in manifest.get(table, {}).items():
+                slot, definition = _render_entity(feature, feature_id, table, name, entity, ledger, lang, config)
+                bindings[f"{feature_id}/{name}"] = slot
+                names[f"gm:{slot}"] = entity["display"]
+                entities[table][f"gm:{slot}"] = definition
         for plant in manifest.get("plants", []):
             surface_patches.append({**_resolve_tokens(plant, feature_id, ledger), "block": _resolve_tokens(f"$block:{plant['block']}", feature_id, ledger)})
         for name, biome in manifest.get("biomes", {}).items():
@@ -1039,6 +1087,12 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
             for key, text in json.loads(lang_file.read_text(encoding="utf-8")).items():
                 lang.text(key, text)
 
+    # After everything's rendered, because the vehicle may be another feature's. What it breaks back into is always what placed it, so that breaking one can't turn into anything else.
+    for feature_id, feature in features.items():
+        for name, item in feature["manifest"].get("items", {}).items():
+            if "places_vehicle" in item:
+                entities["vehicles"][_resolve_tokens(f"$vehicle:{item['places_vehicle']}", feature_id, ledger)]["item"] = f"gm:{ledger['items'][f'{feature_id}/{name}']['slot']}"
+
     # After every mob is rendered, because the one being given a new look may be in a later feature.
     for feature_id, feature in features.items():
         for target, model_name in feature["manifest"].get("reskins", {}).items():
@@ -1071,6 +1125,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
     _write_json(config / "bindings.json", bindings)
     _write_json(config / "item_defaults.json", item_defaults)
     _write_json(config / "mobs.json", mobs)
+    _write_json(config / "entities.json", entities)
     _write_json(config / "block_models.json", block_models)
     _write_json(config / "machine_inventories.json", machine_inventories)
     _write_json(config / "block_settings.json", block_settings)

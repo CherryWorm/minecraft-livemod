@@ -112,6 +112,10 @@ def film(mobs, log, process):
     """Holds new mobs at set points in their animations, on the real client, for a reviewer to judge how they move."""
     filmed = {}
     definitions = json.loads((runtime.server_folder("shadow") / "config" / "conduit" / "mobs.json").read_text(encoding="utf-8"))
+    others = runtime.server_folder("shadow") / "config" / "conduit" / "entities.json"
+    if others.exists():
+        for table in json.loads(others.read_text(encoding="utf-8")).values():
+            definitions.update(table)
     for slot in mobs[:FILMED_MOBS]:
         # Close enough that it fills the frame, whatever its size, with the camera level with the middle of it.
         height = max(0.5, min(float(definitions.get(f"gm:{slot}", {}).get("height", 1)), 8))

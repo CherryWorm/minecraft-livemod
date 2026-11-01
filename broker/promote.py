@@ -203,7 +203,8 @@ def choose_tier(content, jars):
 def new_visuals(old_ledger, new_ledger):
     blocks = [entry["slot"] for key, entry in new_ledger["blocks"].items() if key not in old_ledger.get("blocks", {})]
     items = [entry["slot"] for key, entry in new_ledger["items"].items() if key not in old_ledger.get("items", {})]
-    mobs = [entry["slot"] for key, entry in new_ledger.get("mobs", {}).items() if key not in old_ledger.get("mobs", {})]
+    # Everything alive gets summoned for the client gate in the same way, so it's all one list to that.
+    mobs = [entry["slot"] for table in ("mobs", *bundles.ENTITY_TABLES) for key, entry in new_ledger.get(table, {}).items() if key not in old_ledger.get(table, {})]
     return blocks, items, mobs
 
 

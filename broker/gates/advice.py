@@ -52,7 +52,7 @@ def run(features):
         for name, item in manifest.get("items", {}).items():
             node = f"item:{feature_id}/{name}"
             components = item.get("components") or {}
-            does_something = item.get("tier") or components or item.get("retired") or has_module
+            does_something = item.get("tier") or components or item.get("retired") or has_module or item.get("places_vehicle")
             if not does_something and node not in used:
                 source = " It drops from something, but" if name in dropped else ""
                 notes.append(f"{feature_id}/{name}:{source} nothing uses it yet, so players can't do anything with it.")
@@ -71,6 +71,11 @@ def run(features):
                 notes.append(f"{feature_id}/{name} is a machine, but this feature has no server module to make it do anything.")
             if family not in BUILDING_FAMILIES and family not in ("machine", "facing_machine", "model", "facing") and block.get("tool") is None and "plant" not in str(family):
                 notes.append(f"{feature_id}/{name} doesn't say which tool mines it, so it may drop nothing.")
+        if not has_module:
+            notes += [f"{feature_id}/{name} is a projectile, but only a module can fire one, and this feature has no server module." for name in manifest.get("projectiles", {})]
+            notes += [f"{feature_id}/{name} is a prop, but only a module can place one, and this feature has no server module." for name in manifest.get("props", {})]
+            placed = {item.get("places_vehicle") for item in manifest.get("items", {}).values()}
+            notes += [f"{feature_id}/{name} is a vehicle, but no item in this feature says \"places_vehicle\", and it has no server module to place one." for name in manifest.get("vehicles", {}) if name not in placed]
         if has_module and not manifest.get("automation") and any(block.get("family") in ("machine", "facing_machine") for block in manifest.get("blocks", {}).values()):
             notes.append(f"{feature_id} has a machine. If it does anything by itself, declare it in \"automation\" with a per_minute rate.")
         if (manifest.get("items") or manifest.get("blocks") or manifest.get("mobs")) and not manifest.get("knowledge"):

@@ -526,6 +526,9 @@ def _refusal(name, groups):
     return None
 
 
+HANDED_TO_MODULES = ("gm/conduit/slots/SlotBlockEntity", "gm/conduit/mobs/SlotMob", "gm/conduit/entities/SlotProjectile", "gm/conduit/entities/SlotVehicle", "gm/conduit/entities/SlotProp")
+
+
 def _class_problem(name, side):
     """Why this module may not refer to this class, or None. Own classes are handled before this."""
     if name.startswith(("java/lang/invoke/", "java/lang/runtime/")) and name not in LIMITED_MEMBERS:
@@ -547,7 +550,7 @@ def _class_problem(name, side):
         if side == "mixins" and not name.startswith(MIXIN_LIBRARIES):
             return "isn't one of the libraries a mixin may use, which are listed in docs/feature-format.md"
     # A machine's tick and a mob's behaviour are handed these, so using them is what the API asks for.
-    if name.startswith("gm/conduit/") and not name.startswith("gm/conduit/api/") and name not in ("gm/conduit/slots/SlotBlockEntity", "gm/conduit/mobs/SlotMob"):
+    if name.startswith("gm/conduit/") and not name.startswith("gm/conduit/api/") and name not in HANDED_TO_MODULES:
         return "is the module host's own code, and modules may only use gm/conduit/api"
     return _refusal(name, SERVER_REFUSED)
 
