@@ -21,7 +21,7 @@ class Case(unittest.TestCase):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.root = pathlib.Path(folder.name)
-        for target, name, value in ((far, "MACHINE", "someone@elsewhere"), (far, "HOME", "/there"), (far, "LANES", 2), (far, "down_until", 0), (far, "world_sent", None),
+        for target, name, value in ((far, "MACHINE", "someone@elsewhere"), (far, "HOME", "/there"), (far, "LANES", {"gates": 2, "check": 2}), (far, "records_sent", None), (far, "AGAIN_SECONDS", 0), (far, "down_until", 0), (far, "world_sent", None),
                                     (runtime, "RUNTIME", self.root), (runtime, "REPORTS", self.root / "reports"), (runtime, "HISTORY", self.root / "history"),
                                     (runtime, "STATE_FILE", self.root / "state.json")):
             patcher = mock.patch.object(target, name, value)
@@ -47,7 +47,7 @@ class Case(unittest.TestCase):
         stdout = json.dumps(self.report) if command[0] == "ssh" and "broker.promote" in command[-1] else ""
         return subprocess.CompletedProcess(command, 0, stdout, "")
 
-    def run_far(self, flags=("--no-deploy",), lane="far-1", release_id="feature-1"):
+    def run_far(self, flags=("--no-deploy",), lane="far-gates-1", release_id="feature-1"):
         return far.run(self.root / "assembled", release_id, flags, lane)
 
     def promote_command(self):
@@ -56,46 +56,117 @@ class Case(unittest.TestCase):
 
 class Lanes(Case):
     def test_none_without_a_machine(self):
-        with mock.patch.object(far, "LANES", 0):
-            self.assertEqual(far.lanes(), [])
+        with mock.patch.object(far, "LANES", {"gates": 0, "check": 0}):
+            self.assertEqual(far.lanes("gates"), [])
 
     def test_a_test_run_goes_there_first(self):
         with mock.patch.object(daemon, "GATE_LANES", 2):
-            self.assertEqual(daemon.lanes_for("gates"), ["far-1", "far-2", "", "gates-1"])
+            self.assertEqual(daemon.lanes_for("gates"), ["far-gates-1", "far-gates-2", "", "gates-1"])
+
+    def test_a_compile_check_goes_there_first_too(self):
+        with mock.patch.object(daemon, "CHECK_LANES", 1):
+            self.assertEqual(daemon.lanes_for("check"), ["far-check-1", "far-check-2", "check-0"])
+
+    def test_a_check_comes_back_here_when_the_machine_lets_one_down(self):
+        far.mark_down()
+        with mock.patch.object(daemon, "CHECK_LANES", 1):
+            self.assertEqual(daemon.lanes_for("check"), ["check-0"])
 
     def test_a_release_never_does(self):
         with mock.patch.object(daemon, "GATE_LANES", 2):
             self.assertEqual(daemon.lanes_for("release"), ["", "gates-1"])
 
     def test_nor_does_anything_else(self):
-        self.assertFalse(any(far.is_far(lane) for kind in ("check", "lint", "javap", "server_icon", "set_rule", "server_errors") for lane in daemon.lanes_for(kind)))
+        self.assertFalse(any(far.is_far(lane) for kind in ("lint", "javap", "server_icon", "set_rule", "server_errors") for lane in daemon.lanes_for(kind)))
 
     def test_a_machine_that_let_a_job_down_is_left_alone_for_a_while(self):
         far.mark_down()
-        self.assertEqual(far.lanes(), [])
+        self.assertEqual(far.lanes("gates"), [])
         with mock.patch.object(far.time, "monotonic", return_value=time.monotonic() + far.DOWN_SECONDS + 1):
-            self.assertEqual(far.lanes(), ["far-1", "far-2"])
+            self.assertEqual(far.lanes("gates"), ["far-gates-1", "far-gates-2"])
 
     def test_they_dont_use_this_machines_memory(self):
-        job = daemon.Job("gates", "far-1", None, time.monotonic())
+        job = daemon.Job("gates", "far-gates-1", None, time.monotonic())
         with mock.patch.object(daemon, "memory_available_gb", return_value=0.5):
-            self.assertTrue(daemon.room_for("gates", "far-2", {"a": job}))
+            self.assertTrue(daemon.room_for("gates", "far-gates-2", {"a": job}))
             self.assertTrue(daemon.room_for("check", "check-0", {"a": job}), "a job over there isn't one here")
 
 
 class Running(Case):
-    def test_only_a_test_run_can_go_there(self):
-        for flags in (("--why=x",), ("--check-only",), ()):
+    def test_only_test_runs_and_checks_can_go_there(self):
+        for flags in (("--why=x",), ()):
             with self.assertRaises(ValueError):
                 self.run_far(flags)
         self.assertEqual(self.commands, [])
 
-    def test_it_runs_in_the_lane_of_the_same_number_there(self):
-        self.run_far(lane="far-2")
+    def test_it_runs_in_the_lane_of_the_same_name_there(self):
+        self.run_far(lane="far-gates-2")
         command = self.promote_command()
         self.assertIn("BROKER_LANE=gates-2", command)
         self.assertIn("cd /there/repo-gates-2", command)
         self.assertIn("--no-deploy", command)
+
+    def test_a_compile_check_has_a_lane_of_its_own_there(self):
+        self.run_far(("--check-only",), lane="far-check-2")
+        command = self.promote_command()
+        self.assertIn("BROKER_LANE=check-2", command)
+        self.assertIn("cd /there/repo-check-2", command)
+        self.assertIn("--check-only", command)
+
+    def test_the_records_are_only_sent_when_theyve_changed(self):
+        self.run_far()
+        self.run_far(("--check-only",), lane="far-check-1")
+        self.assertEqual(sum("state.json" in str(command[-1]) for command in self.commands), 1)
+        runtime.STATE_FILE.write_text(json.dumps({"current": "r2"}), encoding="utf-8")
+        (runtime.HISTORY / "r2").mkdir()
+        self.run_far()
+        self.assertEqual(sum("state.json" in str(command[-1]) for command in self.commands), 2)
+        self.assertTrue(any("history/r2/" in str(command[-1]) for command in self.commands))
+
+    def test_records_that_didnt_arrive_are_sent_again(self):
+        self.fails_on = "history/r1"
+        with self.assertRaises(far.Gone):
+            self.run_far()
+        self.fails_on = None
+        self.run_far()
+        self.assertEqual(far.records_sent, "r1")
+
+    def test_old_files_there_are_tidied_but_never_the_current_release(self):
+        self.run_far()
+        tidying = next(command[-1] for command in self.commands if command[0] == "ssh" and command[-1].startswith("find "))
+        self.assertIn(f"-mtime +{far.KEEP_DAYS}", tidying)
+        self.assertIn("! -name r1", tidying)
+
+    def test_a_connection_dropped_once_isnt_the_machine_going_away(self):
+        seen = {"state": 0, "mkdir": 0}
+
+        def drops_once(command, timeout):
+            text = " ".join(map(str, command))
+            for key, word in (("state", "state.json"), ("mkdir", "mkdir -p /there/runtime/broker")):
+                if word in text:
+                    seen[key] += 1
+                    if seen[key] == 1:
+                        return subprocess.CompletedProcess(command, 255, "", "connection reset")
+            return self.fake_run(command, timeout)
+
+        with mock.patch.object(far, "_run", side_effect=drops_once):
+            self.assertEqual(self.run_far()["result"], "passed_gates")
+        self.assertEqual(seen, {"state": 2, "mkdir": 2})
+        self.assertEqual(far.lanes("gates"), ["far-gates-1", "far-gates-2"])
+
+    def test_a_job_isnt_started_twice_if_its_connection_drops(self):
+        runs = []
+
+        def job_drops(command, timeout):
+            if "broker.promote" in str(command[-1]):
+                runs.append(command)
+                return subprocess.CompletedProcess(command, 255, "", "connection reset")
+            return self.fake_run(command, timeout)
+
+        with mock.patch.object(far, "_run", side_effect=job_drops):
+            with self.assertRaises(far.Gone):
+                self.run_far()
+        self.assertEqual(len(runs), 1)
 
     def test_what_comes_from_a_builder_cant_become_a_command(self):
         self.run_far(release_id="x; rm -rf /")
@@ -122,7 +193,7 @@ class Running(Case):
         self.report = {"result": "blocked", "gate": "client", "reason": "It didn't render."}
         answer = self.run_far()
         self.assertEqual((answer["result"], answer["gate"], answer["reason"]), ("blocked", "client", "It didn't render."))
-        self.assertEqual(far.lanes(), ["far-1", "far-2"], "that's the work's fault and not the machine's")
+        self.assertEqual(far.lanes("gates"), ["far-gates-1", "far-gates-2"], "that's the work's fault and not the machine's")
 
 
 class ApartFromTheHost(unittest.TestCase):
@@ -165,7 +236,7 @@ class World(Case):
 
     def test_its_only_sent_every_so_often(self):
         self.run_far()
-        self.run_far(lane="far-2")
+        self.run_far(lane="far-gates-2")
         self.assertEqual(sum(command[0] == "copy world" for command in self.commands), 1)
         with mock.patch.object(far.time, "monotonic", return_value=time.monotonic() + far.WORLD_MOST_STALE_SECONDS + 1):
             self.run_far()
@@ -223,13 +294,13 @@ class GoingAway(Case):
                 self.fails_on = step
                 with self.assertRaises(far.Gone, msg=step):
                     self.run_far()
-                self.assertEqual(far.lanes(), [], step)
+                self.assertEqual(far.lanes("gates"), [], step)
 
     def test_no_report_is_the_machine_going_away(self):
         with mock.patch.object(far, "_run", return_value=subprocess.CompletedProcess([], 0, "", "")):
             with self.assertRaises(far.Gone):
                 self.run_far()
-        self.assertEqual(far.lanes(), [])
+        self.assertEqual(far.lanes("gates"), [])
 
     def test_taking_too_long_is_too(self):
         def too_long(command, timeout, **_):
@@ -285,7 +356,7 @@ class Broker(Case):
 
         self.request("job", "gates", commit="abc")
         answer = self.serve("job", handle)
-        self.assertEqual(self.lanes_tried, ["far-1", ""])
+        self.assertEqual(self.lanes_tried, ["far-gates-1", ""])
         self.assertEqual(answer, {"result": "passed_gates"})
 
     def test_that_doesnt_use_up_its_tries(self):
@@ -336,12 +407,12 @@ class Broker(Case):
             slow.set()
             for job in self.running.values():
                 job.thread.join(WAIT_SECONDS)
-        self.assertEqual(seen, {"testing": "far-1", "going_out": ""})
+        self.assertEqual(seen, {"testing": "far-gates-1", "going_out": ""})
 
     def test_the_lane_and_flags_reach_the_machine(self):
         with mock.patch.object(daemon, "assemble", return_value=self.root / "assembled"), mock.patch.object(far, "run", return_value={"result": "passed_gates"}) as run:
-            daemon.handle({"id": "x", "kind": "gates", "commit": "abc", "release_id": "r"}, "far-2")
-        run.assert_called_once_with(self.root / "assembled", "r", ("--no-deploy",), "far-2")
+            daemon.handle({"id": "x", "kind": "gates", "commit": "abc", "release_id": "r"}, "far-gates-2")
+        run.assert_called_once_with(self.root / "assembled", "r", ("--no-deploy",), "far-gates-2")
 
     def test_pictures_reach_the_agent_as_usual(self):
         picture = self.root / "reports" / "r" / "day.png"
@@ -349,7 +420,7 @@ class Broker(Case):
         picture.write_bytes(b"png")
         with mock.patch.object(daemon, "assemble", return_value=self.root / "assembled"), mock.patch.object(daemon, "REPORTS_FOR_AGENT", self.root / "for-agent"), \
                 mock.patch.object(far, "run", return_value={"result": "passed_gates", "screenshots": [str(picture)]}):
-            answer = daemon.promote("abc", "r", "--no-deploy", lane="far-1")
+            answer = daemon.promote("abc", "r", "--no-deploy", lane="far-gates-1")
         self.assertEqual(answer["screenshots"], ["/workspace/reports/r/day.png"])
         self.assertTrue((self.root / "for-agent" / "r" / "day.png").exists())
 

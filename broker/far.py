@@ -1,10 +1,10 @@
-"""Test runs on another machine, so that they don't use the memory and cores of the one people are playing on.
+"""Test runs and compile checks on another machine, so that they don't use the memory and cores of the one people are playing on.
 
-The broker stays in charge. It sends what a test run needs over SSH, runs the same broker code there, and brings back the report and pictures.
+The broker stays in charge. It sends what a job needs over SSH, runs the same broker code there, and brings back the report and pictures.
 That machine holds no key or secret of this one's, so unchecked work that gets loose there has no way back here. A pass from there is only
 ever kept there, so it can't let a release skip its tests, and the most a machine that's gone wrong could do is mislead a builder.
 
-Each lane here is a lane of the same number there, where the live server isn't running, so the gates copy the world they're sent as if it
+Each lane here is a lane of the same name there, where the live server isn't running, so the gates copy the world they're sent as if it
 were the live one and need no changes. Set one up with scripts/add-test-machine.sh.
 """
 import json
@@ -19,19 +19,23 @@ from broker.gates import shadow
 
 MACHINE = runtime.ENV.get("TEST_MACHINE", "")
 HOME = runtime.ENV.get("TEST_MACHINE_HOME", "/srv/livingmod")
-LANES = int(runtime.ENV.get("FAR_LANES", "0")) if MACHINE else 0
+LANES = {"gates": int(runtime.ENV.get("FAR_LANES", "0")) if MACHINE else 0, "check": int(runtime.ENV.get("FAR_CHECK_LANES", "0")) if MACHINE else 0}
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4", "-o", "StrictHostKeyChecking=accept-new"]
 WORLD_MOST_STALE_SECONDS = 600  # A test only needs a recent world, and this is what saving being turned off and the transfer cost.
 DOWN_SECONDS = 300  # How long to leave a machine alone after it's let a job down.
 RUN_SECONDS = 1100  # Less than the broker gives a job anywhere, so this gives up first and it can still run here.
 SEND_SECONDS = 1800  # Long enough to send the whole world the first time.
+AGAIN_SECONDS = 2  # A busy machine can drop a connection now and then, which shouldn't send everything back here for 5 minutes.
+KEEP_DAYS = 2  # Old releases and pictures there, which nothing uses again.
 RESULTS = ("passed_gates", "nothing_to_release", "blocked")
 MOST_REASON_CHARACTERS = 4000
 MOST_PICTURE_SIZE = "20m"
 
 down_until = 0
 world_sent = None
+records_sent = None
 sending_world = threading.Lock()
+sending_records = threading.Lock()
 
 
 class Gone(Exception):
@@ -42,9 +46,9 @@ def is_far(lane):
     return lane.startswith("far-")
 
 
-def lanes():
+def lanes(kind):
     """Empty if there's no machine, or it let a job down a moment ago."""
-    return [f"far-{number}" for number in range(1, LANES + 1)] if time.monotonic() >= down_until else []
+    return [f"far-{kind}-{number}" for number in range(1, LANES[kind] + 1)] if time.monotonic() >= down_until else []
 
 
 def mark_down():
@@ -59,15 +63,23 @@ def _run(command, timeout):
         raise Gone(f"{command[0]} took over {timeout}s") from error
 
 
-def _ssh(command, timeout=60):
+def _ssh(command, timeout=60, again=True):
+    """Only something that's safe to do twice can go again, because a job's connection dropping doesn't stop the job."""
     result = _run([*SSH, MACHINE, command], timeout)
+    if result.returncode == 255 and again:
+        time.sleep(AGAIN_SECONDS)
+        result = _run([*SSH, MACHINE, command], timeout)
     if result.returncode == 255:
         raise Gone(f"can't reach it: {result.stderr[-300:]}")
     return result
 
 
 def _rsync(*arguments, timeout=SEND_SECONDS):
-    result = _run(["rsync", "-a", "-e", " ".join(SSH), *arguments], timeout)
+    command = ["rsync", "-a", "-e", " ".join(SSH), *arguments]
+    result = _run(command, timeout)
+    if result.returncode != 0:
+        time.sleep(AGAIN_SECONDS)
+        result = _run(command, timeout)
     if result.returncode != 0:
         raise Gone(f"rsync failed: {result.stderr[-300:]}")
 
@@ -77,14 +89,21 @@ def prepare_folders(*others):
 
 
 def send_release_records():
-    """What this release was built from, because a test run is compared with it, and everything's built on what it's used up."""
-    current = runtime.load_state().get("current")
-    if runtime.STATE_FILE.exists():
-        _rsync(str(runtime.STATE_FILE), f"{MACHINE}:{HOME}/runtime/broker/state.json")
-    if current and (runtime.HISTORY / current).exists():
-        _rsync("--delete", f"{runtime.HISTORY / current}/", f"{MACHINE}:{HOME}/runtime/releases/history/{current}/")
-    # The game's own jar, which says what format the game expects.
-    _rsync("--delete", f"{runtime.RUNTIME / 'prod' / 'versions'}/", f"{MACHINE}:{HOME}/runtime/prod/versions/")
+    """What this release was built from, because a test run is compared with it, and everything's built on what it's used up. It's only sent when
+    it's changed, which saves several connections for every job. The lock's held throughout, so nothing can start on the old one's records."""
+    global records_sent
+    with sending_records:
+        current = runtime.load_state().get("current")
+        if records_sent is not None and current == records_sent:
+            return
+        if runtime.STATE_FILE.exists():
+            _rsync(str(runtime.STATE_FILE), f"{MACHINE}:{HOME}/runtime/broker/state.json")
+        if current and (runtime.HISTORY / current).exists():
+            _rsync("--delete", f"{runtime.HISTORY / current}/", f"{MACHINE}:{HOME}/runtime/releases/history/{current}/")
+        # The game's own jar, which says what format the game expects.
+        _rsync("--delete", f"{runtime.RUNTIME / 'prod' / 'versions'}/", f"{MACHINE}:{HOME}/runtime/prod/versions/")
+        _ssh(f"find {HOME}/runtime/releases/history {HOME}/runtime/broker/reports -mindepth 1 -maxdepth 1 -mtime +{KEEP_DAYS} ! -name {shlex.quote(str(current))} -exec rm -rf {{}} + 2>/dev/null; true")
+        records_sent = current
 
 
 def send_world():
@@ -126,10 +145,10 @@ def _believed(report, release_id):
 
 
 def run(source, release_id, flags, lane):
-    """Runs one test run there. Raises Gone if the machine can't, having marked it down so that nothing else tries it for a while."""
-    if "--no-deploy" not in flags:
-        raise ValueError("Only test runs go to another machine. A release has to be proved here.")
-    there = lane.replace("far-", "gates-")
+    """Runs one test run or compile check there. Raises Gone if the machine can't, having marked it down so that nothing else tries it for a while."""
+    if not {"--no-deploy", "--check-only"} & set(flags):
+        raise ValueError("Only test runs and compile checks go to another machine. A release has to be proved here.")
+    there = lane.removeprefix("far-")
     repo = f"{HOME}/repo-{there}"
     last = f"{HOME}/runtime/lanes/{there}/last.json"
     arguments = " ".join(shlex.quote(part) for part in ("--source", repo, "--release-id", release_id, *flags))
@@ -142,7 +161,7 @@ def run(source, release_id, flags, lane):
         send_release_records()
         send_world()
         _rsync("--delete", "--checksum", "--exclude=.env", "--exclude=build/", "--exclude=.gradle/", "--exclude=run/", f"{source}/", f"{MACHINE}:{repo}/")
-        result = _ssh(command, timeout=RUN_SECONDS * 2 + 60)
+        result = _ssh(command, timeout=RUN_SECONDS * 2 + 60, again=False)
         try:
             report = json.loads(result.stdout)
         except ValueError as error:

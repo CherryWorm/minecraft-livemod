@@ -151,12 +151,12 @@ Lookups, lint and the other small jobs start as soon as they're asked for. Each 
 
 To change either number, edit `.env` and run `systemctl restart livingmod-broker`. Don't run `./scripts/stack.sh up -d` for this.
 
-**Test runs on another machine.** Past what fits here, test runs can go to a second machine, which also takes them off the one people are playing on. It needs about 10 GB of memory and 4 fast cores for each lane, and an ordinary account. Nothing runs as root there, but someone with root has to run `apt-get install -y podman uidmap passt docker-compose` on it once. Then run these here as root, in order:
+**Test runs and compile checks on another machine.** Past what fits here, these can go to a second machine, which also takes them off the one people are playing on. It needs about 10 GB of memory and 4 fast cores for each lane, and an ordinary account. Nothing runs as root there, but someone with root has to run `apt-get install -y podman uidmap passt docker-compose` on it once. Then run these here as root, in order:
 
-1. `./scripts/add-test-machine.sh ACCOUNT@ADDRESS`, which says what to add to that account's `authorized_keys` if the broker can't log in yet, and then sets up containers and Python in `~/livingmod` there, copies the images and the world across, and adds `TEST_MACHINE` and `TEST_MACHINE_HOME` to `.env`. Test runs don't go there yet.
-2. `./scripts/add-test-machine.sh --use LANES`, once you're happy with it, which sets `FAR_LANES` and restarts the broker between jobs.
+1. `./scripts/add-test-machine.sh ACCOUNT@ADDRESS`, which says what to add to that account's `authorized_keys` if the broker can't log in yet, and then sets up containers and Python in `~/livingmod` there, copies the images and the world across, and adds `TEST_MACHINE` and `TEST_MACHINE_HOME` to `.env`. Nothing goes there yet.
+2. `./scripts/add-test-machine.sh --use LANES [CHECK_LANES]`, once you're happy with it, which sets `FAR_LANES` and `FAR_CHECK_LANES` and restarts the broker between jobs. There's as many of the second as the first unless you say otherwise.
 
-After that test runs go there first. If it stops answering, each job runs here instead and nobody's told, and it's tried again after 5 minutes. `journalctl -u livingmod-broker | grep 'test machine'` shows when that's happened.
+After that test runs and compile checks go there first. If it stops answering, each job runs here instead and nobody's told, and it's tried again after 5 minutes. `journalctl -u livingmod-broker | grep 'test machine'` shows when that's happened.
 
 - **What it can reach.** This server has a key for that machine, and that machine has nothing for this one, so unchecked work that gets loose there has no way back. Containers there run without root, and the test client is on its lane's internal network, so it reaches its own test server and nothing else, whatever else is on that machine. It has its own secrets. It does hold a copy of the world, which is sent at most every 10 minutes, and that includes where players have been.
 - **What it costs there.** About 3 GB of memory for each lane between jobs, because test servers stay up, and about 3 GB of disk, or 5 GB with a world check. With 16 running flat out it was about 7 GB each and a load of 5 cores each.

@@ -254,11 +254,11 @@ def lanes_for(kind):
     like anything else, because it needs a test server unless what it's releasing has just passed. No lane is the first one."""
     if kind in AT_ONCE:
         return [f"{kind}-{number}" for number in range(MOST_AT_ONCE)]
+    # Test runs and compile checks go to another machine if there is one, which keeps this one's lanes free for releases, and those are only ever proved here.
     if kind == "check":
-        return [f"check-{number}" for number in range(CHECK_LANES)]
+        return [*far.lanes("check"), *(f"check-{number}" for number in range(CHECK_LANES))]
     here = ["", *(f"gates-{number}" for number in range(1, GATE_LANES))]
-    # A test run goes to another machine if there is one, which keeps this one's lanes free for releases, and those are only ever proved here.
-    return [*far.lanes(), *here] if kind == "gates" else here
+    return [*far.lanes("gates"), *here] if kind == "gates" else here
 
 
 def memory_available_gb():

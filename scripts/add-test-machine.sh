@@ -5,7 +5,7 @@
 #   apt-get install -y podman uidmap passt docker-compose
 # This server's secrets stay here, and that machine gets none of them and no way back in. It does get a copy of the world and the game's files.
 # Safe to run again, which also brings its images up to date after a ./scripts/stack.sh build here.
-# It leaves test runs going where they were. To send them there, once a test run has been tried: scripts/add-test-machine.sh --use <lanes>
+# It leaves test runs going where they were. To send them there, once a test run has been tried: scripts/add-test-machine.sh --use <lanes> [compile check lanes]
 # Usage: ./scripts/add-test-machine.sh <account@address> [folder]
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -27,12 +27,13 @@ set_setting() {
 if [[ "${1:-}" == "--use" ]]; then
   lanes=${2:?Say how many lanes}
   set_setting FAR_LANES "$lanes"
+  set_setting FAR_CHECK_LANES "${3:-$lanes}"
   echo "Restarting the broker when what's running has finished, which needs nothing else to restart"
   draining=$("${as_broker[@]}" python3 -c "from broker import daemon; print(daemon.DRAINING)")
   "${as_broker[@]}" touch "$draining"
   while pgrep -f 'broker\.promote' >/dev/null; do sleep 0.5; done
   systemctl restart livingmod-broker
-  echo "Test runs now go to ${TEST_MACHINE:-that machine} first, with up to $lanes at once. The broker's log says 'the test machine let it down' if it ever can't take one."
+  echo "Test runs and compile checks now go to ${TEST_MACHINE:-that machine} first, with up to $lanes and ${3:-$lanes} at once. The broker's log says 'the test machine let it down' if it ever can't take one."
   exit 0
 fi
 
