@@ -8,6 +8,9 @@
 	"entrypoints": {
 		"client": [
 			"gm.companion.Companion"
+		],
+		"jei_mod_plugin": [
+			"gm.companion.jei.CompanionJeiPlugin"
 		]
 	},
 	"mixins": [

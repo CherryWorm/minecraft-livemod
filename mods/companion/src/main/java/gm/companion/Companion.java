@@ -26,16 +26,22 @@ public final class Companion implements ClientModInitializer {
 		PayloadTypeRegistry.clientboundPlay().register(ModulePayloads.Chunk.TYPE, ModulePayloads.Chunk.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(ModulePayloads.Unload.TYPE, ModulePayloads.Unload.CODEC);
 
+		PayloadTypeRegistry.clientboundPlay().register(KnownRecipes.Part.TYPE, KnownRecipes.Part.CODEC);
+
 		ClientPlayNetworking.registerGlobalReceiver(ModulePayloads.Chunk.TYPE, (payload, context) -> HOST.onChunk(payload));
 		ClientPlayNetworking.registerGlobalReceiver(ModulePayloads.Unload.TYPE, (payload, context) -> HOST.unload(payload.moduleId()));
 		// Never sent. Listening for it is how the server tells this companion from one too old for inventory hooks.
 		PayloadTypeRegistry.clientboundPlay().register(ModulePayloads.InventoryHooksSupported.TYPE, ModulePayloads.InventoryHooksSupported.CODEC);
 		ClientPlayNetworking.registerGlobalReceiver(ModulePayloads.InventoryHooksSupported.TYPE, (payload, context) -> {});
+		ClientPlayNetworking.registerGlobalReceiver(KnownRecipes.Part.TYPE, (payload, context) -> KnownRecipes.receive(payload));
 
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("gm", "modules"), HOST::renderHud);
 		ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> InventoryScreens.attach(HOST, screen));
 		ClientTickEvents.END_CLIENT_TICK.register(HOST::tick);
-		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> HOST.unloadAll());
+		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
+			HOST.unloadAll();
+			KnownRecipes.forget();
+		});
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> HOST.unloadAll());
 
 		// A friend can always turn this off on their own machine, with no permission from anyone.

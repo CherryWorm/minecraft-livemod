@@ -1,3 +1,11 @@
+dependencies {
+	// JEI is the player's choice, so it's only compiled against. A client test can ask to run with it.
+	compileOnly "maven.modrinth:jei:${project.jei_version}"
+	if (System.getenv('CLIENT_TEST_JEI')) {
+		runtimeOnly "maven.modrinth:jei:${project.jei_version}"
+	}
+}
+
 fabricApi {
 	configureTests {
 		createSourceSet = true

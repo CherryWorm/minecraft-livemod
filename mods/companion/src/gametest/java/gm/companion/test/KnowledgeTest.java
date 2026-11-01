@@ -1,6 +1,8 @@
 package gm.companion.test;
 
+import com.google.gson.Gson;
 import com.mojang.blaze3d.platform.InputConstants;
+import gm.companion.jei.CompanionJeiPlugin;
 import gm.companion.mixin.AbstractContainerScreenAccessor;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.TestInput;
@@ -26,6 +28,7 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.scores.DisplaySlot;
 import net.minecraft.world.scores.Objective;
@@ -34,6 +37,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Comparator;
+import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
@@ -121,6 +125,18 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				LOGGER.info("[M8] block light: {}", light);
 			}
 			case "say" -> context.runOnClient(client -> client.player.connection.sendChat(request.substring(4)));
+			case "jei" -> logJei(context, ItemStack.EMPTY);
+			case "jeimakes" -> logJei(context, context.computeOnClient(client -> client.player.getMainHandItem().copy()));
+			case "standin" -> {
+				String item = context.computeOnClient(client -> String.valueOf(client.player.getMainHandItem().getItem()));
+				LOGGER.info("[M8] an item from this world is shown as: {}", item);
+			}
+			case "jeipage" -> {
+				context.runOnClient(client -> CompanionJeiPlugin.showPage());
+				context.waitTicks(40);
+				context.takeScreenshot("m8_jei");
+				context.runOnClient(client -> client.gui.setScreen(null));
+			}
 			case "command" -> context.runOnClient(client -> client.player.connection.sendCommand(request.substring(8)));
 			case "sidebar" -> {
 				context.waitTicks(10);
@@ -247,6 +263,11 @@ public final class KnowledgeTest implements FabricClientGameTest {
 			data.setResourcePackStatus(ServerData.ServerPackStatus.ENABLED);
 			ConnectScreen.startConnecting(new TitleScreen(), client, ServerAddress.parseString(address), data, false, null);
 		});
+	}
+
+	private static void logJei(ClientGameTestContext context, ItemStack makes) {
+		List<String> shown = context.computeOnClient(client -> CompanionJeiPlugin.shown(makes));
+		LOGGER.info("[M8] jei: {}", new Gson().toJson(shown));
 	}
 
 	/** Puts one of the held stack into each of two grid squares, reads the result, and takes them back out. */

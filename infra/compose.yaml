@@ -180,6 +180,7 @@ services:
       ALSOFT_DRIVERS: "null"
       LIVINGMOD_SERVER: ${TEST_SERVER:-localhost:25566}
       CLIENT_TEST: ${CLIENT_TEST:-}
+      CLIENT_TEST_JEI: ${CLIENT_TEST_JEI:-}
       S4_CYCLES: ${S4_CYCLES:-100}
       LIVINGMOD_TEST_PASSWORD: ${LIVINGMOD_TEST_PASSWORD:-}
       # Only ever set by tests. A friend's game has neither, and no server can set them.
