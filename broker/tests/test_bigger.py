@@ -243,7 +243,7 @@ class Items(unittest.TestCase):
             self.assertTrue(defaults["timed_use"])
             self.assertEqual(defaults["components"]["minecraft:consumable"]["consume_seconds"], 2)
             self.assertEqual(defaults["components"]["minecraft:consumable"]["animation"], "brush")
-            self.assertEqual(defaults["components"]["minecraft:lore"][0]["text"], "A line")
+            self.assertEqual(defaults["components"]["minecraft:lore"][0]["fallback"], "A line")
 
     def test_the_rules_for_a_use(self):
         static.check_items({"f": feature(items={"t": {"use": {"seconds": 1}}})})

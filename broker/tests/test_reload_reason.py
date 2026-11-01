@@ -41,7 +41,12 @@ class Deploy(unittest.TestCase):
             self.addCleanup(patcher.stop)
 
     def rcon(self, server, *command, check=True):
-        self.calls.append(("told", json.loads(command[2])["text"]) if command[0] == "tellraw" else ("rcon", command))
+        if command[0] == "tellraw":
+            told = json.loads(command[2])
+            # What a game shows with no translation of it, which each player's game may say in their own language instead.
+            self.calls.append(("told", told["fallback"].replace("%s", "".join(told.get("with", [])))))
+        else:
+            self.calls.append(("rcon", command))
         self.assertFalse(check, "a message that can't be sent must not stop a release")
         return ""
 
