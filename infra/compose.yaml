@@ -10,7 +10,8 @@ x-server: &server
       MINECRAFT_VERSION: ${MINECRAFT_VERSION}
       FABRIC_LOADER_VERSION: ${FABRIC_LOADER_VERSION}
       FABRIC_INSTALLER_VERSION: ${FABRIC_INSTALLER_VERSION}
-  user: "1000:1000"
+  # A test machine without root runs these as root inside the container, which there is only that account. See scripts/add-test-machine.sh.
+  user: "${STACK_USER:-1000:1000}"
   restart: unless-stopped
   stop_grace_period: 60s
   # Clients fetch resource packs through the site, because these servers have no route out of the backend network.
@@ -29,7 +30,7 @@ x-velocity: &velocity
     args:
       VELOCITY_URL: ${VELOCITY_URL}
       VELOCITY_SHA256: ${VELOCITY_SHA256}
-  user: "1000:1000"
+  user: "${STACK_USER:-1000:1000}"
   restart: unless-stopped
   secrets:
     - forwarding
@@ -126,7 +127,7 @@ services:
       JAVA_MEMORY: ${SHADOW_MEMORY:-6G}
       WHITE_LIST: "false"
       LEVEL_SEED: ${LEVEL_SEED:-}
-      PACK_PUBLIC_URL: http://localhost:${SHADOW_PACK_PORT:-25568}/
+      PACK_PUBLIC_URL: ${SHADOW_PACK_URL:-http://localhost:${SHADOW_PACK_PORT:-25568}/}
     volumes:
       - ${SHADOW_FOLDER:-${RUNTIME_DIR}}/shadow:/data
       - ${SHADOW_FOLDER:-${RUNTIME_DIR}/releases}/candidate:/opt/release:ro
@@ -157,7 +158,7 @@ services:
   shadow-pack:
     profiles: [lanes]
     image: caddy:${CADDY_VERSION}
-    user: "1000:1000"
+    user: "${STACK_USER:-1000:1000}"
     restart: unless-stopped
     cpu_shares: 256
     oom_score_adj: 500
@@ -170,7 +171,8 @@ services:
       - no-new-privileges:true
     read_only: true
     tmpfs:
-      - /tmp:uid=1000,gid=1000,mode=700
+      # Podman doesn't take a uid here, and whoever this runs as has to be able to write to it.
+      - /tmp:mode=1777
     environment:
       XDG_DATA_HOME: /tmp
       XDG_CONFIG_HOME: /tmp
@@ -184,7 +186,7 @@ services:
   builder:
     profiles: [tools]
     image: eclipse-temurin:25-jdk
-    user: "1000:1000"
+    user: "${STACK_USER:-1000:1000}"
     # 0 means no limit. On a shared host this stops a build from taking cores away from the live server.
     cpus: ${TOOLS_CPUS:-0}
     # Several can run at once, so these make sure that if cores or memory run short, it's these that lose out and not the live server.
@@ -206,15 +208,16 @@ services:
     image: livingmod/testclient:${MINECRAFT_VERSION}
     build:
       context: testclient
-    init: true
-    user: "1000:1000"
+    init: ${TEST_CLIENT_INIT:-true}
+    user: "${STACK_USER:-1000:1000}"
     # It renders in software on every core it can get, so on a shared host it needs a limit too.
     cpus: ${TOOLS_CPUS:-0}
     cpu_shares: 256
     oom_score_adj: 500
     working_dir: /work
-    # Uses the host's network so the pack URL means the same thing here as for a real player.
-    network_mode: host
+    # Uses the host's network so the pack URL means the same thing here as for a real player. On a machine shared with
+    # other things, it's on its lane's network instead, so it can't reach them. See client_settings in broker/gates/client.py.
+    network_mode: ${TEST_CLIENT_NETWORK:-host}
     environment:
       GRADLE_USER_HOME: /cache/gradle
       HOME: /cache/home

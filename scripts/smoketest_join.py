@@ -13,6 +13,7 @@ import socket
 import struct
 import sys
 import time
+import urllib.parse
 import urllib.request
 import uuid
 import zlib
@@ -80,6 +81,7 @@ class Connection:
     def __init__(self, host, port):
         self.sock = socket.create_connection((host, port), timeout=20)
         self.threshold = None
+        self.pack_from = None
         # Bytes are kept here until a whole frame arrives, so a read timeout can't lose our place.
         self.buffer = bytearray()
 
@@ -146,6 +148,8 @@ def accept_pack(conn, data, status_packet):
     forced = data.take(1) == b"\x01"
     print(f"offered resource pack (required={forced}): {url}", flush=True)
     conn.send(status_packet, pack_id + varint(PACK_ACCEPTED))
+    if conn.pack_from:
+        url = urllib.parse.urlsplit(url)._replace(netloc=conn.pack_from).geturl()
     with urllib.request.urlopen(url, timeout=20) as response:
         body = response.read()
     actual = hashlib.sha1(body).hexdigest()
@@ -219,9 +223,11 @@ def main():
     parser.add_argument("--name", default="smoketest")
     parser.add_argument("--stay", type=int, default=8)
     parser.add_argument("--watch-for", help="prints SAW and this text if it turns up in anything the server sends")
+    parser.add_argument("--pack-from", help="host:port to fetch the resource pack from, if the address the server offers can't be reached from here")
     args = parser.parse_args()
     try:
         conn = Connection(args.host, args.port)
+        conn.pack_from = args.pack_from
         login(conn, args.host, args.port, args.name)
         configure(conn)
         play(conn, args.stay, args.watch_for)

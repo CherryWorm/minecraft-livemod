@@ -151,12 +151,18 @@ Lookups, lint and the other small jobs start as soon as they're asked for. Each 
 
 To change either number, edit `.env` and run `systemctl restart livingmod-broker`. Don't run `./scripts/stack.sh up -d` for this.
 
-**Test runs on another machine.** Past what fits here, test runs can go to a second machine, which also takes them off the one people are playing on. Rent one that's for nothing else, with Ubuntu 24.04 or later and about 10 GB of memory and 4 fast cores for each lane, that this server can already reach as root over SSH, and run `./scripts/add-test-machine.sh ADDRESS LANES` here as root. It installs what's needed, copies the images and the world across, adds `TEST_MACHINE`, `TEST_MACHINE_HOME` and `FAR_LANES` to `.env`, and restarts the broker between jobs. After that test runs go there first. If it stops answering, each job runs here instead and nobody's told, and it's tried again after 5 minutes. `journalctl -u livingmod-broker | grep 'test machine'` shows when that's happened.
+**Test runs on another machine.** Past what fits here, test runs can go to a second machine, which also takes them off the one people are playing on. It needs about 10 GB of memory and 4 fast cores for each lane, and an ordinary account. Nothing runs as root there, but someone with root has to run `apt-get install -y podman uidmap passt docker-compose` on it once. Then run these here as root, in order:
 
-- **What it can reach.** This server has a key for that machine, and that machine has nothing for this one, so unchecked work that gets loose there has no way back. It has its own secrets. It does hold a copy of the world, which is sent at most every 10 minutes, and that includes where players have been.
+1. `./scripts/add-test-machine.sh ACCOUNT@ADDRESS`, which says what to add to that account's `authorized_keys` if the broker can't log in yet, and then sets up containers and Python in `~/livingmod` there, copies the images and the world across, and adds `TEST_MACHINE` and `TEST_MACHINE_HOME` to `.env`. Test runs don't go there yet.
+2. `./scripts/add-test-machine.sh --use LANES`, once you're happy with it, which sets `FAR_LANES` and restarts the broker between jobs.
+
+After that test runs go there first. If it stops answering, each job runs here instead and nobody's told, and it's tried again after 5 minutes. `journalctl -u livingmod-broker | grep 'test machine'` shows when that's happened.
+
+- **What it can reach.** This server has a key for that machine, and that machine has nothing for this one, so unchecked work that gets loose there has no way back. Containers there run without root, and the test client is on its lane's internal network, so it reaches its own test server and nothing else, whatever else is on that machine. It has its own secrets. It does hold a copy of the world, which is sent at most every 10 minutes, and that includes where players have been.
+- **What it costs there.** About 3 GB of memory for each lane between jobs, because test servers stay up, and about 3 GB of disk, or 5 GB with a world check. With 16 running flat out it was about 7 GB each and a load of 5 cores each.
 - **Releases.** A release is always proved here, because a pass from there is never believed, so a release after a test run there runs its own tests. This is the one thing that gets slower: about a third of releases used to reuse a pass.
 - **The code.** The same code as this server's is sent with each job, so there's nothing to update. The images aren't, so after `./scripts/stack.sh build` here, run `add-test-machine.sh` again.
-- **To stop using it,** set `FAR_LANES=0` in `.env` and restart the broker. Its test servers stay up until you stop or delete the machine.
+- **To stop using it,** run `./scripts/add-test-machine.sh --use 0`. Its test servers stay up until you stop them there, with `docker compose -p livingmod-gates-N stop` for each lane.
 
 A bigger job beside others only starts if there's room for it and 4 GB to spare, which leaves the live server room to grow to its limit. `journalctl -u livingmod-broker | grep -E 'waiting [0-9]{2,}'` shows anything that's had to wait long. If memory runs out anyway, the system stops the broker and everything it's running, rather than the live server.
 

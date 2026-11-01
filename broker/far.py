@@ -134,7 +134,7 @@ def run(source, release_id, flags, lane):
     last = f"{HOME}/runtime/lanes/{there}/last.json"
     arguments = " ".join(shlex.quote(part) for part in ("--source", repo, "--release-id", release_id, *flags))
     # A lock, because if the broker here restarts, the job there carries on, and the next one in this lane has to wait for it to finish.
-    command = (f"mkdir -p {HOME}/runtime/lanes/{there} && cd {repo} && ln -sf {HOME}/machine.env .env && rm -f {last} && "
+    command = (f". {HOME}/environment && mkdir -p {HOME}/runtime/lanes/{there} && cd {repo} && ln -sf {HOME}/machine.env .env && rm -f {last} && "
                f"BROKER_LANE={there} PYTHONDONTWRITEBYTECODE=1 flock -w {RUN_SECONDS} {HOME}/runtime/lanes/{there}.lock "
                f"timeout {RUN_SECONDS} python3 -m broker.promote {arguments} >/dev/null 2>&1; cat {last}")
     try:

@@ -170,6 +170,14 @@ def photograph_panels(panels, log, process):
     return names
 
 
+def client_settings():
+    """Where the test client finds the server, and what Gradle needs told. Apart from the host, it's on its lane's internal network, with no route to anything but
+    that lane, so Gradle has to make do with what the build before it fetched."""
+    if runtime.CLIENT_APART and runtime.SHADOW_ENV:
+        return {"TEST_CLIENT_NETWORK": f"{runtime.SHADOW_ENV['COMPOSE_PROJECT_NAME']}_backend", "TEST_SERVER": "shadow-proxy:25565"}, ["--offline"]
+    return {"TEST_SERVER": f"localhost:{runtime.SHADOW_PROXY_PORT}"}, []
+
+
 def run_gate(blocks, items, mods_dir, report_dir, mobs=(), client_modules=False, panels=()):
     """Returns the screenshots taken. Skips when there's nothing new to look at."""
     if not blocks and not items and not mobs and not client_modules and not panels:
@@ -181,15 +189,16 @@ def run_gate(blocks, items, mods_dir, report_dir, mobs=(), client_modules=False,
     if shots_dir.exists():
         shutil.rmtree(shots_dir)
 
+    settings, gradle_flags = client_settings()
     with log.open("w", encoding="utf-8") as stream:
         process = subprocess.Popen(
             ["./scripts/stack.sh", "--profile", "tools", "run", "--rm", "-T", "--name", CONTAINER, "testclient",
-             "./gradlew", "--no-daemon", "--console=plain", ":companion:runClientGameTest"],
+             "./gradlew", "--no-daemon", "--console=plain", *gradle_flags, ":companion:runClientGameTest"],
             cwd=runtime.REPO, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT,
             # Nothing's signed until a release is really going out, so this client takes unsigned modules. It's
             # the test's own copy of the game, and it still refuses anything that fails the code check.
             env={**__import__("os").environ, "MODS_DIR": str(mods_dir), "CLIENT_TEST": "scene", **runtime.tools_cache(),
-                 "TEST_SERVER": f"localhost:{runtime.SHADOW_PROXY_PORT}", "COMPANION_ALLOW_UNSIGNED": "true"},
+                 **settings, "COMPANION_ALLOW_UNSIGNED": "true"},
         )
     try:
         _wait_log(log, r"\[SCENE\] joined as [A-Za-z0-9_]+$", 300, process)

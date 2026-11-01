@@ -10,6 +10,7 @@ import unittest
 from unittest import mock
 
 from broker import daemon, far, runtime
+from broker.gates import client
 
 WAIT_SECONDS = 10
 REAL_RUN = far._run
@@ -122,6 +123,31 @@ class Running(Case):
         answer = self.run_far()
         self.assertEqual((answer["result"], answer["gate"], answer["reason"]), ("blocked", "client", "It didn't render."))
         self.assertEqual(far.lanes(), ["far-1", "far-2"], "that's the work's fault and not the machine's")
+
+
+class ApartFromTheHost(unittest.TestCase):
+    """On a machine shared with other things, the test client only reaches its own lane."""
+
+    def test_the_client_goes_on_its_lanes_own_network(self):
+        with mock.patch.object(runtime, "CLIENT_APART", True), mock.patch.object(runtime, "SHADOW_ENV", {"COMPOSE_PROJECT_NAME": "x-gates-3"}):
+            settings, flags = client.client_settings()
+        self.assertEqual(settings, {"TEST_CLIENT_NETWORK": "x-gates-3_backend", "TEST_SERVER": "shadow-proxy:25565"})
+        self.assertEqual(flags, ["--offline"])
+
+    def test_otherwise_it_stays_as_it_was(self):
+        with mock.patch.object(runtime, "CLIENT_APART", False), mock.patch.object(runtime, "SHADOW_ENV", {"COMPOSE_PROJECT_NAME": "x-gates-3"}), \
+                mock.patch.object(runtime, "SHADOW_PROXY_PORT", "25576"):
+            self.assertEqual(client.client_settings(), ({"TEST_SERVER": "localhost:25576"}, []))
+
+    def test_the_first_lane_has_no_network_of_its_own_to_go_on(self):
+        with mock.patch.object(runtime, "CLIENT_APART", True), mock.patch.object(runtime, "SHADOW_ENV", {}), mock.patch.object(runtime, "SHADOW_PROXY_PORT", "25566"):
+            self.assertEqual(client.client_settings(), ({"TEST_SERVER": "localhost:25566"}, []))
+
+    def test_the_pack_is_offered_at_an_address_the_client_can_reach(self):
+        with mock.patch.object(runtime, "CLIENT_APART", True):
+            self.assertEqual(runtime.shadow_env("gates-1")["SHADOW_PACK_URL"], "http://shadow-pack:25568/")
+        with mock.patch.object(runtime, "CLIENT_APART", False):
+            self.assertNotIn("SHADOW_PACK_URL", runtime.shadow_env("gates-1"))
 
 
 class World(Case):

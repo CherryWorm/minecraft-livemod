@@ -128,7 +128,9 @@ def smoke_join():
     """Logs a test client in through the shadow's proxy: login, pack offer, checksum, world entry."""
     time.sleep(3.5)  # Velocity limits how fast one address can log in.
     result = runtime.run(
-        [sys.executable, "scripts/smoketest_join.py", "--port", runtime.SHADOW_PROXY_PORT, "--name", "gatebot", "--stay", "4"],
+        [sys.executable, "scripts/smoketest_join.py", "--port", runtime.SHADOW_PROXY_PORT, "--name", "gatebot", "--stay", "4",
+         # The address offered to a client on its lane's own network doesn't mean anything out here.
+         *(["--pack-from", f"localhost:{runtime.SHADOW_ENV['SHADOW_PACK_PORT']}"] if "SHADOW_PACK_URL" in runtime.SHADOW_ENV else [])],
         check=False, timeout=90,
     )
     if result.returncode != 0:

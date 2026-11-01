@@ -38,6 +38,8 @@ DIFF = lane_folder(LANE) / "diff"
 REPORTS = BROKER / "reports"
 PROJECT = ENV.get("COMPOSE_PROJECT_NAME", "livingmod")
 FIRST_LANE_PORT = 25570
+# Set on a test machine that's shared with other things, so that the test client, which runs unchecked work, can only reach its own lane.
+CLIENT_APART = ENV.get("TEST_CLIENT_APART") == "true"
 
 
 def shadow_env(lane):
@@ -48,7 +50,8 @@ def shadow_env(lane):
         return {}
     number = int(lane.removeprefix("gates-"))
     return {"COMPOSE_PROJECT_NAME": f"{PROJECT}-{lane}", "SHADOW_FOLDER": str(lane_folder(lane)),
-            "SHADOW_PROXY_PORT": str(FIRST_LANE_PORT + number * 2), "SHADOW_PACK_PORT": str(FIRST_LANE_PORT + number * 2 + 1)}
+            "SHADOW_PROXY_PORT": str(FIRST_LANE_PORT + number * 2), "SHADOW_PACK_PORT": str(FIRST_LANE_PORT + number * 2 + 1),
+            **({"SHADOW_PACK_URL": "http://shadow-pack:25568/"} if CLIENT_APART else {})}
 
 
 SHADOW_ENV = shadow_env(LANE)
