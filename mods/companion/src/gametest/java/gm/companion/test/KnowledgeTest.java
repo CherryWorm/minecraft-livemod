@@ -104,7 +104,8 @@ public final class KnowledgeTest implements FabricClientGameTest {
 		context.waitFor(client -> client.gui.screen() == null, 2 * TICKS_PER_MINUTE);
 
 		while (true) {
-			context.waitFor(client -> !requests.isEmpty(), 5 * TICKS_PER_MINUTE);
+			// A long time, because a test can have a whole release to wait for between one request and the next.
+			context.waitFor(client -> !requests.isEmpty(), 30 * TICKS_PER_MINUTE);
 			String request = requests.poll();
 			if ("done".equals(request)) {
 				break;

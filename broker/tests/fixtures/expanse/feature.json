@@ -1,0 +1,117 @@
+{
+  "id": "expanse",
+  "phase": 1,
+  "summary": "Test fixture for big ruins and the rest of world generation. Says in chat when a ruin is built, what a module can find out about where they are, and when a module changes the biome.",
+  "blocks": {
+    "expanse_stone": {"family": "stone", "display": "Expanse Stone", "texture": "expanse_stone", "tool": "pickaxe", "retired": true},
+    "expanse_lens": {"family": "stone", "display": "Expanse Lens", "texture": "expanse_lens", "tool": "pickaxe", "retired": true},
+    "expanse_frost": {"family": "stone", "display": "Expanse Frost", "texture": "expanse_frost", "tool": "pickaxe", "retired": true}
+  },
+  "items": {
+    "expanse_key": {"display": "Expanse Key", "texture": "expanse_key", "retired": true},
+    "expanse_home": {"display": "Expanse Home", "texture": "expanse_home", "retired": true}
+  },
+  "dimensions": {
+    "moor": {
+      "display": "The Moor",
+      "type": {"base": "minecraft:overworld", "ambient_light": 0.4, "attributes": {"minecraft:visual/fog_color": "#aa66cc"}},
+      "generator": {"type": "minecraft:noise", "settings": "minecraft:overworld", "biome_source": {"type": "minecraft:fixed", "biome": "$biome:moor_land"}}
+    }
+  },
+  "ruins": {
+    "moor_hall": {
+      "id": "moor_hall_v1",
+      "dimension": "$dimension:moor",
+      "parts": [
+        {"x": 0, "y": -1, "z": 0, "to": [31, -1, 31], "block": "minecraft:smooth_quartz"},
+        {"x": 0, "y": 0, "z": 0, "to": [31, 3, 0], "block": "minecraft:quartz_bricks"}
+      ],
+      "on": ["natural"],
+      "replaces": ["natural"],
+      "spacing": 6,
+      "maxSlope": 30,
+      "minY": 50, "maxY": 220
+    },
+    "great_hall": {
+      "id": "great_hall_v1",
+      "parts": [
+        {"x": 0, "y": -1, "z": 0, "to": [47, -1, 47], "block": "$block:expanse_stone"},
+        {"x": 0, "y": 0, "z": 0, "to": [47, 3, 0], "block": "minecraft:purpur_block"},
+        {"x": 0, "y": 0, "z": 47, "to": [47, 3, 47], "block": "minecraft:purpur_block"},
+        {"x": 0, "y": 0, "z": 1, "to": [0, 3, 46], "block": "minecraft:purpur_block"},
+        {"x": 47, "y": 0, "z": 1, "to": [47, 3, 46], "block": "minecraft:purpur_block"},
+        {"x": 24, "y": 0, "z": 24, "block": "minecraft:chest"},
+        {"x": 40, "y": 2, "z": 40, "block": "minecraft:gravel"}
+      ],
+      "on": ["natural"],
+      "replaces": ["natural"],
+      "spacing": 12,
+      "maxSlope": 30,
+      "minY": 50, "maxY": 200,
+      "loot": {"type": "minecraft:chest", "pools": [{"rolls": 1, "entries": [{"type": "minecraft:item", "name": "minecraft:flint"}]}]}
+    },
+    "long_wall": {
+      "id": "long_wall_v1",
+      "parts": [{"x": 0, "y": 0, "z": 8, "to": [39, 2, 8], "block": "minecraft:prismarine_bricks"}],
+      "on": ["natural"],
+      "replaces": ["natural"],
+      "followTerrain": true,
+      "maxSlope": 24,
+      "spacing": 11,
+      "minY": 50, "maxY": 200
+    },
+    "on_the_hill": {
+      "id": "on_the_hill_v1",
+      "parts": [{"x": 0, "y": 0, "z": 0, "to": [19, 1, 19], "block": "minecraft:waxed_copper_block"}],
+      "on": ["natural"],
+      "replaces": ["natural"],
+      "highGround": 3,
+      "maxSlope": 30,
+      "spacing": 9,
+      "minY": 40, "maxY": 220
+    },
+    "gravel_shrine": {
+      "id": "gravel_shrine_v1",
+      "parts": [
+        {"x": 4, "y": 0, "z": 4, "block": "minecraft:red_nether_bricks"},
+        {"x": 8, "y": 4, "z": 8, "to": [10, 4, 10], "block": "minecraft:gravel"},
+        {"x": 6, "y": 5, "z": 6, "block": "minecraft:sand"}
+      ],
+      "on": ["minecraft:grass_block", "minecraft:dirt", "minecraft:stone", "minecraft:sand", "minecraft:gravel", "minecraft:snow_block"],
+      "replaces": ["minecraft:air", "minecraft:short_grass", "minecraft:tall_grass", "minecraft:fern", "minecraft:dandelion", "minecraft:poppy", "minecraft:snow"],
+      "chance": 0.1,
+      "minY": 0, "maxY": 220
+    },
+    "cave_room": {
+      "id": "cave_room_v1",
+      "parts": [
+        {"x": 4, "y": 0, "z": 4, "to": [10, 0, 10], "block": "minecraft:black_concrete"},
+        {"x": 4, "y": 4, "z": 4, "to": [10, 4, 10], "block": "minecraft:black_concrete"},
+        {"x": 4, "y": 1, "z": 4, "to": [10, 3, 4], "block": "minecraft:black_concrete"},
+        {"x": 4, "y": 1, "z": 10, "to": [10, 3, 10], "block": "minecraft:black_concrete"},
+        {"x": 4, "y": 1, "z": 5, "to": [4, 3, 9], "block": "minecraft:black_concrete"},
+        {"x": 10, "y": 1, "z": 5, "to": [10, 3, 9], "block": "minecraft:air"},
+        {"x": 5, "y": 1, "z": 5, "to": [9, 3, 9], "block": "minecraft:air"}
+      ],
+      "on": ["minecraft:stone"],
+      "replaces": ["minecraft:stone", "minecraft:deepslate", "minecraft:andesite", "minecraft:diorite", "minecraft:granite", "minecraft:tuff", "minecraft:dirt", "minecraft:gravel", "minecraft:air", "minecraft:cave_air"],
+      "underground": true,
+      "opensOntoCave": true,
+      "chance": 0.25,
+      "minY": -40, "maxY": 50
+    }
+  },
+  "biomes": {
+    "moor_land": {
+      "base": "minecraft:plains",
+      "attributes": {"minecraft:visual/sky_color": "#aa66cc"},
+      "spread": false
+    },
+    "orchard_plains": {
+      "base": "minecraft:plains",
+      "add_features": {"vegetal_decoration": ["minecraft:trees_cherry"]},
+      "effects": {"grass_color": "#7fbf6f"},
+      "proportion": 0.6
+    }
+  }
+}
