@@ -209,8 +209,13 @@ class Fixing(Base):
         self.assertEqual(args[2:], ("e_one", "early"))
         self.assertEqual(options["fix"], "bug_1")
         self.assertEqual(options["on_released"], self.desk._released)
-        self.assertEqual(options["about"], "a bug fix")
+        self.assertEqual(options["about"], "fixing \"the kiln only burns coal once\"")
         self.agent.workshop.remove_fix.assert_called_once_with("bug_1")
+
+    async def test_a_title_with_a_name_in_it_isnt_said_to_everyone(self):
+        self.ask.return_value = finding(feature="alloy_kiln", title="the Hollow Kiln burns coal once", spec="Burn it once.")
+        await self.report()
+        self.assertEqual(self.agent.workshop.build.await_args.kwargs["about"], "a bug fix")
 
     async def test_the_player_hears_what_was_found_and_again_when_its_in(self):
         await self.report()

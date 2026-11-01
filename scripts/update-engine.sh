@@ -20,10 +20,10 @@ before=$(sudo -u "$user" -H git rev-parse HEAD)
 sudo -u "$user" -H git pull --ff-only
 # The agent's main is what's live, so this changes the engine and nothing else.
 commit=$(git -c safe.directory='*' -C "$agent_repo" rev-parse main)
-sudo -u "$user" -H env PYTHONDONTWRITEBYTECODE=1 python3 - "$commit" "engine$(date +%s)" <<'EOF'
+sudo -u "$user" -H env PYTHONDONTWRITEBYTECODE=1 python3 - "$commit" "engine$(date +%s)" "$before" <<'EOF'
 import json, sys
-from broker import daemon
-report = daemon.promote(sys.argv[1], sys.argv[2])
+from broker import daemon, deploy
+report = daemon.promote(sys.argv[1], sys.argv[2], f"--why={deploy.engine_reason(sys.argv[3])}")
 print(json.dumps({key: report.get(key) for key in ("release", "result", "gate", "reason", "tier", "stages")}, indent=1))
 sys.exit(0 if report.get("result") in ("released", "nothing_to_release") else 1)
 EOF

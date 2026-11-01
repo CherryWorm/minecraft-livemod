@@ -18,6 +18,7 @@ BIBLE = pathlib.Path("/workspace/repo/bible")
 FEATURES = pathlib.Path("/workspace/repo/mods/genesis/features")
 STATE = pathlib.Path("/workspace/state")
 HELP_LIMIT = 400  # A real answer needs more room than a remark, and chat wraps it.
+TEASER_TRIES = 3
 LOOK_UP = "mcp__guide__look_up"
 
 INTERVIEW_SCHEMA = {
@@ -259,16 +260,19 @@ async def request_news(governor, items, briefs, language=None):
 
 async def teaser(governor, feature, stage):
     """A few words for the sidebar about one thing being built. Returns None if they can't be said safely, and the sidebar
-    then shows what /plan would. A second try is worth it, because a good line is often only just too long. Story is all
-    spoiler, so no model gets to describe it."""
+    then shows what /plan would. Trying again is worth it if the model hears what was wrong, because a good line is often only
+    just too long, or uses one word it can't. Story is all spoiler, so no model gets to describe it."""
     if feature.get("category") == "story":
         return "more of the story"
     brief = llm.untrusted("brief", json.dumps({"stage": stage, "category": feature.get("category"), "spec": feature.get("spec")}))
-    for _ in range(2):
-        result = await llm.ask(governor, "teaser", brief, schema=TEASER_SCHEMA, max_turns=3)
-        text = feedback.safe_teaser(result.structured.get("teaser") if isinstance(result.structured, dict) and not result.is_error else None, feature)
-        if text:
-            return text
+    prompt = brief
+    for _ in range(TEASER_TRIES):
+        result = await llm.ask(governor, "teaser", prompt, schema=TEASER_SCHEMA, max_turns=3)
+        line = result.structured.get("teaser") if isinstance(result.structured, dict) and not result.is_error else None
+        problem = feedback.teaser_problem(line, feature)
+        if not problem:
+            return feedback.safe_teaser(line, feature)
+        prompt = f"{brief}\n\nYour last line, {json.dumps(line)}, can't be used: {problem}. Write a different one."
     return None
 
 

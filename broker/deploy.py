@@ -21,12 +21,28 @@ BACKUPS_KEPT = 10
 RELOADING = ("conduit.reloading", "Reloading the world for a moment. What's changing: %s.")
 RESTARTING = ("conduit.restarting", "Restarting the server for a moment, and you'll be put back where you are. What's changing: %s.")
 UNDOING = ("conduit.undoing", "Restarting the server for a moment to undo a change that went wrong, and you'll be put back where you are.")
-NOTHING_NAMED = "the engine underneath the world"
+NOTHING_NAMED = "an update to the game's engine"
 MOST_WHY = 200
+GAME_CODE = ("mods/conduit/src/main", "mods/companion/src/main")
 
 
 class RolledBack(Exception):
     pass
+
+
+def engine_reason(before):
+    """What a restart for new engine code is for, from what's changed in the game's own code since this commit. Commit messages are public
+    and only ever about what the engine can do, so they can't spoil anything in the world. New abilities first, because they're what players can look forward to."""
+    log = runtime.run(["git", "log", "--format=%s", f"{before}..HEAD", "--", *GAME_CODE], check=False).stdout or ""
+    changes = [line.split(", and ")[0] for line in log.splitlines() if line]
+    if not changes:
+        return ""
+    changes.sort(key=lambda change: not change.startswith(("Add ", "Let ")))
+    named = [change[0].lower() + change[1:] for change in changes[:2]]
+    while len(named) > 1 and len("; ".join(named)) > MOST_WHY - 40:
+        named.pop()
+    more = len(changes) - len(named)
+    return f"an engine update: {'; '.join(named)}" + (f", and {more} more" if more else "")
 
 
 def tell_players(said, *values):

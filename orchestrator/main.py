@@ -18,6 +18,7 @@ FEATURES = workshop.REPO / "mods/genesis/features"
 STATE = pathlib.Path("/workspace/state")
 OPENING = STATE / "opening.json"
 ENGINE_UPDATED = "engine_updated"
+TEASER_ROUNDS = 3  # How many goes each thing being built gets at a line for the sidebar.
 AGENT_LABEL ="§b[Agent]§r "
 HOW_TO_ANSWER = ("§7Please answer me with a private message: type §f/dm§7, a space, then your message, like §f/dm I love exploring§7. "
                  "Only I can see those. You can also click this line to start one.")
@@ -801,12 +802,13 @@ class Agent:
                     await self.speak_if_worthwhile(event, player)
 
     async def name_what_is_being_built(self, graph):
-        """Once each, and only for what's really being built, so that this stays cheap."""
+        """Only for what's really being built, so that this stays cheap, and until there's a line, because the bare category tells players nothing."""
         for feature in list(self.building.values()):
-            if feature.get("small") or "teaser" in feature or self.governor.why_not_speak():
+            if feature.get("small") or feature.get("teaser") or feature.get("teaser_rounds", 0) >= TEASER_ROUNDS or self.governor.why_not_speak():
                 continue
             node = graph.get("nodes", {}).get(feature.get("node"), {})
             feature["teaser"] = await voice.teaser(self.governor, feature, feedback.STAGE_WORDS.get(node.get("stage"), "unknown"))
+            feature["teaser_rounds"] = feature.get("teaser_rounds", 0) + 1
             self.save()
 
     async def board_loop(self):

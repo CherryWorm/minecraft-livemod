@@ -20,6 +20,10 @@ STAGE_WORDS = {"early": "early game", "mid": "mid game", "end": "late game"}
 BOARD_TAGS = {"early": "early", "mid": "mid", "end": "late"}
 BOARD_WIDTH = 34  # The sidebar grows with its longest line and never wraps, so this is about how much of the screen it takes.
 MOST_NAMED_IN_A_RELEASE = 3
+MOST_IN_A_FIX_TITLE = 70
+# A line made only of these tells players nothing a fixed list couldn't.
+SAYS_NOTHING = {"a", "an", "the", "new", "some", "more", "another", "other", "kind", "sort", "type", "of", "thing", "something", "improved", "better",
+                *(word for category in CATEGORIES for word in category.split())}
 # Nothing a voice says reaches anyone outside the game. What the engine lacks goes in a file that notifies nobody, and what the world becomes is the
 # director's to decide, so no player should hear that someone's been told or that it's up to whoever runs the server. Prompts say so too, but players believe this.
 RELAYED = re.compile(
@@ -50,14 +54,17 @@ def without_noted(text):
 
 def describe(feature, graph, language=None):
     """What players get to read about one piece of work. A bug fix or a small convenience is named, because there's
-    nothing to spoil. Anything else is only ever its stage and its category, like "early game mob". These go by a fixed
-    list, so they can be said in someone's own language with no model, where anything a person or a model wrote stays as it was."""
+    nothing to spoil. Anything else is its line from the sidebar, which has already been checked, with its stage. Failing that
+    it's only its stage and its category, like "early game mob". Those go by a fixed list, so they can be said in someone's
+    own language with no model, where anything a person or a model wrote stays as it was."""
     say = wording.plan_words(language)
     if feature.get("small"):
         return feature.get("title") or say("a small fix")
     node = (graph or {}).get("nodes", {}).get(feature.get("node"))
     stage = STAGE_WORDS.get(node["stage"]) if node else None
     category = feature.get("category") if feature.get("category") in CATEGORIES else None
+    if feature.get("teaser"):
+        return f"{feature['teaser']} ({say(stage)})" if stage else feature["teaser"]
     if stage and category and say(stage) != stage:
         return f"{say(category)} ({say(stage)})"
     return " ".join(say(word) for word in (stage, category) if word) or say("something new")
@@ -77,17 +84,52 @@ def release_reason(abouts):
     return f"{', '.join(shown[:-1])} and {shown[-1]}" if len(shown) > 1 else shown[0]
 
 
-def safe_teaser(text, feature):
-    """A model wrote this and everyone's going to see it, so it's refused if it looks like it's giving anything away:
-    anything from the feature's own id, a name from its brief, or something capitalised like a name."""
-    text = (text or "").strip().rstrip(".").replace("§", "")
+def _plain_line(text):
+    return (text or "").strip().rstrip(".").replace("§", "")
+
+
+def teaser_problem(text, feature):
+    """Why a line a model wrote can't go in front of everyone, or None if it can. It's refused if it looks like it's giving anything
+    away: anything from the feature's own id, a name from its brief, or something capitalised like a name. It's also refused if it
+    only says what kind of thing this is, because /plan could say that with no model at all."""
+    text = _plain_line(text)
     spec = feature.get("spec", "")
     words = re.findall(r"[A-Za-z']+", text)
     named = [*feature.get("id", "").split("_"), *re.findall(r"(?<=[a-z,] )[A-Z][a-z]{2,}", spec), *re.findall(r"[A-Za-z]+", " ".join(re.findall(r"`([^`]+)`", spec)))]
     names = {name.lower() for name in named if len(name) > 2}
-    if not words or len(text) > BOARD_WIDTH or any(word[0].isupper() for word in words[1:]) or any(word.lower() in names for word in words):
-        return None
-    return text
+    if not words:
+        return "it's empty"
+    if len(text) > BOARD_WIDTH:
+        return f"it's {len(text)} characters, and it has to fit in {BOARD_WIDTH}"
+    capitalised = next((word for word in words[1:] if word[0].isupper()), None)
+    if capitalised:
+        return f"\"{capitalised}\" is capitalised like a name"
+    giving_away = next((word for word in words if word.lower() in names), None)
+    if giving_away:
+        return f"\"{giving_away}\" comes from the brief"
+    if all(word.lower() in SAYS_NOTHING for word in words):
+        return "it only says what kind of thing this is, so say what it's for"
+    return None
+
+
+def safe_teaser(text, feature):
+    return None if teaser_problem(text, feature) else _plain_line(text)
+
+
+def fix_reason(title):
+    """What everyone's told a bug fix changes. It's about something that's out, but not everyone will have found it, so a title with
+    a name in it isn't said."""
+    title = _plain_line(title)
+    words = re.findall(r"[A-Za-z']+", title)
+    if not words or len(title) > MOST_IN_A_FIX_TITLE or any(word[0].isupper() for word in words[1:]):
+        return "a bug fix"
+    return f"fixing \"{title}\""
+
+
+def balance_reason(table, field):
+    """What everyone's told a tuned number changes: what kind of thing and which number, with no name, for the same reason."""
+    number = re.sub(r"(?<=[a-z])([A-Z])", r" \1", field.removeprefix("json.").removeprefix("output.")).replace("_", " ").replace(".", " ").lower()
+    return f"a balance change to {table}: {number}"
 
 
 def board_line(feature, graph):

@@ -73,6 +73,28 @@ class Deploy(unittest.TestCase):
         deploy.deploy("T3", self.release)
         self.assertIn(deploy.NOTHING_NAMED, self.said()[0])
 
+    def reason_from(self, log):
+        with mock.patch.object(deploy.runtime, "run", mock.Mock(return_value=mock.Mock(stdout=log))) as run:
+            reason = deploy.engine_reason("abc123")
+        self.assertIn("abc123..HEAD", run.call_args.args[0])
+        self.assertIn("mods/conduit/src/main", run.call_args.args[0])
+        return reason
+
+    def test_an_engine_update_says_what_changed_in_the_game_new_things_first(self):
+        reason = self.reason_from("Fix what the compiler found, and work out a mob's walk\nLet features have vehicles and beams\nAdd fluids of a feature's own\nKeep a mob up\n")
+        self.assertEqual(reason, "an engine update: let features have vehicles and beams; add fluids of a feature's own, and 2 more")
+
+    def test_one_change_just_says_it(self):
+        self.assertEqual(self.reason_from("Add fluids of a feature's own\n"), "an engine update: add fluids of a feature's own")
+
+    def test_nothing_in_the_game_changed_means_nothing_to_name(self):
+        self.assertEqual(self.reason_from(""), "")
+
+    def test_two_long_changes_still_fit(self):
+        reason = self.reason_from(f"Add {'a' * 150}\nAdd {'b' * 150}\n")
+        self.assertLess(len(reason), deploy.MOST_WHY)
+        self.assertTrue(reason.endswith(", and 1 more"))
+
     def test_a_long_reason_is_cut_short(self):
         deploy.deploy("T2", self.release, "x" * 1000)
         self.assertLess(len(self.said()[0]), deploy.MOST_WHY + 100)

@@ -592,7 +592,7 @@ class Workshop:
                     commit = ready_commit(f"{feature_id}: {name} {field} to {value}", tree)
                 except Refused as refused:
                     return f"Refused at {refused.gate}: {refused.reason}"
-                answer = await request("release", commit=commit, release_id=f"{branch}-{int(now)}", why="a balance change")
+                answer = await request("release", commit=commit, release_id=f"{branch}-{int(now)}", why=feedback.balance_reason(table, field))
                 if answer.get("result") not in ("released", "nothing_to_release"):
                     return f"Refused at {answer.get('gate')}: {answer.get('reason')}"
                 _git("checkout", "-q", "main")

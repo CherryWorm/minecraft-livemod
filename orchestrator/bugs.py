@@ -10,7 +10,7 @@ import time
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
-from orchestrator import llm, progression, voice, workshop
+from orchestrator import feedback, llm, progression, voice, workshop
 
 STATE = pathlib.Path("/workspace/state")
 CRASHED_MIXINS = pathlib.Path("/workspace/reports/crashed_mixins.json")
@@ -239,7 +239,7 @@ class BugDesk:
         async with self.feature_locks.setdefault(entry["feature"], asyncio.Lock()):
             while True:
                 await self._wait_until_allowed()
-                shipped = await self.agent.workshop.build(entry["feature"], entry["spec"], entry["node"], entry["stage"], small=True, about="a bug fix", fix=f"bug_{number}", on_released=self._released)
+                shipped = await self.agent.workshop.build(entry["feature"], entry["spec"], entry["node"], entry["stage"], small=True, about=feedback.fix_reason(self._speakable(entry.get("title"))), fix=f"bug_{number}", on_released=self._released)
                 if shipped is not None:  # Otherwise it had to stop for now, not because of anything wrong with it.
                     return shipped
 
