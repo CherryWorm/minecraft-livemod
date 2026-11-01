@@ -6,6 +6,7 @@ RUN apk add --no-cache tinyproxy
 
 COPY tinyproxy.conf /etc/tinyproxy/tinyproxy.conf
 COPY allowed-hosts /etc/tinyproxy/allowed-hosts
+COPY entrypoint.sh /entrypoint.sh
 
 USER tinyproxy
-ENTRYPOINT ["tinyproxy", "-d", "-c", "/etc/tinyproxy/tinyproxy.conf"]
+ENTRYPOINT ["sh", "/entrypoint.sh"]

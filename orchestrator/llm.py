@@ -1,4 +1,4 @@
-"""Every Claude call goes through here, so usage is always counted and limits are always respected."""
+"""Every model call goes through here, so usage is always counted and limits are always respected."""
 import dataclasses
 import json
 import pathlib
@@ -55,8 +55,8 @@ def untrusted(label, text):
 
 async def ask(governor: Governor, role, prompt, *, system=None, schema=None, resume=None, tools=None,
               allowed_tools=None, disallowed_tools=None, cwd=None, agents=None, max_turns=4, mcp_servers=None,
-              permission_mode="dontAsk", budget=None, env=None):
-    """Runs one Claude conversation turn for a role. By default it can use no tools at all."""
+              permission_mode="dontAsk", budget=None, env=None, lane=None):
+    """Runs one conversation turn for a role. By default it can use no tools at all, and it runs on Claude unless given a lane."""
     config = ROLES[role]
     options = ClaudeAgentOptions(
         model=config["model"],
@@ -73,13 +73,13 @@ async def ask(governor: Governor, role, prompt, *, system=None, schema=None, res
         agents=agents,
         mcp_servers=mcp_servers or {},
         max_budget_usd=budget,
-        env=env or {},
+        env={**(env or {}), **(lane.env if lane else {})},
         output_format={"type": "json_schema", "schema": schema} if schema else None,
     )
     started = time.monotonic()
     final = None
     async for message in query(prompt=prompt, options=options):
-        if isinstance(message, RateLimitEvent):
+        if isinstance(message, RateLimitEvent) and lane is None:
             info = message.rate_limit_info
             governor.record_rate_limit(info.status, info.resets_at)
         elif isinstance(message, ResultMessage):
@@ -87,10 +87,12 @@ async def ask(governor: Governor, role, prompt, *, system=None, schema=None, res
     seconds = round(time.monotonic() - started, 1)
     if final is None:
         return Result("", None, "", 0.0, True, "no_result", seconds)
-    governor.record_usage(final.total_cost_usd)
+    # What Claude Code estimates for a model it doesn't know says nothing about the plan, which this doesn't touch.
+    if lane is None or lane.counted:
+        governor.record_usage(final.total_cost_usd)
     TIMELINE.parent.mkdir(parents=True, exist_ok=True)
     with TIMELINE.open("a", encoding="utf-8") as stream:
         stream.write(json.dumps({"at": time.time(), "role": role, "seconds": seconds, "estimate": final.total_cost_usd,
-                                 "error": final.is_error, "stop": final.stop_reason}) + "\n")
+                                 "error": final.is_error, "stop": final.stop_reason, **({"lane": lane.name} if lane else {})}) + "\n")
     return Result(final.result or "", final.structured_output, final.session_id, final.total_cost_usd or 0.0,
                   final.is_error, final.stop_reason or "", seconds)

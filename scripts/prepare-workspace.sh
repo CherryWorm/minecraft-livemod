@@ -11,4 +11,6 @@ docker run --rm -v "$RUNTIME_DIR:/runtime" alpine:3.22 sh -c '
   mkdir -p control agent-workspace/requests agent-workspace/responses agent-workspace/reports agent-workspace/state
   chown 1000:1000 control agent-workspace agent-workspace/requests agent-workspace/responses agent-workspace/reports agent-workspace/state
   chmod 2775 agent-workspace agent-workspace/requests agent-workspace/responses agent-workspace/reports agent-workspace/state
+  # Compose needs the file to exist, and an empty one means no self-hosted model.
+  [ -e secrets/model_key.secret ] || { : >secrets/model_key.secret; chmod 400 secrets/model_key.secret; }
 ' </dev/null

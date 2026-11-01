@@ -22,6 +22,7 @@ done
 
 # Empty until scripts/set-claude-token.sh fills it and makes it root-only.
 [[ -e "$runtime/secrets/claude_token.secret" ]] || (umask 077 && : >"$runtime/secrets/claude_token.secret")
+[[ -e "$runtime/secrets/model_key.secret" ]] || (umask 077 && : >"$runtime/secrets/model_key.secret")
 
 if [[ ! -f .env ]]; then
   cat >.env <<EOF

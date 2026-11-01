@@ -13,7 +13,7 @@ import uuid
 
 from claude_agent_sdk import AgentDefinition, create_sdk_mcp_server, tool
 
-from orchestrator import llm, preview, research, templates, tuning, world_index
+from orchestrator import lanes, llm, preview, research, templates, tuning, world_index
 
 REPO = pathlib.Path("/workspace/repo")
 PROGRESSION = "bible/progression.json"
@@ -152,12 +152,12 @@ def ready_commit(message, tree, feature_id=None, node=None):
     return _git("rev-parse", "HEAD", cwd=tree)
 
 
-async def checked_against_main(kind, message, tree, feature_id, node, **fields):
+async def checked_against_main(kind, message, tree, feature_id, node, ask=None, **fields):
     """Something else can ship while this waits its turn, and then this looks like it's removing that. Nobody's made a
     mistake, so it catches up and asks again, rather than sending a builder off to fix something that isn't wrong."""
     for _ in range(STALE_RETRIES):
         commit = ready_commit(message, tree, feature_id, node)
-        answer = await request(kind, commit=commit, **fields)
+        answer = await (ask or request)(kind, commit=commit, **fields)
         if STALE not in str(answer.get("reason")):
             break
         await asyncio.sleep(10)
@@ -215,17 +215,18 @@ def _template_tool(name, function, folder):
     return run_template
 
 
-def _tools_for(feature_id, tree, node):
+def _tools_for(feature_id, tree, node, ask=None):
     folder = tree / "mods/genesis/features" / feature_id
+    ask = ask or request
 
     @tool("lint_feature", "Instantly checks this feature against the release rules, with no compile, and gives advice. Use it as often as you like.", {})
     async def lint_feature(args):
         print(f"{feature_id}: used lint_feature", flush=True)
-        return _text(_verdict(await checked_against_main("lint", f"{feature_id}: work in progress", tree, feature_id, node), ("passed_lint",)))
+        return _text(_verdict(await checked_against_main("lint", f"{feature_id}: work in progress", tree, feature_id, node, ask=ask), ("passed_lint",)))
 
     @tool("check_feature", "Compiles this feature and runs the static checks. Takes about 10 seconds.", {})
     async def check_feature(args):
-        return _text(_verdict(await checked_against_main("check", f"{feature_id}: work in progress", tree, feature_id, node), ("passed_gates", "nothing_to_release")))
+        return _text(_verdict(await checked_against_main("check", f"{feature_id}: work in progress", tree, feature_id, node, ask=ask), ("passed_gates", "nothing_to_release")))
 
     @tool("preview_feature", "Draws this feature's art beside vanilla's in about a second, and says where the picture is, so read it with Read.", {})
     async def preview_feature(args):
@@ -238,7 +239,7 @@ def _tools_for(feature_id, tree, node):
     @tool("java_api", "Shows the real public methods and fields of a Minecraft or Fabric class. Pass the full class name.",
           {"class_name": str})
     async def java_api(args):
-        answer = await request("javap", class_name=args["class_name"])
+        answer = await ask("javap", class_name=args["class_name"])
         return _text(answer.get("output") or answer.get("reason", "Not found."))
 
     made = [_template_tool(name, function, folder) for name, function in templates.TEMPLATES.items()]
@@ -265,6 +266,8 @@ class Workshop:
         self.tune_times = []
         self.changes = 0  # So that plain code can tell whether something really was changed, whatever a model says.
         self.release_lock = asyncio.Lock()
+        self.lanes = {}  # Models other than Claude that a builder can run on, by name.
+        self.hub = None  # Other machines that can do a builder's work.
 
     def world_server(self, can_tune=False):
         """What the director, builders and tuner can ask about the world, and for the tuner, change."""
@@ -367,7 +370,21 @@ class Workshop:
             return {"approve": False, "problems": ["The review didn't complete, so it should run again."]}
         return result.structured
 
-    async def build(self, feature_id, spec, node, stage, small=False):
+    async def _attempt(self, feature_id, tree, prompt, session, small, lane, node, stage, max_turns, usage, tools, web):
+        """One go at the feature, by a model here or on another machine. Either way, what it did ends up in this tree."""
+        role = "small_builder" if small else "builder"
+        if lane == lanes.REMOTE:
+            # Being committed is what lets the machine see any earlier attempt's work.
+            ready_commit(f"{feature_id}: before going to another machine", tree, feature_id, node)
+            return await self.hub.attempt(feature_id, tree, {"prompt": prompt, "system": llm.prompt_text("builder"), "session": session, "small": small,
+                                                             "node": node, "stage": stage, "max_turns": max_turns, "budget": usage})
+        chosen = self.lanes.get(lane)
+        return await llm.ask(self.governor, role, (chosen.note if chosen and not session else "") + prompt, system=llm.prompt_text("builder"), tools=tools, allowed_tools=tools,
+                             disallowed_tools=BUILDER_DENIED, agents=None if small else SUBAGENTS, cwd=str(tree), max_turns=max_turns, resume=session,
+                             mcp_servers={"broker": _tools_for(feature_id, tree, node), "web": web, "world": self.world_server()},
+                             budget=usage, lane=chosen)
+
+    async def build(self, feature_id, spec, node, stage, small=False, lane=None):
         """Takes one feature from spec to released. Returns True if it reached players, False if it couldn't be done,
         and None if it had to stop for now and should be picked up again later."""
         started = time.monotonic()
@@ -390,10 +407,10 @@ class Workshop:
                                   f"in the world is in bible/progression.json.\n\n{llm.untrusted('spec', spec)}\n\n"
                                   f"Your feature folder is mods/genesis/features/{feature_id}/.")
             began = time.monotonic()
-            result = await llm.ask(self.governor, "small_builder" if small else "builder", prompt, system=llm.prompt_text("builder"), tools=tools, allowed_tools=tools,
-                                   disallowed_tools=BUILDER_DENIED, agents=None if small else SUBAGENTS, cwd=str(tree), max_turns=max_turns, resume=session,
-                                   mcp_servers={"broker": _tools_for(feature_id, tree, node), "web": web, "world": self.world_server()},
-                                   budget=usage)
+            result = await self._attempt(feature_id, tree, prompt, session, small, lane, node, stage, max_turns, usage, tools, web)
+            if result.stop_reason in lanes.MACHINE_GONE:
+                print(f"{feature_id}: the machine it was on has gone, so it's going back in the queue", flush=True)
+                return None
             timings[f"build_{attempt}"] = round(time.monotonic() - began, 1)
             session = result.session_id or session
             if result.is_error:

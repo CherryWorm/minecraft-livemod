@@ -197,6 +197,10 @@ services:
     build:
       context: egress
     restart: unless-stopped
+    environment:
+      # A self-hosted model's address, set by scripts/set-selfhosted-model.sh.
+      EGRESS_EXTRA_HOSTS: ${EGRESS_EXTRA_HOSTS:-}
+      EGRESS_EXTRA_PORTS: ${EGRESS_EXTRA_PORTS:-}
     cap_drop:
       - ALL
     security_opt:
@@ -281,8 +285,15 @@ services:
       AGENT_SMALL_BUILDERS: ${AGENT_SMALL_BUILDERS:-2}
       AGENT_MIND_USAGE_LIMIT: ${AGENT_MIND_USAGE_LIMIT:-2.5}
       AGENT_STOP_AFTER_RELEASES: ${AGENT_STOP_AFTER_RELEASES:-}
+      AGENT_SELFHOSTED_URL: ${AGENT_SELFHOSTED_URL:-}
+      AGENT_SELFHOSTED_MODEL: ${AGENT_SELFHOSTED_MODEL:-}
+      AGENT_SELFHOSTED_API: ${AGENT_SELFHOSTED_API:-responses}
+      AGENT_SELFHOSTED_BUILDERS: ${AGENT_SELFHOSTED_BUILDERS:-0}
+      AGENT_SELFHOSTED_VISION: ${AGENT_SELFHOSTED_VISION:-}
+      AGENT_SELFHOSTED_CONTEXT: ${AGENT_SELFHOSTED_CONTEXT:-128000}
     secrets:
       - claude_token
+      - model_key
       - bridge
       - web_proxy
     # Read-only except the workspace. The broker on the host picks up requests from there.
@@ -314,6 +325,9 @@ secrets:
     file: ${RUNTIME_DIR}/secrets/bridge.secret
   claude_token:
     file: ${RUNTIME_DIR}/secrets/claude_token.secret
+  # The self-hosted model's key. An empty file means there isn't one.
+  model_key:
+    file: ${RUNTIME_DIR}/secrets/model_key.secret
   web_proxy:
     file: ${RUNTIME_DIR}/secrets/web_proxy.secret
   # Local test stacks leave this unset, and an empty file means no password gate.

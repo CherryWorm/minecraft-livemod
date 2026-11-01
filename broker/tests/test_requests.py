@@ -7,7 +7,7 @@ import time
 import unittest
 from unittest import mock
 
-from orchestrator import feedback, llm, main, progression, voice, workshop
+from orchestrator import lanes, feedback, llm, main, progression, voice, workshop
 
 
 def result(data=None, is_error=False):
@@ -42,6 +42,9 @@ class Base(unittest.IsolatedAsyncioTestCase):
         agent.governor.why_not_build.return_value = None
         agent.governor.builders_allowed.return_value = 2
         agent.governor.small_builders_allowed.return_value = 1
+        agent.self_hosted = mock.Mock(lane=None, slots=0)
+        agent.hub = mock.Mock()
+        agent.hub.free_slots.return_value = 0
         agent.bridge = mock.Mock()
         agent.bridge.whisper = mock.AsyncMock()
         agent.bridge.call = mock.AsyncMock(return_value={})
@@ -432,6 +435,46 @@ class WhenToPlan(Base):
         self.agent.queue.pop()
         self.agent.building["big"] = {"id": "big", "node": "e_one", "spec": "x"}
         self.assertTrue(self.agent.should_plan())
+
+
+class WhichLane(Base):
+    def building(self, *on):
+        for number, lane in enumerate(on):
+            self.agent.building[f"b{number}"] = {"id": f"b{number}", "lane": lane}
+
+    def test_claude_goes_first(self):
+        self.assertIsNone(self.agent.lane_with_room())
+
+    def test_nothing_else_turned_on_means_it_waits_for_claude(self):
+        self.building(None, None)
+        self.assertIs(self.agent.lane_with_room(), False)
+
+    def test_a_self_hosted_model_takes_what_claude_has_no_room_for(self):
+        self.agent.self_hosted = mock.Mock(lane=object(), slots=1)
+        self.building(None, None)
+        self.assertEqual(self.agent.lane_with_room(), lanes.SELF_HOSTED)
+        self.building(None, None, lanes.SELF_HOSTED)
+        self.assertIs(self.agent.lane_with_room(), False)
+
+    def test_other_machines_take_what_is_left(self):
+        self.agent.hub.free_slots.return_value = 1
+        self.building(None, None)
+        self.assertEqual(self.agent.lane_with_room(), lanes.REMOTE)
+
+    def test_a_warning_from_the_plan_moves_work_over_by_itself(self):
+        self.agent.self_hosted = mock.Mock(lane=object(), slots=2)
+        self.agent.governor.builders_allowed.return_value = 1
+        self.building(None)
+        self.assertEqual(self.agent.lane_with_room(), lanes.SELF_HOSTED)
+
+    def test_small_jobs_never_count_against_big_slots(self):
+        self.agent.building["small"] = {"id": "small", "small": True}
+        self.assertIsNone(self.agent.lane_with_room())
+
+    def test_planning_keeps_enough_waiting_for_every_slot(self):
+        self.agent.self_hosted = mock.Mock(lane=object(), slots=3)
+        self.agent.hub.free_slots.return_value = 2
+        self.assertEqual(self.agent.big_slots(), 2 + 3 + 2)
 
 
 class Building(Base):

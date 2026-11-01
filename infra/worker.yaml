@@ -1,0 +1,93 @@
+# Builders on another machine, started by scripts/worker-up.sh. As locked down as the agent is on the main server, and
+# it can only reach the main server and the model it's using.
+name: livingmod-worker
+
+services:
+  egress:
+    image: livingmod/egress:1
+    build:
+      context: egress
+    restart: unless-stopped
+    environment:
+      EGRESS_EXTRA_HOSTS: ${EGRESS_EXTRA_HOSTS:-}
+      EGRESS_EXTRA_PORTS: ${EGRESS_EXTRA_PORTS:-}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /run/tinyproxy
+      - /var/log/tinyproxy
+    networks:
+      - public
+      - backend
+
+  worker:
+    depends_on:
+      - egress
+    image: livingmod/agent:${CLAUDE_AGENT_SDK_VERSION}
+    build:
+      context: agent
+      args:
+        CLAUDE_AGENT_SDK_VERSION: ${CLAUDE_AGENT_SDK_VERSION}
+    restart: unless-stopped
+    init: true
+    # See the agent's service in compose.yaml for why each of these is needed.
+    security_opt:
+      - seccomp=agent/seccomp.json
+      - systempaths=unconfined
+      - apparmor=unconfined
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    environment:
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
+      DISABLE_AUTOUPDATER: "1"
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+      HTTPS_PROXY: http://egress:8888
+      HTTP_PROXY: http://egress:8888
+      NO_PROXY: localhost,127.0.0.1
+      PYTHONPATH: /app:/reference
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      WORKER_HUB_URL: ${WORKER_HUB_URL}
+      WORKER_SLOTS: ${WORKER_SLOTS:-2}
+      WORKER_LANE: ${WORKER_LANE:-self_hosted}
+      AGENT_SELFHOSTED_URL: ${AGENT_SELFHOSTED_URL:-}
+      AGENT_SELFHOSTED_MODEL: ${AGENT_SELFHOSTED_MODEL:-}
+      AGENT_SELFHOSTED_API: ${AGENT_SELFHOSTED_API:-responses}
+      AGENT_SELFHOSTED_BUILDERS: ${AGENT_SELFHOSTED_BUILDERS:-0}
+      AGENT_SELFHOSTED_VISION: ${AGENT_SELFHOSTED_VISION:-}
+      AGENT_SELFHOSTED_CONTEXT: ${AGENT_SELFHOSTED_CONTEXT:-128000}
+    secrets:
+      - worker_token
+      - model_key
+      - claude_token
+    volumes:
+      - ../orchestrator:/app/orchestrator:ro
+      - ../docs:/reference/docs:ro
+      - ../assetkit:/reference/assetkit:ro
+      - ../mods/conduit/src/main/java/gm/conduit/api:/reference/conduit-api:ro
+      - ../mods/companion/src/main/java/gm/companion/api:/reference/companion-api:ro
+      - ${WORKER_DIR}/workspace:/workspace
+    command: ["python3", "-m", "orchestrator.worker"]
+    networks:
+      - backend
+
+networks:
+  public: {}
+  backend:
+    internal: true
+
+secrets:
+  worker_token:
+    file: ${WORKER_DIR}/secrets/worker_token.secret
+  model_key:
+    file: ${WORKER_DIR}/secrets/model_key.secret
+  claude_token:
+    file: ${WORKER_DIR}/secrets/claude_token.secret

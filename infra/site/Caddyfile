@@ -17,6 +17,13 @@
 		reverse_proxy prod:25567
 	}
 
+	# Other machines' builders, which have tokens of their own that the agent checks. Nothing's served here unless one's been added.
+	handle /worker/* {
+		reverse_proxy agent:8790 {
+			flush_interval -1
+		}
+	}
+
 	handle {
 		# Written by scripts/set-password.sh. A missing file stops the site from starting, rather than opening it.
 		import /etc/caddy/auth/auth.caddy

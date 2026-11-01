@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """The agent's main loop: plain code that routes events and decides when each role runs."""
 import asyncio
+import collections
 import json
 import os
 import pathlib
 import re
 import time
 
-from orchestrator import feedback, icon, llm, minds, progression, research, voice, workshop, world_index
+from orchestrator import feedback, icon, lanes, llm, minds, progression, research, voice, worker_hub, workshop, world_index
 from orchestrator.bridge import Bridge
 from orchestrator.governor import CONTROL, Governor
 
@@ -83,6 +84,11 @@ class Agent:
         self.research = research.Research(self.governor, self.private_words)
         self.minds = minds.Minds(self.governor, self.bridge, self.private_words)
         self.workshop = workshop.Workshop(self.governor, self.on_released, self.research, lambda: self.reached)
+        self.self_hosted = lanes.SelfHosted()
+        if self.self_hosted.lane:
+            self.workshop.lanes[lanes.SELF_HOSTED] = self.self_hosted.lane
+        self.hub = worker_hub.WorkerHub(workshop.REPO, workshop.request, self.governor, lambda: self.reached)
+        self.workshop.hub = self.hub
         self.told_about_dm = set()
         self.chat_buffer = []
         self.wake_director = asyncio.Event()
@@ -608,7 +614,25 @@ class Agent:
 
     def out_of_work(self):
         """Fewer waiting than can be built at once, so the director plans ahead rather than leaving builders idle until everything's finished."""
-        return self.waiting() < self.governor.builders_allowed()
+        return self.waiting() < self.big_slots()
+
+    def running_on(self):
+        return collections.Counter(feature.get("lane") for feature in self.building.values() if not feature.get("small"))
+
+    def big_slots(self):
+        return self.governor.builders_allowed() + self.self_hosted.slots * bool(self.self_hosted.lane) + self.running_on()[lanes.REMOTE] + self.hub.free_slots()
+
+    def lane_with_room(self):
+        """Claude first, so that what's being built now is as good as it was, and anything else takes what's left over. A warning
+        from the plan leaves Claude's builders with less room, so more work moves over by itself. False means nowhere has room."""
+        running = self.running_on()
+        if running[None] < self.governor.builders_allowed():
+            return None
+        if self.self_hosted.lane and running[lanes.SELF_HOSTED] < self.self_hosted.slots:
+            return lanes.SELF_HOSTED
+        if self.hub.free_slots() > 0:
+            return lanes.REMOTE
+        return False
 
     def engine_updated(self):
         """The owner's way of saying the engine can do more than it could. It's the file's time that counts, because the agent can only read that folder, so touching it again works again."""
@@ -648,7 +672,7 @@ class Agent:
             if node not in graph["nodes"]:
                 print(f"refusing feature {feature['id']}: node {node!r} isn't in the progression", flush=True)
                 return
-            shipped = await self.workshop.build(feature["id"], feature["spec"], node, progression.stage_of(graph, node), small=feature.get("small", False))
+            shipped = await self.workshop.build(feature["id"], feature["spec"], node, progression.stage_of(graph, node), small=feature.get("small", False), lane=feature.get("lane"))
         except Exception as error:  # noqa: BLE001 - one failed feature must not stop the others
             print(f"building {feature['id']} failed: {error}", flush=True)
         finally:
@@ -665,16 +689,25 @@ class Agent:
 
     def start_work(self):
         """Small jobs have slots of their own, so that one never waits behind a big feature."""
-        for small, allowed in ((True, self.governor.small_builders_allowed()), (False, self.governor.builders_allowed())):
-            running = sum(bool(feature.get("small")) == small for feature in self.building.values())
-            for feature in [feature for feature in self.queue if bool(feature.get("small")) == small]:
-                if running >= allowed:
-                    break
-                if feature["id"] not in self.building:
-                    self.queue.remove(feature)
-                    self.building[feature["id"]] = feature
-                    running += 1
-                    asyncio.create_task(self.build_one(feature))
+        def start(feature, lane):
+            self.queue.remove(feature)
+            feature["lane"] = lane
+            self.building[feature["id"]] = feature
+            asyncio.create_task(self.build_one(feature))
+
+        running = sum(bool(feature.get("small")) for feature in self.building.values())
+        for feature in [feature for feature in self.queue if feature.get("small")]:
+            if running >= self.governor.small_builders_allowed():
+                break
+            if feature["id"] not in self.building:
+                start(feature, None)
+                running += 1
+        for feature in [feature for feature in self.queue if not feature.get("small")]:
+            lane = self.lane_with_room()
+            if lane is False:
+                break
+            if feature["id"] not in self.building:
+                start(feature, lane)
         self.save()
 
     async def build_loop(self):
@@ -769,7 +802,7 @@ class Agent:
             await self.bridge.events.put({"event": "join", "player": name})
         print("agent running", flush=True)
         await asyncio.gather(readers, self.event_loop(), self.chat_loop(), self.build_loop(), self.sort_loop(), self.opening_loop(),
-                             self.status_loop(), self.watch_loop(), self.board_loop())
+                             self.status_loop(), self.watch_loop(), self.board_loop(), self.self_hosted.serve(), self.hub.serve())
 
 
 if __name__ == "__main__":

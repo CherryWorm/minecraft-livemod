@@ -72,6 +72,15 @@ Everything new has to be worth having the day it ships, so the director puts wha
 
 JEI shows this world's recipes through a plugin in the companion, under "Recipes you know". The server sends each player only what they've earned: open recipes once they've held something it uses, gated ones once learned, and machine recipes the same way, or once made if they're there to be worked out. Players with an older companion just don't get it.
 
+## More builders
+
+Builders can run on more than the plan. Directing, reviewing, chat and minds always stay on Claude, and everything any builder makes goes through the same gates and review. Each is off until you set it up.
+
+- **A self-hosted model.** `sudo ./scripts/set-selfhosted-model.sh`, then `./scripts/agent-up.sh`. It asks for the model's address, its name, which API it speaks (`responses` as Codex uses, or `chat`), how many builders it can take at once, and its key. Claude's builders fill up first, and this takes what's left over. If the plan warns about its limits, more work moves over by itself. The key only ever stays in the agent's main process, and builders talk to a small translator there. Check the model can really do the job with `spikes/selfhosted_check.py`.
+- **Other machines.** On the server, `sudo ./scripts/add-worker.sh <name> <slots>` prints a token once. On the other machine, which needs Docker and a checkout of this repository at the same commit, run `./scripts/worker-up.sh <https://server> <slots> <self_hosted|claude>`. It connects out over HTTPS, so it can be behind a router. It only has a model write code: compiling, gates and releases stay on the main server, so more builders eventually queue there. Remove a machine by deleting its entry from `runtime/control/workers.json`. After updating the server, update each machine's checkout and start it again, because a machine on different code is refused when it connects.
+
+Gates and releases still happen one at a time, at about two to three minutes a feature, so that's the ceiling however many builders there are.
+
 `/board` turns a sidebar on or off for the player who types it, and it stays that way until they change it. It shows how many things have shipped, are being built and are queued, and a spoiler-free line about each thing being built. A small model writes those lines from the brief, and they're refused for anything that looks like a name. Nothing needs installing. If the agent stops, the board says so within about 90 seconds.
 
 `/plan` shows any player what's being built and what's next, in order. Bug fixes and small conveniences are named, and everything else is only its stage and a category from a fixed list, like "early game mob", so nothing's spoiled. Plain code writes it.
