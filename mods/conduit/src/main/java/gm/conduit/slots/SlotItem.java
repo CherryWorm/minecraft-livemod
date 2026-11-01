@@ -18,6 +18,7 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
@@ -116,8 +117,18 @@ public final class SlotItem extends SimplePolymerItem {
 		if (context.getClickedFace() != Direction.UP || !allowedGround || !level.getBlockState(spot).canBeReplaced()) {
 			return InteractionResult.PASS;
 		}
-		level.setBlockAndUpdate(spot, placement.block().defaultBlockState());
-		level.playSound(null, spot, placement.block().defaultBlockState().getSoundType().getPlaceSound(), SoundSource.BLOCKS, 1.0F, 1.0F);
+		// A seed isn't a block in the game's eyes, so it has to ask and tell in the same way as one that is.
+		if (placement.block() instanceof SlotBlock block && !block.canPlace(new BlockPlaceContext(context))) {
+			return InteractionResult.FAIL;
+		}
+		BlockState placed = placement.block().defaultBlockState();
+		level.setBlockAndUpdate(spot, placed);
+		level.playSound(null, spot, placed.getSoundType().getPlaceSound(), SoundSource.BLOCKS, 1.0F, 1.0F);
+		ItemStack before = context.getItemInHand().copy();
+		placement.block().setPlacedBy(level, spot, placed, context.getPlayer(), before);
+		if (context.getPlayer() instanceof ServerPlayer player) {
+			ServerModuleHost.instance().fire(events -> events.blockPlaced(player, level, spot, placed, before));
+		}
 		context.getItemInHand().consume(1, context.getPlayer());
 		return InteractionResult.SUCCESS;
 	}

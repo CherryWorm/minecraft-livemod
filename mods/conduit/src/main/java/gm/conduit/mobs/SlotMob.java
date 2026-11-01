@@ -120,6 +120,7 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity, Flyi
 	private Consumer<Boolean> walkDone;
 	private MobBehavior walkOwner;
 	private int walkUntil;
+	private int walkNextLook;
 	private int walkFailures;
 	private boolean flies;
 	/** What modules have done to its parts, by part, kept here so it comes back with the world. */
@@ -283,6 +284,7 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity, Flyi
 		this.walkDone = done;
 		this.walkOwner = ServerModuleHost.instance().mobBehavior(slotId());
 		this.walkUntil = this.tickCount + WALK_GIVES_UP_TICKS;
+		this.walkNextLook = this.tickCount;
 		this.walkFailures = 0;
 		getNavigation().stop();
 	}
@@ -314,7 +316,8 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity, Flyi
 		}
 		if (this.tickCount >= this.walkUntil) {
 			finishWalk(false);
-		} else if (getNavigation().isDone() || this.tickCount % WALK_REPLAN_TICKS == 0) {
+		} else if (this.tickCount >= this.walkNextLook) {
+			this.walkNextLook = this.tickCount + WALK_REPLAN_TICKS;
 			boolean found = getNavigation().moveTo(this.walkingTo.getX() + 0.5, this.walkingTo.getY(), this.walkingTo.getZ() + 0.5, this.walkSpeed);
 			this.walkFailures = found ? 0 : this.walkFailures + 1;
 			if (this.walkFailures >= STUCK_TRIES) {
