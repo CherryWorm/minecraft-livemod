@@ -38,7 +38,7 @@ final class KnownRecipeCategory implements IRecipeCategory<KnownRecipes.Shown> {
 
 	@Override
 	public Component getTitle() {
-		return Component.literal("Recipes you know");
+		return Component.translatableWithFallback("companion.jei.known_recipes", "Recipes you know");
 	}
 
 	@Override

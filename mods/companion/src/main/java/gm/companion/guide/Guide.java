@@ -38,6 +38,7 @@ public final class Guide {
 	private static final KeyMapping OPEN_KEY = new KeyMapping("key.companion.guide", InputConstants.KEY_B, KeyMapping.Category.MISC);
 	private static boolean stale;
 	private static List<KnownRecipes.Shown> recipesInBook = List.of();
+	private static String languageInBook = "";
 
 	private Guide() {}
 
@@ -63,6 +64,12 @@ public final class Guide {
 		}
 		if (KnownRecipes.known() != recipesInBook) {
 			recipesInBook = KnownRecipes.known();
+			stale = true;
+		}
+		// The book reads its pages in one language when it's built, and changing language in the options doesn't build it again.
+		String language = client.getLanguageManager().getSelected();
+		if (!language.equals(languageInBook)) {
+			languageInBook = language;
 			stale = true;
 		}
 		// Not under someone reading it, because that would take the page they're on away from them.

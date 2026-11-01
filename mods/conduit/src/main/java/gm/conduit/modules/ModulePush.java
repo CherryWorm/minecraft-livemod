@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import gm.conduit.pack.Words;
 import io.netty.buffer.ByteBuf;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
@@ -93,7 +94,7 @@ public final class ModulePush {
 				return;
 			}
 			if (!ServerPlayNetworking.canSend(player, INVENTORY_HOOKS)) {
-				player.sendSystemMessage(Component.literal(OUT_OF_DATE));
+				player.sendSystemMessage(Words.say("conduit.out_of_date", OUT_OF_DATE));
 			}
 			ACTIVE.values().forEach(module -> send(player, module));
 		});

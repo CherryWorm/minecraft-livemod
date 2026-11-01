@@ -3,6 +3,7 @@ package gm.conduit;
 import eu.pb4.polymer.virtualentity.api.ElementHolder;
 import eu.pb4.polymer.virtualentity.api.attachment.ManualAttachment;
 import eu.pb4.polymer.virtualentity.api.elements.BlockDisplayElement;
+import gm.conduit.pack.Words;
 import net.fabricmc.fabric.api.entity.event.v1.ServerEntityLevelChangeEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
@@ -77,7 +78,7 @@ public final class Opening {
 				return true;
 			}
 			if (player instanceof ServerPlayer serverPlayer) {
-				serverPlayer.sendSystemMessage(Component.literal("§7Nothing can be broken until the world opens."), true);
+				serverPlayer.sendSystemMessage(Words.say("conduit.opening.no_breaking", "§7Nothing can be broken until the world opens."), true);
 			}
 			return false;
 		});
@@ -133,7 +134,7 @@ public final class Opening {
 		server.overworld().getWorldBorder().setSize(OPEN_SIZE);
 		server.setDifficulty(server instanceof DedicatedServer dedicated ? dedicated.getProperties().difficulty.get() : Difficulty.NORMAL, true);
 		server.getCommands().performPrefixedCommand(server.createCommandSourceStack().withSuppressedOutput(), "time set day");
-		server.getPlayerList().broadcastSystemMessage(Component.literal(
+		server.getPlayerList().broadcastSystemMessage(Words.say("conduit.opening.opened",
 				"§e§lThe world has opened.§r§e The wall is gone, you can break things, monsters and hunger are back, and a new day is starting."), false);
 		LOGGER.info("the opening is over");
 		return true;
@@ -191,6 +192,6 @@ public final class Opening {
 		// Nobody may be near spawn, and an unloaded chunk reports its ground as the bottom of the world.
 		overworld.getChunk(spawn);
 		player.teleportTo(spawn.getX() + 0.5, overworld.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, spawn.getX(), spawn.getZ()), spawn.getZ() + 0.5);
-		player.sendSystemMessage(Component.literal("§7The world is still small for now, so you've been brought back to spawn."));
+		player.sendSystemMessage(Words.say("conduit.opening.brought_back", "§7The world is still small for now, so you've been brought back to spawn."));
 	}
 }

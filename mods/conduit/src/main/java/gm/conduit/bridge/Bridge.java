@@ -6,11 +6,13 @@ import com.mojang.brigadier.Command;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import gm.conduit.KillSwitch;
 import gm.conduit.mobs.Minds;
+import gm.conduit.pack.Words;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.minecraft.ChatFormatting;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -77,7 +79,7 @@ public final class Bridge {
 		// A command rather than a mode, so a player always knows which of their words are public.
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> dispatcher.register(Commands.literal("dm")
 				.executes(context -> {
-					context.getSource().getPlayerOrException().sendSystemMessage(literal(DM_USAGE));
+					context.getSource().getPlayerOrException().sendSystemMessage(Words.say("conduit.dm_usage", DM_USAGE));
 					return Command.SINGLE_SUCCESS;
 				})
 				.then(Commands.argument("message", StringArgumentType.greedyString()).executes(context -> {
@@ -87,7 +89,7 @@ public final class Bridge {
 
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> dispatcher.register(Commands.literal("bug")
 				.executes(context -> {
-					context.getSource().getPlayerOrException().sendSystemMessage(literal(BUG_USAGE));
+					context.getSource().getPlayerOrException().sendSystemMessage(Words.say("conduit.bug_usage", BUG_USAGE));
 					return Command.SINGLE_SUCCESS;
 				})
 				.then(Commands.argument("report", StringArgumentType.greedyString()).executes(context -> {
@@ -98,7 +100,7 @@ public final class Bridge {
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> dispatcher.register(Commands.literal("plan").executes(context -> {
 			ServerPlayer player = context.getSource().getPlayerOrException();
 			if (CLIENTS.isEmpty() || KillSwitch.on()) {
-				player.sendSystemMessage(literal("§7The agent isn't listening right now. Try again later."));
+				player.sendSystemMessage(Words.say("conduit.not_listening", "§7The agent isn't listening right now. Try again later."));
 			} else {
 				emit(event("plan", player));
 			}
@@ -117,10 +119,10 @@ public final class Bridge {
 	/** Goes to the agent and to nobody else. Without an agent to read it, the player is told so and it goes nowhere. */
 	private static void dm(ServerPlayer player, String text) {
 		if (CLIENTS.isEmpty() || KillSwitch.on()) {
-			player.sendSystemMessage(literal("§7The agent isn't listening right now, so that wasn't sent. Try again later."));
+			player.sendSystemMessage(Words.say("conduit.not_sent", "§7The agent isn't listening right now, so that wasn't sent. Try again later."));
 			return;
 		}
-		player.sendSystemMessage(literal("§8You to the agent: §7" + text));
+		player.sendSystemMessage(Words.say("conduit.dm_echo", "§8You to the agent: %s", literal(text).withStyle(ChatFormatting.GRAY)));
 		JsonObject dm = event("dm", player);
 		dm.addProperty("text", text);
 		emit(dm);
@@ -129,10 +131,10 @@ public final class Bridge {
 	/** Like a /dm, it goes to the agent and to nobody else, but it goes straight to whoever looks into bugs. */
 	private static void bug(ServerPlayer player, String text) {
 		if (CLIENTS.isEmpty() || KillSwitch.on()) {
-			player.sendSystemMessage(literal("§7The agent isn't listening right now, so that wasn't sent. Try again later."));
+			player.sendSystemMessage(Words.say("conduit.not_sent", "§7The agent isn't listening right now, so that wasn't sent. Try again later."));
 			return;
 		}
-		player.sendSystemMessage(literal("§8Your bug report: §7" + text));
+		player.sendSystemMessage(Words.say("conduit.bug_echo", "§8Your bug report: %s", literal(text).withStyle(ChatFormatting.GRAY)));
 		JsonObject bug = event("bug", player);
 		bug.addProperty("text", text);
 		emit(bug);
@@ -142,6 +144,7 @@ public final class Bridge {
 		JsonObject json = new JsonObject();
 		json.addProperty("event", kind);
 		json.addProperty("player", player.getGameProfile().name());
+		json.addProperty("language", player.clientInformation().language());
 		return json;
 	}
 

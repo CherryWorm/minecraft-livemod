@@ -6,6 +6,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import com.mojang.brigadier.Command;
+import gm.conduit.pack.Words;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -99,12 +100,12 @@ public final class Board {
 	private static void toggle(ServerPlayer player) {
 		if (WATCHING.remove(player.getUUID())) {
 			player.connection.send(new ClientboundSetObjectivePacket(objective(), ClientboundSetObjectivePacket.METHOD_REMOVE));
-			player.sendSystemMessage(Component.literal("§7The build board is off. Type §f/board§7 to bring it back."));
+			player.sendSystemMessage(Words.say("conduit.board.off", "§7The build board is off. Type §f/board§7 to bring it back."));
 		} else {
 			refresh();
 			WATCHING.add(player.getUUID());
 			start(player);
-			player.sendSystemMessage(Component.literal("§7The build board is on. Type §f/board§7 again to hide it."));
+			player.sendSystemMessage(Words.say("conduit.board.on", "§7The build board is on. Type §f/board§7 again to hide it."));
 		}
 		save();
 	}
@@ -135,21 +136,21 @@ public final class Board {
 	private static List<Line> render() {
 		List<Line> found = new ArrayList<>();
 		if (latest != null) {
-			found.add(Line.count("Shipped", latest.get("shipped").getAsInt(), ChatFormatting.GREEN));
-			found.add(Line.count("In the works", latest.get("building").getAsInt(), ChatFormatting.YELLOW));
-			found.add(Line.count("In the queue", latest.get("queued").getAsInt(), ChatFormatting.AQUA));
+			found.add(Line.count("conduit.board.shipped", "Shipped", latest.get("shipped").getAsInt(), ChatFormatting.GREEN));
+			found.add(Line.count("conduit.board.building", "In the works", latest.get("building").getAsInt(), ChatFormatting.YELLOW));
+			found.add(Line.count("conduit.board.queued", "In the queue", latest.get("queued").getAsInt(), ChatFormatting.AQUA));
 		}
 		if (latest == null || System.currentTimeMillis() - heardAt > AWAY_AFTER_MILLIS) {
-			found.add(Line.note(" ", ChatFormatting.GRAY));
-			found.add(Line.note("The agent is away, so this", ChatFormatting.GRAY));
-			found.add(Line.note("isn't updating right now", ChatFormatting.GRAY));
+			found.add(Line.note("", " ", ChatFormatting.GRAY));
+			found.add(Line.note("conduit.board.away_1", "The agent is away, so this", ChatFormatting.GRAY));
+			found.add(Line.note("conduit.board.away_2", "isn't updating right now", ChatFormatting.GRAY));
 			return found;
 		}
-		found.add(Line.note(" ", ChatFormatting.GRAY));
-		found.add(Line.note("Being built now", ChatFormatting.GOLD));
+		found.add(Line.note("", " ", ChatFormatting.GRAY));
+		found.add(Line.note("conduit.board.now", "Being built now", ChatFormatting.GOLD));
 		JsonArray now = latest.getAsJsonArray("now");
 		if (now.isEmpty()) {
-			found.add(Line.note("Nothing this minute", ChatFormatting.GRAY));
+			found.add(Line.note("conduit.board.nothing", "Nothing this minute", ChatFormatting.GRAY));
 		}
 		for (int index = 0; index < Math.min(now.size(), MOST_BEING_BUILT); index++) {
 			JsonObject item = now.get(index).getAsJsonObject();
@@ -170,7 +171,7 @@ public final class Board {
 	}
 
 	private static Objective objective() {
-		return new Objective(new Scoreboard(), OBJECTIVE, ObjectiveCriteria.DUMMY, Component.literal("Build Progress").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD),
+		return new Objective(new Scoreboard(), OBJECTIVE, ObjectiveCriteria.DUMMY, Words.say("conduit.board.title", "Build Progress").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD),
 				ObjectiveCriteria.RenderType.INTEGER, false, BlankFormat.INSTANCE);
 	}
 
@@ -203,25 +204,26 @@ public final class Board {
 	}
 
 	/** Words on the left, and a short right-aligned value where the score would be. */
-	private record Line(String text, ChatFormatting colour, String right, ChatFormatting rightColour) {
-		static Line count(String label, int count, ChatFormatting colour) {
-			return new Line(label, ChatFormatting.WHITE, String.valueOf(count), colour);
+	private record Line(String key, String text, ChatFormatting colour, String right, ChatFormatting rightColour) {
+		static Line count(String key, String label, int count, ChatFormatting colour) {
+			return new Line(key, label, ChatFormatting.WHITE, String.valueOf(count), colour);
 		}
 
-		static Line note(String text, ChatFormatting colour) {
-			return new Line(text, colour, "", colour);
+		static Line note(String key, String text, ChatFormatting colour) {
+			return new Line(key, text, colour, "", colour);
 		}
 
 		static Line building(String text, String tag) {
 			String clean = text.replace("§", "");
 			String shown = clean.length() > LONGEST_TEXT ? clean.substring(0, LONGEST_TEXT - 1) + "…" : clean;
 			ChatFormatting colour = TAGS.get(tag);
-			return new Line(shown, ChatFormatting.WHITE, colour == null ? "" : tag, colour == null ? ChatFormatting.GRAY : colour);
+			return new Line("", shown, ChatFormatting.WHITE, colour == null ? "" : tag, colour == null ? ChatFormatting.GRAY : colour);
 		}
 
 		ClientboundSetScorePacket packet(int index) {
 			NumberFormat format = this.right.isEmpty() ? BlankFormat.INSTANCE : new FixedFormat(Component.literal(this.right).withStyle(this.rightColour));
-			return new ClientboundSetScorePacket(owner(index), OBJECTIVE, MOST_LINES - index, Optional.of(Component.literal(this.text).withStyle(this.colour)), Optional.of(format));
+			Component shown = this.key.isEmpty() ? Component.literal(this.text) : Words.say(this.key, this.text);
+			return new ClientboundSetScorePacket(owner(index), OBJECTIVE, MOST_LINES - index, Optional.of(shown.copy().withStyle(this.colour)), Optional.of(format));
 		}
 	}
 }

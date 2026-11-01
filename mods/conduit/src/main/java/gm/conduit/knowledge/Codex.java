@@ -2,6 +2,7 @@ package gm.conduit.knowledge;
 
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import gm.conduit.pack.Words;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -82,7 +83,7 @@ public final class Codex {
 	public static void open(ServerPlayer player, String entry) {
 		List<KnowledgePlan.Entry> known = Knowledge.instance().knownEntries(player);
 		if (known.isEmpty()) {
-			player.sendSystemMessage(Component.literal("§7Nothing is written here yet. Look closer at the world."));
+			player.sendSystemMessage(Words.say("conduit.codex_empty", "§7Nothing is written here yet. Look closer at the world."));
 			return;
 		}
 		if (ServerPlayNetworking.canSend(player, Open.TYPE)) {
@@ -93,17 +94,18 @@ public final class Codex {
 		}
 		List<Filterable<Component>> pages = new ArrayList<>();
 		for (KnowledgePlan.Entry item : known) {
-			List<String> parts = split(item.text());
+			// Pages hold so much text that where they end has to go by the words a player will really read, and it's only read once anyway.
+			List<String> parts = split(Words.shown(player, item.titleKey() + ".text", item.text()));
 			for (int index = 0; index < parts.size(); index++) {
 				// A real style, because a §r here resets to white, which can't be read on a book's page.
 				MutableComponent page = Component.empty();
 				if (index == 0) {
-					page.append(Component.literal(item.title()).withStyle(ChatFormatting.BOLD)).append("\n\n");
+					page.append(Component.literal(Words.shown(player, item.titleKey(), item.title())).withStyle(ChatFormatting.BOLD)).append("\n\n");
 				}
 				pages.add(Filterable.passThrough(page.append(parts.get(index))));
 			}
 		}
-		showBook(player, "Codex", pages);
+		showBook(player, Words.shown(player, "conduit.codex_title", "Codex"), pages);
 	}
 
 	private static void sendIfChanged(ServerPlayer player) {

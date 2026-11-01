@@ -272,7 +272,7 @@ class BlockDrops(unittest.TestCase):
                 (root / "feature" / "assets" / "models" / "m.bbmodel").write_text("{}", encoding="utf-8")
                 ledger = {**self.LEDGER, "mobs": {"f/m": {"slot": "e0001"}}}
                 with self.assertRaises(bundles.BundleError) as caught:
-                    bundles._render_mob({"dir": root / "feature"}, "f", "m", {"display": "M", "drops": drops}, ledger, {}, root, root)
+                    bundles._render_mob({"dir": root / "feature"}, "f", "m", {"display": "M", "drops": drops}, ledger, bundles.LanguageFiles({}), root, root)
                 self.assertIn("one of this world's items", str(caught.exception))
 
     def test_an_empty_list_is_refused(self):
@@ -389,7 +389,7 @@ class MobSounds(unittest.TestCase):
             (root / "feature" / "assets" / "models").mkdir(parents=True)
             (root / "feature" / "assets" / "models" / "m.bbmodel").write_text("{}", encoding="utf-8")
             _, definition = bundles._render_mob({"dir": root / "feature"}, "f", "m", {"display": "M", "sounds": {"hurt": "$sound:yelp", "death": "minecraft:entity.pig.death"}},
-                                                {"mobs": {"f/m": {"slot": "e0001"}}}, {}, root, root)
+                                                {"mobs": {"f/m": {"slot": "e0001"}}}, bundles.LanguageFiles({}), root, root)
         self.assertEqual(definition["sounds"], {"hurt": "gm:" + bundles._sound_id("f", "yelp"), "death": "minecraft:entity.pig.death"})
 
 

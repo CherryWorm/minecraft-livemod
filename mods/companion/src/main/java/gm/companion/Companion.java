@@ -56,12 +56,12 @@ public final class Companion implements ClientModInitializer {
 				ClientCommands.literal("companion")
 						.then(ClientCommands.literal("off").executes(context -> {
 							HOST.setTurnedOff(true);
-							context.getSource().sendFeedback(Component.literal("Modules are off on this computer."));
+							context.getSource().sendFeedback(Component.translatableWithFallback("companion.modules_off", "Modules are off on this computer."));
 							return Command.SINGLE_SUCCESS;
 						}))
 						.then(ClientCommands.literal("on").executes(context -> {
 							HOST.setTurnedOff(false);
-							context.getSource().sendFeedback(Component.literal("Modules are on. They'll load next time you join."));
+							context.getSource().sendFeedback(Component.translatableWithFallback("companion.modules_on", "Modules are on. They'll load next time you join."));
 							return Command.SINGLE_SUCCESS;
 						}))));
 	}

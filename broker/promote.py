@@ -16,6 +16,7 @@ import time
 
 from broker import bundles, deploy, runtime, sign
 from broker.gates import GateFailed, advice, balance, bytecode, client, mixins, progression, shadow, static
+from orchestrator import wording
 
 SERVER_MODS = ("conduit",)
 PROGRESS_SNAPSHOT = "progress_snapshot.json"
@@ -68,7 +69,7 @@ def compile_content(source, mods, content):
     new_ledger = bundles.assign_slots(features, json.loads(json.dumps(old_ledger)), pool)
     if content.exists():
         shutil.rmtree(content)
-    bundles.render(features, new_ledger, content, runtime.data_format(), runtime.vanilla_biome, discovery_scope(source), progression_nodes(source), runtime.vanilla_dimension_type)
+    bundles.render(features, new_ledger, content, runtime.data_format(), runtime.vanilla_biome, discovery_scope(source), progression_nodes(source), runtime.vanilla_dimension_type, wording.load_languages(source))
     return features, pool, old_ledger, new_ledger
 
 
@@ -218,9 +219,10 @@ def changed_panels(content, old_content):
 
 
 def fingerprint(content, jars, current):
-    """Identifies what a gate run proved: this exact content and these jars, on top of this release."""
+    """Identifies what a gate run proved: this exact content and these jars, on top of this release. Words in another language don't count, because
+    no slow gate looks at them and the instant checks run every time anyway, and a translation arriving shouldn't mean testing everything again."""
     digest = hashlib.sha256(str(current).encode())
-    digest.update(bundles.tree_hash(content).encode())
+    digest.update(bundles.tree_hash(content, wording.is_translation).encode())
     for jar in sorted(jars):
         digest.update(jar.read_bytes())
     return digest.hexdigest()

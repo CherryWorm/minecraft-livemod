@@ -11,7 +11,7 @@ Each feature is one folder, `mods/genesis/features/<id>/`, where `<id>` is lower
     textures/<name>.png        16x16 unless you have reason otherwise
     textures/<name>.png.mcmeta only for animation
     models/<block_name>.json   optional custom block model
-    lang.json                  optional extra translated text
+    lang.json                  rarely needed. Use "texts" in feature.json instead
   server/                      optional Java module, on the server
     src/main/java/...
     src/main/resources/module.properties   contains entry=<class>
@@ -205,7 +205,7 @@ It's a small cube with an arm toward each neighbour that's the same block, any m
 
 Use `$block:name` and `$item:name` in recipes and models. For another feature's content, use `$item:other_feature/name`. Never write a slot ID yourself.
 
-`display` is the only readable name players can see. Everything else in the pack and data pack is renamed to meaningless IDs automatically.
+`display` is the only readable name players can see. Everything else in the pack and data pack is renamed to meaningless IDs automatically. Write it in English, and see "Text" for how it reaches players in other languages.
 
 A released name can never be removed, because worlds may contain it. To retire something, keep it declared, mark it `"retired": true` and stop making it obtainable.
 
@@ -310,7 +310,7 @@ public final class EmberModule implements ServerModule {
         context.bindBlock("ember_block", new BlockBehavior() {
             @Override
             public InteractionResult use(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
-                player.sendSystemMessage(Component.literal("The block is warm."));
+                player.sendSystemMessage(context.text("warm"));
                 return InteractionResult.SUCCESS;
             }
         });
@@ -336,7 +336,7 @@ What each behaviour can do is in `/reference/conduit-api/`, and all of it is opt
 A module can open a menu made of chest slots, or a book, and neither needs anything on a player's computer:
 
 ```java
-context.openMenu(player, Component.literal("Survey"), 3, new MenuBehavior() {
+context.openMenu(player, context.text("survey"), 3, new MenuBehavior() {
     @Override
     public void draw(MenuView menu) {
         menu.set(13, new ItemStack(Items.COMPASS));
@@ -350,7 +350,7 @@ context.openMenu(player, Component.literal("Survey"), 3, new MenuBehavior() {
     }
 });
 
-context.openBook(player, "Field Notes", List.of(Component.literal("The first page.")));
+context.openBook(player, context.textFor(player, "notes_title"), List.of(context.text("notes_first_page")));
 ```
 
 A menu has from 1 to 6 rows of 9. Each slot is a button: what's in it is only a picture, which can't be taken, and `draw` runs again after every click. Give the items names with `DataComponents.CUSTOM_NAME` so they say what they do. A menu closes by itself if your module is unloaded, and `closed(menu)` tells you when it does for any reason. For several pages, call `openMenu` again with the next one.
@@ -406,7 +406,7 @@ context.openPanel(player, "kiln", machine, new PanelBehavior() {
     @Override
     public void tick(PanelView panel) {
         panel.setValue("heat", machine.data().getFloatOr("heat", 0));
-        panel.setText("state", machine.data().getBooleanOr("lit", false) ? "Burning" : "Cold");
+        panel.setText("state", context.textFor(panel.player(), machine.data().getBooleanOr("lit", false) ? "burning" : "cold"));
     }
 
     @Override
@@ -424,11 +424,42 @@ context.openPanel(player, "kiln", machine, new PanelBehavior() {
 
 `opened` sets what it starts with and `tick` keeps it current. Only what's really different gets sent, so setting everything every tick is fine. `clicked` hears buttons, tabs and rows, with the row's number for a list, `typed` hears a text field, and `closed` hears it closing, whyever it closed. A module can use `setText`, `setValue`, `setEnabled`, `setVisible`, `setTooltip`, `setItem` for an icon, `setRows` for a list, `setTyped`, `setPage` and `close`, by the widget's `id`.
 
-For someone to talk to or trade with, a `mob`, a `label` for what it says, and a `list` of what they can say or buy back with `PanelRow.of("Bread", new ItemStack(Items.BREAD))` is all it takes. A row can be turned off with a reason: `new PanelRow("Sold out", icon, false, "Come back tomorrow")`.
+For someone to talk to or trade with, a `mob`, a `label` for what it says, and a `list` of what they can say or buy back with `PanelRow.of(context.textFor(panel.player(), "bread"), new ItemStack(Items.BREAD))` is all it takes. A row can be turned off with a reason: `new PanelRow(context.textFor(panel.player(), "sold_out"), icon, false, context.textFor(panel.player(), "come_back"))`.
 
 Someone with no companion, or one too old for panels, gets the same panel as a plain chest, which does all the same things: slots are slots, and buttons, tabs and rows are named items they can click. So nothing needs its own code, but keep it usable that way: a bar's value is only a number in an item's name there, and they can't type at all, so never make typing the only way. Every slot, button, tab and row, and anything with an `id`, takes a place in that chest, which has 54.
 
 The release gates open each new or changed panel on a real client and photograph it for the reviewer, before anything has driven it, so what a module sets in `opened` won't be in that picture.
+
+### Text
+
+Players read this world in the language their game is set to, English or German so far. Write everything in English, and it gets translated when the feature goes out. `display`, `tooltip`, knowledge, a panel's words and these `texts` all do that by themselves, and German names stay the same from then on, so what you write in English is what gets named. Don't write German anywhere yourself.
+
+Text a module says goes in `texts`, by a name of your choosing:
+
+```json
+"texts": {
+  "warm": "The block is warm.",
+  "holds": "It holds %s of %s."
+}
+```
+
+```java
+player.sendSystemMessage(context.text("warm"));
+player.sendSystemMessage(context.text("holds", stack.getCount(), stack.getHoverName()));
+stack.set(DataComponents.CUSTOM_NAME, context.text("warm"));
+```
+
+- `context.text(name, values...)` is a message that each player's game shows in their own language, and it's what to use anywhere that takes a `Component`: chat, a menu's title, a book's pages, the name or lore on a stack. A value goes in where it says `%s`, and it can be a number, a string or another message, so give it `stack.getHoverName()` rather than its `getString()`, and each player sees that in their language too. If the values have to go in a different order in a sentence, `%1$s` and `%2$s` say which is which, and `%%` is a percent sign. Nothing else that looks like a place for a value works.
+- `context.textFor(player, name, values...)` is the same as plain text in one player's language, for what only takes plain text: what a panel says, and a book's title.
+- `"other_feature/name"` uses another feature's text.
+
+A client module has `context.text(name, values...)` too, for what it draws.
+
+`texts` go in the resource pack with everything else that gets translated, under names that give nothing away, so someone who unpacks it could read them, the same as a Codex page they haven't earned. Words that would really spoil something if read early can stay in the code, in English.
+
+Text written straight into code, like `Component.literal("The block is warm.")`, stays English for everyone, and the instant check points it out. A number, a symbol or something a player typed is fine as it is. Tell a player about a thing by its message, not by reading its name into a sentence you've written, or the sentence comes out half in one language.
+
+Words in another language can come out longer, so leave room on a label, and a button whose translation doesn't fit stays in English.
 
 ### Talking to other features
 
@@ -587,7 +618,7 @@ Only what's listed here is allowed, so anything else is refused until the owner 
 - From `java.util`: the collections, `Collections`, `Arrays`, `Objects`, `Optional` and `Comparator`, and everything in `java.util.function`. Not streams.
 - For drawing: `GuiGraphicsExtractor`, `Font` and `DeltaTracker`.
 - `ItemStack`, but only what's listed above.
-- For text: `Component`, `MutableComponent`, `FormattedText`, `FormattedCharSequence`, `Style`, `TextColor`, `ChatFormatting` and `Identifier`.
+- For text: `Component`, `MutableComponent`, `FormattedText`, `FormattedCharSequence`, `Style`, `TextColor`, `ChatFormatting` and `Identifier`. Use `context.text` for words, so they come out in each player's language.
 - For math: `Mth`, `ARGB`, `CommonColors`, `Vec2` and `Vec3`.
 - `Minecraft`, but only `getInstance()`, `font`, `getFps()` and `getDeltaTracker()`.
 

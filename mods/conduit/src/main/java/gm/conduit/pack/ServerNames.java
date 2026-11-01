@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.stream.Stream;
 
 /**
  * Tells the server what the resource pack calls things. Only clients read a pack, so to the server everything from this
@@ -22,8 +23,10 @@ import java.util.Map;
  */
 public final class ServerNames {
 	private static final Logger LOGGER = LoggerFactory.getLogger("Conduit");
-	private static final Path FILE = Path.of("live-assets", "assets", "gm", "lang", "en_us.json");
+	public static final String ENGLISH = "en_us";
+	private static final Path FOLDER = Path.of("live-assets", "assets", "gm", "lang");
 	private static final Language GAME = Language.getInstance();
+	private static Map<String, Map<String, String>> languages = Map.of();
 
 	private ServerNames() {}
 
@@ -33,8 +36,20 @@ public final class ServerNames {
 		ServerLifecycleEvents.END_DATA_PACK_RELOAD.register((server, resources, success) -> reload());
 	}
 
+	/** What the pack says for a key in one language, going by English if it doesn't say, and otherwise by what it's given. */
+	static String in(String language, String key, String otherwise) {
+		String found = languages.getOrDefault(language, Map.of()).get(key);
+		return found != null ? found : languages.getOrDefault(ENGLISH, Map.of()).getOrDefault(key, otherwise);
+	}
+
+	/** The English for a key, or null if the pack has no such key. */
+	public static String english(String key) {
+		return languages.getOrDefault(ENGLISH, Map.of()).get(key);
+	}
+
 	private static void reload() {
-		Map<String, String> names = read();
+		languages = readAll();
+		Map<String, String> names = languages.getOrDefault(ENGLISH, Map.of());
 		Language.inject(new Language() {
 			@Override
 			public String getOrDefault(String key, String fallback) {
@@ -59,16 +74,26 @@ public final class ServerNames {
 		});
 	}
 
-	private static Map<String, String> read() {
-		Map<String, String> names = new HashMap<>();
-		if (!Files.exists(FILE)) {
-			return names;
+	private static Map<String, Map<String, String>> readAll() {
+		Map<String, Map<String, String>> found = new HashMap<>();
+		if (!Files.isDirectory(FOLDER)) {
+			return found;
 		}
+		try (Stream<Path> files = Files.list(FOLDER)) {
+			files.filter(file -> file.toString().endsWith(".json")).forEach(file -> found.put(file.getFileName().toString().replace(".json", ""), read(file)));
+		} catch (IOException error) {
+			LOGGER.error("Can't read {}", FOLDER, error);
+		}
+		return found;
+	}
+
+	private static Map<String, String> read(Path file) {
+		Map<String, String> names = new HashMap<>();
 		try {
-			JsonObject json = new Gson().fromJson(Files.readString(FILE), JsonObject.class);
+			JsonObject json = new Gson().fromJson(Files.readString(file), JsonObject.class);
 			json.entrySet().forEach(entry -> names.put(entry.getKey(), entry.getValue().getAsString()));
 		} catch (IOException | RuntimeException error) {
-			LOGGER.error("Can't read {}", FILE, error);
+			LOGGER.error("Can't read {}", file, error);
 		}
 		return names;
 	}

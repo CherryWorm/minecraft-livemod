@@ -6,10 +6,13 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import gm.conduit.bridge.Bridge;
 import gm.conduit.knowledge.Knowledge;
+import gm.conduit.pack.Words;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -382,6 +385,6 @@ public final class Minds {
 	static void speakAround(SlotMob mob, String text) {
 		AABB area = mob.getBoundingBox().inflate(HEARING_RANGE);
 		((ServerLevel) mob.level()).getEntitiesOfClass(ServerPlayer.class, area).forEach(player ->
-				player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§e" + mob.displayName() + "§r: " + text)));
+				player.sendSystemMessage(Words.say(mob.getType().getDescriptionId(), mob.displayName()).withStyle(ChatFormatting.YELLOW).append(Component.literal(": " + text).withStyle(ChatFormatting.WHITE))));
 	}
 }

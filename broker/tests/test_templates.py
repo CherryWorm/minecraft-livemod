@@ -802,8 +802,9 @@ class Machines(Case):
 
     def test_a_display_name_cant_break_the_java(self):
         new_machine(self.at(), name="crucible", display='The "Big" One\\', casing="#70707a", accent="#e88e36")
-        source = next((self.at() / "server").rglob("*.java")).read_text(encoding="utf-8")
-        self.assertIn(r'The \"Big\" One\\ makes something.', source)
+        manifest = json.loads((self.at() / "feature.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["texts"]["made"], 'The "Big" One\\ makes something.')
+        self.assertIn('context.text("made")', next((self.at() / "server").rglob("*.java")).read_text(encoding="utf-8"))
 
     def test_a_second_machine_leaves_the_module_alone(self):
         new_machine(self.at(), name="one", display="One", casing="#70707a", accent="#e88e36")

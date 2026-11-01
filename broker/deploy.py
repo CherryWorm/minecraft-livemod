@@ -17,9 +17,10 @@ CRASH_WINDOW_SECONDS = 600
 HEALTH_SECONDS = {"T1": 10, "T2": 15, "T3": 40}
 SAFE_WAIT_SECONDS = 60
 BACKUPS_KEPT = 10
-RELOADING = "Reloading the world for a moment."
-RESTARTING = "Restarting the server for a moment, and you'll be put back where you are."
-UNDOING = "Restarting the server for a moment to undo a change that went wrong, and you'll be put back where you are."
+# Each by what the pack calls it, so each player's game says it in their language. What's changing is plain words from when it was built, which stay in English.
+RELOADING = ("conduit.reloading", "Reloading the world for a moment. What's changing: %s.")
+RESTARTING = ("conduit.restarting", "Restarting the server for a moment, and you'll be put back where you are. What's changing: %s.")
+UNDOING = ("conduit.undoing", "Restarting the server for a moment to undo a change that went wrong, and you'll be put back where you are.")
 NOTHING_NAMED = "the engine underneath the world"
 MOST_WHY = 200
 
@@ -28,10 +29,11 @@ class RolledBack(Exception):
     pass
 
 
-def tell_players(text):
+def tell_players(said, *values):
     """Said just before the game freezes or restarts, so nobody's left wondering why. Plain text with no model involved, because
     a model's answer would come after the reload it's explaining. If it can't be sent, the release goes ahead anyway."""
-    runtime.rcon("prod", "tellraw", "@a", json.dumps({"text": text, "color": "gray"}), check=False)
+    key, english = said
+    runtime.rcon("prod", "tellraw", "@a", json.dumps({"translate": key, "fallback": english, "color": "gray", **({"with": list(values)} if values else {})}), check=False)
 
 
 def wait_for_safe_moment():
@@ -120,7 +122,7 @@ def deploy(tier, release_folder, why=""):
     safe = wait_for_safe_moment()
     # Test runs in other lanes carry on meanwhile, so none of them can be copying the world while this changes or restarts it.
     with runtime.world_lock():
-        tell_players(f"{RESTARTING if tier == 'T3' else RELOADING} What's changing: {(why or NOTHING_NAMED)[:MOST_WHY]}.")
+        tell_players(RESTARTING if tier == "T3" else RELOADING, (why or NOTHING_NAMED)[:MOST_WHY])
         mark = runtime.utc_now()
         content = release_folder / "content"
         backup_file = None

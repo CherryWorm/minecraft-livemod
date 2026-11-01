@@ -7,7 +7,8 @@ import hashlib
 import math
 import re
 
-BOOK = "assets/companion/patchouli_books/guide/en_us"
+BOOKS = "assets/companion/patchouli_books/guide"
+ENGLISH = "en_us"
 NAMESPACE = "companion"
 # About what fits on a line, under an entry's title, and on a page after it. A page that goes over is drawn smaller, so these can be approximate.
 LINE_CHARACTERS = 26
@@ -83,16 +84,17 @@ def _icon(entry):
     return DEFAULT_ICON
 
 
-def _category(path, name, icon, description, flags, sortnum, parent=None):
-    category = {"name": name, "icon": icon, "description": description, "sortnum": sortnum, "flag": "|" + ",".join(sorted(flags))}
-    if parent:
-        category["parent"] = f"{NAMESPACE}:{parent}"
-    return f"{BOOK}/categories/{path}.json", category
+def book(entries, nodes, language=ENGLISH, say=str):
+    """Every file of the book in one language, as {path in the pack: contents}. Entries are each like {key, title, text, routes, recipes, node, things, icon},
+    and nodes is the progression graph's. Each stage of it is a category of the book, and each node a category within that. What the book itself says goes through say."""
+    folder = f"{BOOKS}/{language}"
 
+    def _category(path, name, icon, description, flags, sortnum, parent=None):
+        category = {"name": name, "icon": icon, "description": description, "sortnum": sortnum, "flag": "|" + ",".join(sorted(flags))}
+        if parent:
+            category["parent"] = f"{NAMESPACE}:{parent}"
+        return f"{folder}/categories/{path}.json", category
 
-def book(entries, nodes):
-    """Every file of the book, as {path in the pack: contents}. Entries are each like {key, title, text, routes, recipes, node, things, icon},
-    and nodes is the progression graph's. Each stage of it is a category of the book, and each node a category within that."""
     files = {}
     filed = {}
     for entry in entries:
@@ -101,12 +103,12 @@ def book(entries, nodes):
         recipes = entry["recipes"]
         pages += [{"type": "gm:recipe", "recipes": recipes[start:start + RECIPES_PER_PAGE]} for start in range(0, len(recipes), RECIPES_PER_PAGE)]
         category = f"n{_node_hash(entry['node'])}" if entry["node"] in nodes else "other"
-        files[f"{BOOK}/entries/{flag(entry['key'])}.json"] = {
+        files[f"{folder}/entries/{flag(entry['key'])}.json"] = {
             "name": entry["title"], "category": f"{NAMESPACE}:{category}", "icon": _icon(entry), "flag": flag(entry["key"]), "pages": pages}
 
     if None in filed:
         name, icon, description = OTHER
-        path, category = _category("other", name, icon, description, [flag(entry["key"]) for entry in filed[None]], len(STAGES) * MOST_SUBCATEGORIES)
+        path, category = _category("other", say(name), icon, say(description), [flag(entry["key"]) for entry in filed[None]], len(STAGES) * MOST_SUBCATEGORIES)
         files[path] = category
 
     for stage_number, (stage, (name, icon, description)) in enumerate(STAGES.items()):
@@ -115,12 +117,12 @@ def book(entries, nodes):
         for part, start in enumerate(range(0, len(here), MOST_SUBCATEGORIES)):
             root = f"s_{stage}" if part == 0 else f"s_{stage}_{part + 1}"
             chunk = here[start:start + MOST_SUBCATEGORIES]
-            path, category = _category(root, name if part == 0 else f"{name}, Part {part + 1}", icon, description,
+            path, category = _category(root, say(name) if part == 0 else say("%s, Part %s") % (say(name), part + 1), icon, say(description),
                                        [flag(entry["key"]) for node in chunk for entry in filed[node]], stage_number * MOST_SUBCATEGORIES + part)
             files[path] = category
             for position, node in enumerate(chunk):
                 node_name = nodes[node].get("name", node)
-                path, category = _category(f"n{_node_hash(node)}", node_name, _icon(filed[node][0]), f"What you've come to know about {node_name}.",
+                path, category = _category(f"n{_node_hash(node)}", node_name, _icon(filed[node][0]), say("What you've come to know about %s.") % node_name,
                                            [flag(entry["key"]) for entry in filed[node]], position, root)
                 files[path] = category
     return files

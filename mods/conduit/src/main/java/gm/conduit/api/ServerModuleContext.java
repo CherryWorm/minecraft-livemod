@@ -3,6 +3,7 @@ package gm.conduit.api;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -66,6 +67,18 @@ public interface ServerModuleContext {
 	 * and then a recipe that has to be learned only works if the whole world shares what's learned and someone knows it.
 	 */
 	MachineAttempt attemptRecipe(Player player, String machine, List<ItemStack> inputs);
+
+	/**
+	 * Says one of this feature's "texts", or "other_feature/name", in each player's own language. Send it to anyone, or use it anywhere that takes
+	 * a message, like a stack's name, and each player's game shows it in theirs. Values go in where it says %s, and can be messages themselves, like a stack's getHoverName().
+	 */
+	MutableComponent text(String name, Object... args);
+
+	/**
+	 * The same, as plain text in one player's language, for what can only take plain text, like what a panel says, or a book's title. It's whatever
+	 * their game's set to right now, so don't keep it. Vanilla's own names stay in English here, because the server doesn't have those.
+	 */
+	String textFor(Player player, String name, Object... args);
 
 	/** Opens a menu made of chest slots, from 1 to 6 rows, which needs nothing on the player's computer. */
 	void openMenu(ServerPlayer player, Component title, int rows, MenuBehavior behavior);

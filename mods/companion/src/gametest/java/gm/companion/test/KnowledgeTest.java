@@ -42,6 +42,8 @@ import net.minecraft.world.scores.Scoreboard;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -273,9 +275,74 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				String shown = context.computeOnClient(client -> client.gui.screen() == null ? "none" : client.gui.screen().getClass().getSimpleName());
 				LOGGER.info("[M8] the screen is {}", shown);
 			}
+			// The same steps as the game's own language screen.
+			case "language" -> {
+				context.runOnClient(client -> {
+					client.getLanguageManager().setSelected(words[1]);
+					client.options.languageCode = words[1];
+					client.reloadResourcePacks();
+					client.options.save();
+					client.options.broadcastOptions();
+				});
+				context.waitTicks(40);
+				context.waitFor(client -> client.gui.overlay() == null, 2 * TICKS_PER_MINUTE);
+			}
+			case "whatlanguage" -> {
+				String shown = context.computeOnClient(client -> client.getLanguageManager().getSelected());
+				LOGGER.info("[M8] language {}", shown);
+			}
+			case "title" -> {
+				String shown = context.computeOnClient(client -> client.gui.screen() == null ? "none" : client.gui.screen().getTitle().getString());
+				LOGGER.info("[M8] title {}", shown);
+			}
+			case "hoverhotbar" -> {
+				int place = Integer.parseInt(words[1]);
+				double[] pixel = context.computeOnClient(client -> {
+					AbstractContainerScreen<?> screen = (AbstractContainerScreen<?>) client.gui.screen();
+					AbstractContainerScreenAccessor at = (AbstractContainerScreenAccessor) screen;
+					Slot found = screen.getMenu().getSlot(FIRST_HOTBAR_SLOT + place);
+					double scale = client.getWindow().getGuiScale();
+					return new double[] {(at.companion$leftPos() + found.x + 8) * scale, (at.companion$topPos() + found.y + 8) * scale};
+				});
+				context.getInput().setCursorPos(pixel[0], pixel[1]);
+				context.waitTicks(5);
+			}
+			case "bookpage" -> {
+				String shown = context.computeOnClient(client -> client.gui.screen() instanceof BookViewScreen book ? firstPage(book) : "no book");
+				LOGGER.info("[M8] book page {}", shown);
+			}
+			case "menunames" -> {
+				String shown = context.computeOnClient(client -> {
+					List<String> names = new ArrayList<>();
+					for (int slot = 0; slot < client.player.containerMenu.slots.size() - 36; slot++) {
+						ItemStack stack = client.player.containerMenu.getSlot(slot).getItem();
+						if (!stack.isEmpty()) {
+							names.add(stack.getHoverName().getString());
+						}
+					}
+					return String.join(" | ", names);
+				});
+				LOGGER.info("[M8] menu names {}", shown);
+			}
 			default -> LOGGER.warn("[M8] unknown request {}", request);
 		}
 		context.waitTicks(10);
+	}
+
+	/** The screen keeps what it's showing to itself, and this is only a test. */
+	private static String firstPage(BookViewScreen screen) {
+		try {
+			for (Field field : BookViewScreen.class.getDeclaredFields()) {
+				// There's a shared empty one as well, which isn't what this screen's showing.
+				if (field.getType() == BookViewScreen.BookAccess.class && !Modifier.isStatic(field.getModifiers())) {
+					field.setAccessible(true);
+					return ((BookViewScreen.BookAccess) field.get(screen)).getPage(0).getString().replace("\n", " | ");
+				}
+			}
+			return "no pages";
+		} catch (IllegalAccessException error) {
+			throw new IllegalStateException(error);
+		}
 	}
 
 	private static String sidebar(Scoreboard scoreboard) {

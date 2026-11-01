@@ -2,10 +2,15 @@
 
 Each attempt that goes back costs minutes of gates and review, so these get said in the instant check instead.
 """
+import re
+
 from broker.gates import balance
+from orchestrator import wording
 
 # Building blocks are made to be placed, so nothing has to use them.
 BUILDING_FAMILIES = {"stone", "wood", "soil", "glow", "metal", "cutout"}
+# Words a player would read, going straight into a message. A single word might be a name or a symbol, so it takes two.
+LITERAL_TEXT = re.compile(r"(?:Component\.literal|setText|setTooltip|PanelRow\.of)\((?:\s*\"[^\"]*\",\s*)?[^\"()]*\"([^\"]*[A-Za-z]+ [A-Za-z]+[^\"]*)\"")
 
 
 def _used_anywhere(features, recipes):
@@ -70,4 +75,8 @@ def run(features):
             notes.append(f"{feature_id} has a machine. If it does anything by itself, declare it in \"automation\" with a per_minute rate.")
         if (manifest.get("items") or manifest.get("blocks") or manifest.get("mobs")) and not manifest.get("knowledge"):
             notes.append(f"{feature_id} has no knowledge entry, so it has no page in the Codex and players have nowhere to read about it.")
+        written_in = [found for path in sorted(feature["dir"].glob("*/src/main/java/**/*.java")) for found in LITERAL_TEXT.findall(path.read_text(encoding="utf-8"))]
+        if written_in:
+            notes.append(f"{feature_id}'s code writes {len(written_in)} {wording.TEXT_IN_CODE}, like {written_in[0]!r}, and those stay in English for players in other languages. "
+                         "Put them in \"texts\" in feature.json and use context.text(\"name\"). See \"Text\" in docs/feature-format.md.")
     return notes

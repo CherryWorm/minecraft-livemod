@@ -137,7 +137,7 @@ class Release(unittest.TestCase):
         self.addCleanup(self.folder.cleanup)
 
     def page(self, out):
-        return json.loads(next((out / "pack" / guide.BOOK / "entries").glob("*.json")).read_text(encoding="utf-8"))
+        return json.loads(next((out / "pack" / guide.BOOKS / guide.ENGLISH / "entries").glob("*.json")).read_text(encoding="utf-8"))
 
     def test_a_release_writes_its_knowledge_into_the_book(self):
         out, ledger = self.rendered()

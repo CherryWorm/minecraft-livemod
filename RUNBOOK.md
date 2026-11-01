@@ -74,6 +74,14 @@ Everything new has to be worth having the day it ships, so the director puts wha
 
 JEI shows this world's recipes through a plugin in the companion, under "Recipes you know". The server sends each player only what they've earned: open recipes once they've held something it uses, gated ones once learned, and machine recipes the same way, or once made if they're there to be worked out. Players with an older companion just don't get it.
 
+## Languages
+
+Each player reads this world in the language their game is set to, English or German so far, and changing it in the game's options is all it takes. Builders write everything in English. Just before a feature goes to its gates, a role on the cheapest model puts anything new into German, and that's kept on main in `bible/lang/de_de.json`, by the English it came from. So only what's changed ever gets asked about, it costs a few seconds per feature, and the same words always come out the same, which means a name players have learned doesn't change between releases. To change a German name by hand, edit that file. What's already out gets caught up within about 10 minutes of the agent starting, and goes out with the next release. A translation that loses a token or a colour code is thrown away, and English shows until a later try gets it right, so nothing ever shows a raw key or an id.
+
+The engine's own words, the Codex's headings and what plain code says in chat are written by hand in `orchestrator/words/de_de.json`. If you add something players read to conduit, say it with `Words.say`, and a test fails until it has German. `LANGUAGES` in `orchestrator/wording.py` is the list of languages.
+
+Still English, on purpose or for now: the password dialog and anything else shown before the pack loads, commands only you use, teasers and small jobs' titles on `/board` and `/plan`, what a broadcast says when the watcher speaks to everyone, machine names in JEI, vanilla's own names in a panel's plain text, and anything a module wrote straight into its code. The instant check points that last one out to builders.
+
 ## More builders
 
 Builders can run on more than the plan. Directing, reviewing, chat and minds always stay on Claude, and everything any builder makes goes through the same gates and review. Each is off until you set it up.

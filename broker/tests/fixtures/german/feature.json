@@ -1,0 +1,63 @@
+{
+  "id": "german",
+  "phase": 1,
+  "summary": "Test fixture for the world in another language: names, tooltips, the book, a panel, and what modules say.",
+  "node": "e_first",
+  "blocks": {
+    "ember_brick": {"family": "stone", "display": "Ember Brick", "texture": "ember_brick", "tool": "pickaxe"}
+  },
+  "items": {
+    "ember_token": {"display": "Ember Token", "texture": "ember_token", "tooltip": ["Warm to the touch", "Burns 50% hotter", "Nobody has translated this line"]},
+    "glow_stone": {"display": "Glow Stone", "texture": "ember_token"},
+    "plain_thing": {"display": "Plain Thing", "texture": "ember_token"},
+    "ember_reader": {"display": "Ember Reader", "texture": "ember_token", "retired": true},
+    "ember_opener": {"display": "Ember Opener", "texture": "ember_token", "retired": true},
+    "ember_book": {"display": "Ember Book", "texture": "ember_token", "retired": true}
+  },
+  "recipes": {
+    "ember_brick": {"mode": "open", "json": {"type": "minecraft:crafting_shapeless", "ingredients": ["minecraft:brick", "minecraft:stick"], "result": {"id": "$block:ember_brick", "count": 1}}},
+    "ember_token": {"mode": "open", "json": {"type": "minecraft:crafting_shapeless", "ingredients": ["minecraft:paper", "minecraft:stick"], "result": {"id": "$item:ember_token", "count": 1}}},
+    "glow_stone": {"mode": "open", "json": {"type": "minecraft:crafting_shapeless", "ingredients": ["minecraft:paper", "minecraft:coal"], "result": {"id": "$item:glow_stone", "count": 1}}},
+    "plain_thing": {"mode": "open", "json": {"type": "minecraft:crafting_shapeless", "ingredients": ["minecraft:paper", "minecraft:clay_ball"], "result": {"id": "$item:plain_thing", "count": 1}}}
+  },
+  "knowledge": {
+    "on_embers": {
+      "title": "On Embers",
+      "text": "Every $item:ember_token stays warm for a long time. Keep one close to $block:ember_brick and it never goes cold.\nNobody knows why that is, and nobody has ever asked the bricks.",
+      "routes": [{"type": "obtain", "id": "$item:ember_token"}]
+    },
+    "on_glow": {
+      "title": "On Glowing",
+      "text": "A $item:glow_stone gives off a little light in the dark.",
+      "routes": [{"type": "obtain", "id": "$item:glow_stone"}]
+    },
+    "on_plain": {
+      "title": "On Plain Things",
+      "text": "Nobody has translated this page.",
+      "routes": [{"type": "obtain", "id": "$item:plain_thing"}]
+    }
+  },
+  "texts": {
+    "warm": "The token is warm in your hand.",
+    "holding": "You hold %s of %s.",
+    "plain": "Nobody has translated this sentence.",
+    "broken": "This one lost %s in translation.",
+    "burning": "Burning",
+    "book_title": "Ember Notes",
+    "book_page": "The first page of the notes.",
+    "hud": "Ember Display"
+  },
+  "panels": {
+    "ember_desk": {
+      "title": "Ember Desk",
+      "width": 176,
+      "height": 166,
+      "widgets": [
+        {"type": "label", "id": "state", "x": 8, "y": 20, "text": "Cold"},
+        {"type": "button", "id": "light", "x": 8, "y": 32, "width": 60, "height": 18, "text": "Light", "tooltip": "Burns one coal"},
+        {"type": "button", "id": "squeezed", "x": 72, "y": 32, "width": 30, "height": 18, "text": "Press"},
+        {"type": "tabs", "id": "pages", "x": 8, "y": 52, "tabs": [{"id": "work", "text": "Work"}, {"id": "offers", "text": "Offers"}]}
+      ]
+    }
+  }
+}

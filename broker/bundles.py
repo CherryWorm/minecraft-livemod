@@ -12,6 +12,7 @@ import shutil
 
 from broker import guide
 from orchestrator import others
+from orchestrator import wording
 
 TOKEN = re.compile(r"\$(block|item|mob|sound|biome|dimension):([a-z0-9_]+(?:/[a-z0-9_]+)?)")
 
@@ -34,6 +35,8 @@ USE_SOUND = "minecraft:intentionally_empty"
 DEFAULT_LIST_ROWS = 9
 CHEST_ROW = 9
 PANEL_IMAGE_FIELDS = ("image", "hover_image", "disabled_image", "portrait")
+# The padding of a tab and the gap after it.
+TAB_GAP = 11
 LOOKS_ONLY_ATTRIBUTES = ("minecraft:visual/", "minecraft:audio/")
 BLOCK_FACES = {"top", "bottom", "front", "back", "left", "right", "side"}
 # Everything a dimension type can say. The game ignores a field it doesn't know without saying so, so this has to catch those.
@@ -44,6 +47,40 @@ DEFAULT_DIMENSION_TYPE = "minecraft:overworld"
 
 class BundleError(Exception):
     """A problem with a bundle, worded so the agent can fix it."""
+
+
+class LanguageFiles:
+    """The pack's language files as they're written, with a translation going in beside each piece of English. A key a language
+    doesn't have falls back to English in the game itself, so a translation that's missing or no different is just left out."""
+
+    def __init__(self, languages):
+        self.english = {}
+        self.languages = languages
+        self.others = {language: {} for language in languages}
+
+    def name(self, key, english):
+        self._put(key, english, lambda words: words.name(english))
+
+    def text(self, key, english):
+        self._put(key, english, lambda words: words.text(english))
+
+    def literal(self, key, english):
+        """The same, for what goes through the game's formatting without being written for it, where a percent sign means something."""
+        self._put(key, _literal(english), lambda words: _literal(words.text(english)))
+
+    def _put(self, key, english, translate):
+        self.english[key] = english
+        for language, words in self.languages.items():
+            translated = translate(words)
+            if translated != english:
+                self.others[language][key] = translated
+
+    def write(self, pack):
+        _write_json(pack / f"assets/gm/lang/{wording.ENGLISH}.json", self.english)
+        for language, translated in self.others.items():
+            words = {**translated, **wording.engine_words(language, "game")}
+            for variant in wording.SAME_WORDS.get(language, (language,)):
+                _write_json(pack / f"assets/gm/lang/{variant}.json", words)
 
 
 def read_pool(repo):
@@ -363,7 +400,7 @@ def _copy_model(feature, feature_id, name, model_name, config):
 def _render_mob(feature, feature_id, name, mob, ledger, pack_lang, datapack, config):
     slot = ledger["mobs"][f"{feature_id}/{name}"]["slot"]
     model = _copy_model(feature, feature_id, name, mob.get("model", name), config)
-    pack_lang[f"entity.gm.{slot}"] = mob["display"]
+    pack_lang.name(f"entity.gm.{slot}", mob["display"])
     if mob.get("drops"):
         if not isinstance(mob["drops"], dict) or ":" in str(mob["drops"].get("item")):
             raise BundleError(f"{feature_id}/{name}: a mob drops one of this world's items, like {{\"item\": \"fang\", \"count\": [1, 2]}}, not {mob['drops']!r}.")
@@ -507,6 +544,46 @@ def _render_panels(feature, feature_id, ledger, pack):
     return rendered
 
 
+def _fits_on(panel, widget, text):
+    """Words in another language can be much longer, and a player can't do anything about one that runs off a button or the panel. It's better left in English."""
+    wide = len(text) * wording.CHARACTER_WIDTH
+    if widget is None:
+        return panel.get("title_x", 8) + wide <= panel.get("width", 0)
+    if widget.get("type") == "button":
+        return wide <= widget.get("width", 0) - wording.BUTTON_MARGIN
+    if widget.get("type") == "label" and not widget.get("width"):
+        return widget.get("x", 0) + wide <= panel.get("width", 0)
+    return True
+
+
+def translated_panel(panel, words):
+    """The same panel in another language. Everything but what it says stays the same, so it works the same."""
+    copied = json.loads(json.dumps(panel))
+
+    def said(holder, field, widget):
+        if isinstance(holder.get(field), str):
+            translated = words.text(holder[field])
+            if field in ("tooltip", "hint") or _fits_on(panel, widget, translated):
+                holder[field] = translated
+
+    said(copied, "title", None)
+    for widget in copied.get("widgets", []):
+        for field in ("text", "tooltip", "hint"):
+            said(widget, field, widget)
+        tabs = widget.get("tabs", [])
+        shown = [words.text(tab.get("text", "")) for tab in tabs]
+        if widget.get("x", 0) + sum(len(text) * wording.CHARACTER_WIDTH + TAB_GAP for text in shown) <= panel.get("width", 0):
+            for tab, text in zip(tabs, shown):
+                tab["text"] = text
+    return copied
+
+
+def _write_panels(panels, languages, config):
+    _write_json(config / "panels.json", panels)
+    for language, words in languages.items():
+        _write_json(config / f"panels.{language}.json", {name: translated_panel(panel, words) for name, panel in panels.items()})
+
+
 def _effect_id(feature_id, name):
     """The companion works this out the same way, from the name a module asks for."""
     return "p" + _sound_id(feature_id, name)
@@ -567,37 +644,68 @@ def _link_knowledge(entries, gated, recipe_routes):
         entries[key]["recipes"].append(recipe_id)
 
 
-def _write_book(features, ledger, entries, machines, names, nodes, pack):
-    """The Codex, from the knowledge entries as they are once everything's linked up, in the names players know things by."""
+def _literal(text):
+    return text.replace("%", "%%")
+
+
+def _write_book(features, ledger, entries, machines, names, nodes, pack, lang):
+    """The Codex, from the knowledge entries as they are once everything's linked up, in the names players know things by. Patchouli
+    finds its pages through the English folder and then prefers the same file from a player's own language's, so that's what's written.
+    Titles and text also go in the language files, for the server to say them in chat and for a client with no Patchouli to read."""
     by_machine = {}
     for recipes in machines.values():
         for recipe in recipes:
             for key in recipe["needs"]:
                 by_machine.setdefault(key, []).append(recipe["id"])
-    listed = []
-    for feature_id, feature in features.items():
-        manifest = feature["manifest"]
-        things = [f"gm:{ledger[table][f'{feature_id}/{name}']['slot']}" for table in ("items", "blocks") for name in manifest.get(table, {})]
-        for name, entry in manifest.get("knowledge", {}).items():
-            key = f"{feature_id}/{name}"
-            text = _resolve_tokens(entry["text"], feature_id, ledger)
-            entries[key]["guide"] = guide.flag(key)
-            listed.append({"key": key, "title": entry["title"], "text": re.sub(r"gm:[ise]\d{4}", lambda found: names.get(found[0], found[0]), text),
-                           "routes": entries[key]["routes"], "recipes": entries[key]["recipes"] + by_machine.get(key, []), "node": manifest.get("node"),
-                           "things": things, "icon": _resolve_tokens(entry.get("icon"), feature_id, ledger)})
-    for path, contents in guide.book(listed, nodes).items():
+
+    def listed(title, text, shown):
+        found = []
+        for feature_id, feature in features.items():
+            manifest = feature["manifest"]
+            things = [f"gm:{ledger[table][f'{feature_id}/{name}']['slot']}" for table in ("items", "blocks") for name in manifest.get(table, {})]
+            for name, entry in manifest.get("knowledge", {}).items():
+                key = f"{feature_id}/{name}"
+                resolved = _resolve_tokens(text(entry["text"]), feature_id, ledger)
+                entries[key]["guide"] = guide.flag(key)
+                found.append({"key": key, "title": title(entry["title"]), "text": re.sub(r"gm:[ise]\d{4}", lambda match: shown.get(match[0], match[0]), resolved),
+                              "routes": entries[key]["routes"], "recipes": entries[key]["recipes"] + by_machine.get(key, []), "node": manifest.get("node"),
+                              "things": things, "icon": _resolve_tokens(entry.get("icon"), feature_id, ledger)})
+        return found
+
+    def keep_words(shown, into):
+        for entry in shown:
+            into[f"knowledge.gm.{guide.flag(entry['key'])}"] = _literal(entry["title"])
+            into[f"knowledge.gm.{guide.flag(entry['key'])}.text"] = entry["text"]
+
+    english = listed(str, str, names)
+    keep_words(english, lang.english)
+    english_book = guide.book(english, nodes)
+    for path, contents in english_book.items():
         _write_json(pack / path, contents)
+    for language, words in lang.languages.items():
+        translated = listed(words.name, words.text, {thing: words.name(name) for thing, name in names.items()})
+        said = {}
+        keep_words(translated, said)
+        lang.others[language].update({key: text for key, text in said.items() if text != lang.english[key]})
+        book_words = wording.engine_words(language, "book")
+        node_names = {node: {**info, "name": words.name(info["name"])} if info.get("name") else info for node, info in nodes.items()}
+        for path, contents in guide.book(translated, node_names, language, lambda text: book_words.get(text, text)).items():
+            if contents != english_book[path.replace(f"/{language}/", f"/{wording.ENGLISH}/")]:
+                for variant in wording.SAME_WORDS.get(language, (language,)):
+                    _write_json(pack / path.replace(f"/{language}/", f"/{variant}/"), contents)
 
 
-def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared", nodes=None, vanilla_type=None):
-    """Writes pack/, datapack/ and config/ under out. Returns nothing: out is the release's content."""
+def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared", nodes=None, vanilla_type=None, languages=None):
+    """Writes pack/, datapack/ and config/ under out. Returns nothing: out is the release's content. Languages are what wording.load_languages
+    gives, and everything's written in English as well, for any game set to a language that isn't one of them."""
     pack = out / "pack"
     datapack = out / "datapack"
     config = out / "config"
     for folder in (pack, datapack, config):
         folder.mkdir(parents=True, exist_ok=True)
 
-    lang = {}
+    languages = languages or {}
+    lang = LanguageFiles(languages)
     tags = {}
     patches = []
     surface_patches = []
@@ -626,7 +734,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
             slot = ledger["blocks"][f"{feature_id}/{name}"]["slot"]
             bindings[f"{feature_id}/{name}"] = slot
             names[f"gm:{slot}"] = block["display"]
-            lang[f"block.gm.{slot}"] = block["display"]
+            lang.name(f"block.gm.{slot}", block["display"])
             _copy_texture(feature, "block", slot, block.get("texture", name), pack)
             for face, texture in block.get("faces", {}).items():
                 if face not in BLOCK_FACES:
@@ -668,7 +776,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
             slot = ledger["items"][f"{feature_id}/{name}"]["slot"]
             bindings[f"{feature_id}/{name}"] = slot
             names[f"gm:{slot}"] = item["display"]
-            lang[f"item.gm.{slot}"] = item["display"]
+            lang.name(f"item.gm.{slot}", item["display"])
             _copy_texture(feature, "item", slot, item.get("texture", name), pack)
             # Handheld is how vanilla's tools sit in the hand.
             parent = "minecraft:item/handheld" if item.get("handheld") else "minecraft:item/generated"
@@ -683,8 +791,11 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
                     "sound": USE_SOUND, "has_consume_particles": False}}
                 defaults["timed_use"] = True
             if "tooltip" in item:
+                # As keys, because a stack keeps what it was made with, whichever language whoever's holding it plays in.
+                for index, line in enumerate(item["tooltip"]):
+                    lang.literal(f"tooltip.gm.{slot}.{index}", line)
                 defaults["components"] = {**defaults.get("components", {}), "minecraft:lore": [
-                    {"text": line, "italic": False, "color": "gray"} for line in item["tooltip"]]}
+                    {"translate": f"tooltip.gm.{slot}.{index}", "fallback": _literal(line), "italic": False, "color": "gray"} for index, line in enumerate(item["tooltip"])]}
             if "components" in defaults:
                 defaults["components"] = _wearable(defaults["components"])
             if defaults:
@@ -754,9 +865,12 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
                 "touchingAir": bool(ore.get("touchingAir")),
                 **({"dimension": _resolve_tokens(ore["dimension"], feature_id, ledger)} if "dimension" in ore else {}),
             })
+        for name, text in manifest.get("texts", {}).items():
+            lang.text(f"text.gm.{wording.text_id(feature_id, name)}", text)
         lang_file = feature["dir"] / "assets" / "lang.json"
         if lang_file.exists():
-            lang.update(json.loads(lang_file.read_text(encoding="utf-8")))
+            for key, text in json.loads(lang_file.read_text(encoding="utf-8")).items():
+                lang.text(key, text)
 
     # After every mob is rendered, because the one being given a new look may be in a later feature.
     for feature_id, feature in features.items():
@@ -767,8 +881,8 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
             mobs[f"gm:{slot}"]["model"] = _copy_model(feature, feature_id, target, model_name, config)
 
     _link_knowledge(entries, gated, recipe_routes)
-    _write_book(features, ledger, entries, machines, names, nodes or {}, pack)
-    _write_json(pack / "assets/gm/lang/en_us.json", lang)
+    _write_book(features, ledger, entries, machines, names, nodes or {}, pack, lang)
+    lang.write(pack)
     if sounds_json:
         _write_json(pack / "assets/gm/sounds.json", sounds_json)
     for tag, values in tags.items():
@@ -787,7 +901,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
     _write_json(config / "block_models.json", block_models)
     _write_json(config / "machine_inventories.json", machine_inventories)
     _write_json(config / "block_settings.json", block_settings)
-    _write_json(config / "panels.json", panels)
+    _write_panels(panels, languages, config)
     _write_json(config / "knowledge.json", {"scope": scope, "entries": entries, "gated": gated, "open": sorted(open_recipes),
                                             "machines": machines, "names": names})
     _write_json(out / "recipes.json", recipe_modes)
@@ -795,13 +909,15 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
                                | {patch["id"] for patch in patches + surface_patches + biome_patches + ruin_patches})
 
 
-def tree_hash(path):
-    """A hash of everything under a folder, for telling whether a release changed it."""
+def tree_hash(path, leave_out=lambda relative: False):
+    """A hash of everything under a folder, for telling whether a release changed it. Anything leave_out says yes to doesn't count, going by its path from there."""
     digest = hashlib.sha256()
     if path.exists():
         for item in sorted(file for file in path.rglob("*") if file.is_file()):
-            digest.update(str(item.relative_to(path)).encode())
-            digest.update(item.read_bytes())
+            relative = item.relative_to(path).as_posix()
+            if not leave_out(relative):
+                digest.update(relative.encode())
+                digest.update(item.read_bytes())
     return digest.hexdigest()
 
 

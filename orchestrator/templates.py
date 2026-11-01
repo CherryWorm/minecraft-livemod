@@ -143,7 +143,6 @@ import gm.conduit.api.ServerModuleContext;
 import gm.conduit.slots.SlotBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.chat.Component;
 import net.minecraft.util.Prediction;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
@@ -190,11 +189,11 @@ public final class @CLASS@ implements ServerModule {
 			main.shrink(1);
 			off.shrink(1);
 			player.getInventory().placeItemBackInInventory(attempt.output(), Prediction.SERVER_ONLY);
-			player.sendSystemMessage(Component.literal("@DISPLAY@ makes something."));
+			player.sendSystemMessage(context.text("made"));
 		} else if (attempt.locked()) {
-			player.sendSystemMessage(Component.literal("@DISPLAY@ waits, as if you were missing something."));
+			player.sendSystemMessage(context.text("locked"));
 		} else if (attempt.nearMiss()) {
-			player.sendSystemMessage(Component.literal("@DISPLAY@ stirs."));
+			player.sendSystemMessage(context.text("near"));
 		}
 		return InteractionResult.SUCCESS;
 	}
@@ -953,7 +952,7 @@ public final class @CLASS@ implements ServerModule {
 		public void tick(PanelView panel) {
 			int left = this.machine.data().getIntOr("left", 0);
 			panel.setValue("progress", left == 0 ? 0 : 1 - (float) left / WORK_TICKS);
-			panel.setText("state", left == 0 ? "Idle" : "Working");
+			panel.setText("state", context.textFor(panel.player(), left == 0 ? "idle" : "working"));
 			panel.setEnabled("start", left == 0 && !this.machine.getItem(INPUT).isEmpty());
 		}
 
@@ -973,9 +972,9 @@ def _module_files(draft, name, display, template=MODULE):
     if draft.id in JAVA_WORDS or draft.id[0].isdigit():
         raise TemplateError(f"A module's package is gm.feature.<id>, and {draft.id} can't be a Java package name. Give the feature another id.")
     class_name = _class_name(draft.id)
-    # json.dumps gives an escaped Java string too. It's quoted in the template, so the outer quotes go.
-    spoken = json.dumps(display)[1:-1]
-    source = (template.replace("@ID@", draft.id).replace("@CLASS@", class_name).replace("@MACHINE@", name).replace("@DISPLAY@", spoken))
+    source = template.replace("@ID@", draft.id).replace("@CLASS@", class_name).replace("@MACHINE@", name)
+    draft.manifest.setdefault("texts", {}).update({"made": f"{display} makes something.", "locked": f"{display} waits, as if you were missing something.", "near": f"{display} stirs."} if template is MODULE
+                                                  else {"idle": "Idle", "working": "Working"})
     draft.file(f"server/src/main/java/gm/feature/{draft.id}/{class_name}.java", source.encode())
     draft.file("server/src/main/resources/module.properties", f"entry=gm.feature.{draft.id}.{class_name}\n".encode())
     return class_name

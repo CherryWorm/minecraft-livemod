@@ -74,13 +74,16 @@ PANEL_NEEDS_ID = {"button", "list", "text_field", "bar"}
 PANEL_BAR_DIRECTIONS = {"right", "left", "up", "down"}
 MIN_COMPASS_FRAMES = 2
 MAX_COMPASS_FRAMES = 64
+# The game only knows %s, %1$s and %%, and shows the raw text if it finds anything else that looks like a place for a value.
+BAD_TEXT_PLACE = re.compile(r"%(?:\d+\$)?(?:[A-RT-Za-rt-z]|$)|%\d+\$%")
+TEXT_USED = re.compile(r"\.text\(\s*\"([a-z0-9_/]+)\"|\.textFor\([^\";]*?,\s*\"([a-z0-9_/]+)\"")
 BLOCK_WITH_STATE = re.compile(r"[^\[\]\s]+(\[[a-z0-9_]+=[a-z0-9_]+(,[a-z0-9_]+=[a-z0-9_]+)*\])?")
 # The vanilla blocks whose block entity takes a loot table. An ender chest looks like one, but it's the player's own.
 LOOT_CONTAINERS = re.compile(r"minecraft:(chest|trapped_chest|barrel|dispenser|dropper|hopper|crafter|([a-z]+_)?shulker_box|([a-z]+_)*copper_chest)")
 # Words that would give content away if they appeared in a path players can see.
 SAFE_PATH = re.compile(r"^assets/(gm/(textures/(block/s\d{4}(_(top|bottom|front|back|left|right|side|\d))?|item/[is]\d{4}(_[cv]\d+)?)\.png(\.mcmeta)?"
-                       r"|models/(block/s\d{4}(_c?\d+)?|item/[is]\d{4}(_[cv]\d+)?)\.json|items/[is]\d{4}\.json|lang/en_us\.json|sounds/[0-9a-f]+\.ogg|sounds\.json|shaders/post/p[0-9a-f]+\.fsh|post_effect/p[0-9a-f]+\.json|textures/gui/p[0-9a-f]+\.png)"
-                       r"|companion/patchouli_books/guide/en_us/(entries/k[0-9a-f]+|categories/(n[0-9a-f]+|s_[a-z]+(_\d+)?|other))\.json)$")
+                       r"|models/(block/s\d{4}(_c?\d+)?|item/[is]\d{4}(_[cv]\d+)?)\.json|items/[is]\d{4}\.json|lang/[a-z]{2}_[a-z]{2}\.json|sounds/[0-9a-f]+\.ogg|sounds\.json|shaders/post/p[0-9a-f]+\.fsh|post_effect/p[0-9a-f]+\.json|textures/gui/p[0-9a-f]+\.png)"
+                       r"|companion/patchouli_books/guide/[a-z]{2}_[a-z]{2}/(entries/k[0-9a-f]+|categories/(n[0-9a-f]+|s_[a-z]+(_\d+)?|other))\.json)$")
 
 
 def _fail(message):
@@ -428,6 +431,26 @@ def check_items(features):
             variants = item.get("variants")
             if variants is not None and not (isinstance(variants, dict) and variants and all(isinstance(texture, str) for texture in variants.values())):
                 _fail(f"{label} has variants {variants!r}. It's names and the texture for each, like {{\"gilded\": \"ledger_gilded\"}}.")
+
+
+def check_texts(features):
+    """A module saying something by name finds out too late that it isn't there, and a bad place for a value shows a player the raw text."""
+    problems = []
+    for feature_id, feature in features.items():
+        texts = feature["manifest"].get("texts", {})
+        if not isinstance(texts, dict) or not all(isinstance(name, str) and isinstance(text, str) for name, text in texts.items()):
+            problems.append(f"{feature_id} has texts {texts!r}. It's names and what each says, like {{\"warm\": \"The block is warm.\"}}.")
+            continue
+        for name, text in texts.items():
+            if BAD_TEXT_PLACE.search(text):
+                problems.append(f"Text {feature_id}/{name} is {text!r}. A value goes in as %s, or %1$s to say which one, and a percent sign is %%.")
+        for path in sorted(feature["dir"].glob("*/src/main/java/**/*.java")):
+            for said, said_for in TEXT_USED.findall(path.read_text(encoding="utf-8")):
+                name = said or said_for
+                if "/" not in name and name not in texts:
+                    problems.append(f"{path.name} asks for the text {name!r}, which isn't in \"texts\" in {feature_id}'s feature.json.")
+    if problems:
+        _fail("\n".join(problems))
 
 
 def _inventory_place(panel):
@@ -792,6 +815,7 @@ def run(features, old_ledger, new_ledger, pool, content):
     check_block_drops(features)
     check_block_kinds(features)
     check_items(features)
+    check_texts(features)
     check_screen_effects(features)
     check_panels(features)
     check_machines(features)

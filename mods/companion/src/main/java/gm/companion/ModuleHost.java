@@ -12,6 +12,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.Identifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -314,11 +315,20 @@ public final class ModuleHost {
 			this.screenEffect = name == null ? null : Identifier.fromNamespaceAndPath("gm", effectId(this.moduleId, name));
 		}
 
+		@Override
+		public MutableComponent text(String name, Object... args) {
+			return Component.translatable("text.gm.t" + hashed(name.contains("/") ? name : this.moduleId + "/" + name), args);
+		}
+
 		/** The name it has in the resource pack, which the broker works out the same way, so that it gives nothing away. */
 		private static String effectId(String moduleId, String name) {
+			return "p" + hashed(moduleId + "/" + name);
+		}
+
+		private static String hashed(String name) {
 			try {
-				byte[] digest = MessageDigest.getInstance("SHA-256").digest((moduleId + "/" + name).getBytes(StandardCharsets.UTF_8));
-				return "p" + HexFormat.of().formatHex(digest).substring(0, EFFECT_ID_LENGTH);
+				byte[] digest = MessageDigest.getInstance("SHA-256").digest(name.getBytes(StandardCharsets.UTF_8));
+				return HexFormat.of().formatHex(digest).substring(0, EFFECT_ID_LENGTH);
 			} catch (NoSuchAlgorithmException error) {
 				throw new IllegalStateException(error);
 			}

@@ -3,7 +3,9 @@ package gm.conduit.panels;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import gm.conduit.pack.Words;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.minecraft.server.level.ServerPlayer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,6 +16,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 /**
  * A panel from the current release, as the broker rendered it. The companion draws it from the same text, and the server only
@@ -24,8 +29,12 @@ import java.util.Map;
  */
 public record PanelDefinition(String name, String text, String title, int chestRows, List<Widget> widgets, Map<String, Widget> byId, Map<Integer, Widget> byChestSlot) {
 	private static final Logger LOGGER = LoggerFactory.getLogger("Conduit");
-	private static final Path FILE = Path.of("config", "conduit", "panels.json");
+	private static final Path FOLDER = Path.of("config", "conduit");
+	private static final Path FILE = FOLDER.resolve("panels.json");
+	private static final Pattern IN_A_LANGUAGE = Pattern.compile("panels\\.([a-z_]+)\\.json");
 	private static final Map<String, PanelDefinition> PANELS = new HashMap<>();
+	// The same panels in other languages, with everything but what they say the same.
+	private static final Map<String, Map<String, PanelDefinition>> TRANSLATED = new HashMap<>();
 
 	/**
 	 * @param id what a module calls it, or an empty string for something nothing needs to change
@@ -45,27 +54,43 @@ public record PanelDefinition(String name, String text, String title, int chestR
 		ServerLifecycleEvents.END_DATA_PACK_RELOAD.register((server, resources, success) -> reload());
 	}
 
-	/** One named by a module, in its own feature or as "other_feature/name". */
-	public static PanelDefinition find(String moduleId, String name) {
-		PanelDefinition found = PANELS.get(name.contains("/") ? name : moduleId + "/" + name);
+	/** One named by a module, in its own feature or as "other_feature/name", in the player's language if there's a translation of it. */
+	public static PanelDefinition find(String moduleId, String name, ServerPlayer player) {
+		String key = name.contains("/") ? name : moduleId + "/" + name;
+		PanelDefinition found = PANELS.get(key);
 		if (found == null) {
 			throw new IllegalArgumentException("No panel is called " + name + ". It has to be in \"panels\" in feature.json");
 		}
-		return found;
+		return TRANSLATED.getOrDefault(Words.languageOf(player), Map.of()).getOrDefault(key, found);
 	}
 
 	private static void reload() {
 		PANELS.clear();
+		TRANSLATED.clear();
 		if (!Files.exists(FILE)) {
 			return;
 		}
+		readInto(FILE, PANELS);
+		try (Stream<Path> files = Files.list(FOLDER)) {
+			files.forEach(file -> {
+				Matcher language = IN_A_LANGUAGE.matcher(file.getFileName().toString());
+				if (language.matches()) {
+					readInto(file, TRANSLATED.computeIfAbsent(language.group(1), key -> new HashMap<>()));
+				}
+			});
+		} catch (IOException error) {
+			LOGGER.error("Can't look for panels in other languages", error);
+		}
+	}
+
+	private static void readInto(Path file, Map<String, PanelDefinition> panels) {
 		try {
-			JsonObject json = new Gson().fromJson(Files.readString(FILE), JsonObject.class);
+			JsonObject json = new Gson().fromJson(Files.readString(file), JsonObject.class);
 			for (Map.Entry<String, JsonElement> entry : json.entrySet()) {
-				PANELS.put(entry.getKey(), parse(entry.getKey(), entry.getValue().getAsJsonObject()));
+				panels.put(entry.getKey(), parse(entry.getKey(), entry.getValue().getAsJsonObject()));
 			}
 		} catch (IOException | RuntimeException error) {
-			LOGGER.error("Can't read {}", FILE, error);
+			LOGGER.error("Can't read {}", file, error);
 		}
 	}
 

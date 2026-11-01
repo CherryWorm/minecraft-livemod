@@ -243,7 +243,7 @@ An item can say what it is, so every stack of it has these from the start, inclu
 - `components` are the game's own item components, and a tool or weapon's numbers here answer to the same tier curve as anywhere else. Prefer this to setting them on a recipe's result, which only covers what's crafted.
 - `places` makes it a seed, or anything like one: using it on the top of a block puts that block above and uses one up. Leave out `on` to allow anything solid.
 - `handheld` holds it the way vanilla holds a tool.
-- `"tooltip": ["Always points north"]` adds fixed lines to its tooltip.
+- `"tooltip": ["Always points north"]` adds fixed lines to its tooltip, in each player's language, like everything else here. See "Text" in `docs/feature-format.md`.
 - `"use": {"seconds": 1, "animation": "brush"}` makes using it take that long, showing that animation, and then `ItemBehavior.finishUsing` runs. It isn't used up unless your module does that. The animations are `none`, `eat`, `drink`, `block`, `bow`, `trident`, `crossbow`, `spyglass`, `toot_horn`, `brush`, `bundle` and `spear`.
 - `"variants": {"gilded": "ledger_gilded"}` gives it other pictures. A stack shows one when it has `"minecraft:custom_model_data": {"strings": ["gilded"]}`, from a recipe's result or a module, and its usual `texture` otherwise.
 - `"compass": ["needle_0", "needle_1", "needle_2", "needle_3"]` makes it turn like a compass, with as many frames as you like up to 64, the first pointing straight ahead and the rest going round clockwise. It points where a stack's `minecraft:lodestone_tracker` says, which a module sets, and spins if there's nothing there or it's in another dimension.

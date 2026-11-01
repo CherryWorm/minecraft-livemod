@@ -35,7 +35,12 @@ public record KnowledgePlan(
 	public record Route(String type, String id, int needed, List<String> requires) {}
 
 	/** The guide field is what a player's book calls this entry, which is also what turns its page on. */
-	public record Entry(String id, String title, String text, List<Identifier> recipes, List<Route> routes, String guide) {}
+	public record Entry(String id, String title, String text, List<Identifier> recipes, List<Route> routes, String guide) {
+		/** What the pack calls its title. Its text is this and ".text". */
+		public String titleKey() {
+			return "knowledge.gm." + this.guide;
+		}
+	}
 
 	public record MachineInput(String item, int count) {}
 

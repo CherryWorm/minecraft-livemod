@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import gm.conduit.api.PanelBehavior;
 import gm.conduit.api.PanelRow;
 import gm.conduit.api.PanelView;
+import gm.conduit.pack.Words;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -110,7 +111,7 @@ public final class PanelMenu extends AbstractContainerMenu implements PanelView 
 
 	/** How a panel looks when nothing is driving it, which is what a builder and a reviewer see of it before it goes out. */
 	public static void preview(ServerPlayer player, String name) {
-		PanelDefinition definition = PanelDefinition.find("", name);
+		PanelDefinition definition = PanelDefinition.find("", name, player);
 		player.openMenu(new SimpleMenuProvider((id, inventory, who) -> new PanelMenu(id, inventory, player, definition, null, anyone -> true, new PanelBehavior() {}, Runnable::run),
 				Component.literal(definition.title())));
 	}
@@ -357,16 +358,20 @@ public final class PanelMenu extends AbstractContainerMenu implements PanelView 
 					yield ItemStack.EMPTY;
 				}
 				PanelRow row = list.get(offset);
-				yield named(row.icon().isEmpty() ? new ItemStack(Items.PAPER) : row.icon().copyWithCount(1), row.enabled() ? row.text() : row.text() + " (not available)", row.tooltip());
+				yield named(row.icon().isEmpty() ? new ItemStack(Items.PAPER) : row.icon().copyWithCount(1), row.enabled() ? row.text() : notAvailable(row.text()), row.tooltip());
 			}
 			case "bar" -> named(new ItemStack(Items.CLOCK), text + " " + Math.round(this.values.getOrDefault(widget.id(), widget.value()) * PERCENT) + "%", tooltip);
-			case "text_field" -> named(new ItemStack(Items.NAME_TAG), text, "Typing here needs the companion mod.");
+			case "text_field" -> named(new ItemStack(Items.NAME_TAG), text, Words.shown(this.player, "conduit.panel.needs_companion", "Typing here needs the companion mod."));
 			case "icon" -> named(this.items.containsKey(widget.id()) ? this.items.get(widget.id()).copyWithCount(1) : stackOf(widget.icon()), text, tooltip);
 			default -> {
 				ItemStack base = widget.icon().isEmpty() ? new ItemStack(Items.PAPER) : stackOf(widget.icon());
-				yield named(base, isEnabled(widget) ? text : text + " (not available)", tooltip);
+				yield named(base, isEnabled(widget) ? text : notAvailable(text), tooltip);
 			}
 		};
+	}
+
+	private String notAvailable(String text) {
+		return Words.shown(this.player, "conduit.panel.not_available", "%s (not available)", text);
 	}
 
 	private static ItemStack named(ItemStack stack, String name, String tooltip) {

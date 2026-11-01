@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import gm.conduit.api.MachineAttempt;
 import gm.conduit.bridge.Bridge;
 import gm.conduit.modules.ServerModuleHost;
+import gm.conduit.pack.Words;
 import net.fabricmc.fabric.api.entity.event.v1.ServerEntityCombatEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -198,10 +199,11 @@ public final class Knowledge {
 		List<ServerPlayer> learners = this.plan.shared() ? this.server.getPlayerList().getPlayers() : List.of(player);
 		for (ServerPlayer learner : learners) {
 			learner.awardRecipes(recipesOf(entry));
-			learner.sendSystemMessage(Component.literal("§6✦ §rYou've learned §e" + entry.title() + "§r. ")
-					.append(Component.literal("[Read it]").withStyle(style -> style.withColor(ChatFormatting.AQUA)
+			// Colours go on what's filled in, because a colour code in a message's text stops at the first value.
+			learner.sendSystemMessage(Words.say("conduit.learned", "§6✦ §rYou've learned %s. ", Words.say(entry.titleKey(), entry.title()).withStyle(ChatFormatting.YELLOW))
+					.append(Words.say("conduit.read_it", "[Read it]").withStyle(style -> style.withColor(ChatFormatting.AQUA)
 							.withClickEvent(new ClickEvent.RunCommand("/codex " + entry.guide()))
-							.withHoverEvent(new HoverEvent.ShowText(Component.literal("Opens the Codex. You can also type /codex."))))));
+							.withHoverEvent(new HoverEvent.ShowText(Words.say("conduit.read_it_hover", "Opens the Codex. You can also type /codex."))))));
 		}
 		player.level().playSound(null, player.blockPosition(), SoundEvents.ENCHANTMENT_TABLE_USE, SoundSource.PLAYERS, 1.0F, 1.0F);
 		emitDiscovery(player, "learned " + entry.title());
@@ -260,7 +262,7 @@ public final class Knowledge {
 						continue;
 					}
 					int have = this.ledger.addFragment(scopeKey(player), entry.id());
-					player.sendSystemMessage(Component.literal("§6✦ §rA piece of something. §7(" + have + " of " + route.needed() + ")"));
+					player.sendSystemMessage(Words.say("conduit.fragment", "§6✦ §rA piece of something. %s", Words.say("conduit.fragment_count", "(%s of %s)", have, route.needed()).withStyle(ChatFormatting.GRAY)));
 					if (have >= route.needed()) {
 						learn(player, entry);
 					}

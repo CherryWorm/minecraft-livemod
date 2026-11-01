@@ -9,6 +9,7 @@ import gm.conduit.Opening;
 import gm.conduit.knowledge.Knowledge;
 import gm.conduit.mobs.Minds;
 import gm.conduit.pack.LiveAssets;
+import gm.conduit.pack.Words;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
@@ -108,7 +109,7 @@ final class Operations {
 		if (replyClick) {
 			// Always exactly this, so nothing a model writes can put another command in a player's chat box.
 			message.withStyle(style -> style.withClickEvent(new ClickEvent.SuggestCommand("/dm "))
-					.withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to start your reply"))));
+					.withHoverEvent(new HoverEvent.ShowText(Words.say("conduit.reply_hover", "Click to start your reply"))));
 		}
 		player.sendSystemMessage(message);
 		return new JsonPrimitive(true);

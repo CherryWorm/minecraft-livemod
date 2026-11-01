@@ -1,0 +1,33 @@
+{
+ "names": {
+  "Ember Brick": "Glutziegel",
+  "Ember Token": "Glutmarke",
+  "Glow Stone": "Glühstein",
+  "Ember Reader": "Glutleser",
+  "Ember Opener": "Glutöffner",
+  "Ember Book": "Glutbuch",
+  "On Embers": "Von der Glut",
+  "On Glowing": "Vom Leuchten",
+  "First Step": "Erster Abschnitt"
+ },
+ "texts": {
+  "Warm to the touch": "Fühlt sich warm an",
+  "Burns 50% hotter": "Brennt 50% heißer",
+  "Every $item:ember_token stays warm for a long time. Keep one close to $block:ember_brick and it never goes cold.\nNobody knows why that is, and nobody has ever asked the bricks.": "Jede $item:ember_token bleibt lange warm. Halte eine nahe an $block:ember_brick, und sie wird nie kalt.\nNiemand weiß, warum das so ist, und die Ziegel hat auch noch nie jemand gefragt.",
+  "A $item:glow_stone gives off a little light in the dark.": "Ein $item:glow_stone leuchtet ein wenig im Dunkeln.",
+  "The token is warm in your hand.": "Die Marke liegt warm in der Hand.",
+  "You hold %s of %s.": "Du hältst %s von %s.",
+  "This one lost %s in translation.": "Hier ist etwas verloren gegangen.",
+  "Burning": "Brennt",
+  "Ember Notes": "Glutnotizen",
+  "The first page of the notes.": "Die erste Seite der Notizen.",
+  "Ember Display": "Glutanzeige",
+  "Ember Desk": "Glutpult",
+  "Cold": "Kalt",
+  "Light": "Anzünden",
+  "Burns one coal": "Verbrennt eine Kohle",
+  "Press": "Zusammendrücken",
+  "Work": "Arbeit",
+  "Offers": "Angebote"
+ }
+}

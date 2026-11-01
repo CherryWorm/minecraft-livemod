@@ -64,7 +64,10 @@ def flatten(component):
     if isinstance(component, dict):
         text = component.get("text", "") or component.get("", "")
         if "translate" in component:
-            text = str(component["translate"])
+            # What a client with no language file for it shows, which is what the tests go by.
+            text = str(component.get("fallback", component["translate"]))
+            for value in component.get("with", []):
+                text = text.replace("%s", flatten(value) if isinstance(value, (dict, list, str)) else str(value), 1)
         return flatten(text) + "".join(flatten(part) for part in component.get("extra", []))
     return ""
 

@@ -2,6 +2,7 @@ package gm.companion.api;
 
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.MutableComponent;
 
 import java.util.function.Consumer;
 
@@ -14,6 +15,12 @@ public interface ModuleContext {
 	void onHud(HudElement element);
 
 	void onClientTick(Consumer<Minecraft> tick);
+
+	/**
+	 * Says one of this feature's "texts", or "other_feature/name", in whatever language the player's game is set to.
+	 * Values go in where it says %s. It's in the resource pack, under a name that gives nothing away.
+	 */
+	MutableComponent text(String name, Object... args);
 
 	/** Drawing on inventory screens, and the mouse and keys while one's open. */
 	void onInventory(InventoryHooks hooks);

@@ -12,6 +12,8 @@ import gm.conduit.api.ServerModuleContext;
 import gm.conduit.api.WorldEvents;
 import gm.conduit.api.MenuBehavior;
 import gm.conduit.api.PanelBehavior;
+import gm.conduit.pack.ServerNames;
+import gm.conduit.pack.Words;
 import gm.conduit.panels.PanelDefinition;
 import gm.conduit.panels.PanelMenu;
 import gm.conduit.dimensions.Dimensions;
@@ -26,6 +28,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -48,10 +51,14 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -72,6 +79,7 @@ public final class ServerModuleHost {
 	private static final Path DIRECTORY = Path.of("modules", "server");
 	private static final Path BINDINGS = Path.of("config", "conduit", "bindings.json");
 	private static final int MAX_FAILURES = 5;
+	private static final int TEXT_ID_LENGTH = 16;
 
 	private final Map<String, LoadedModule> modules = new LinkedHashMap<>();
 	private final Map<String, LoadedModule> ownerBySlot = new HashMap<>();
@@ -459,13 +467,43 @@ public final class ServerModuleHost {
 		}
 
 		private void open(ServerPlayer player, String name, Container container, Predicate<Player> stillThere, PanelBehavior behavior) {
-			PanelDefinition definition = PanelDefinition.find(this.moduleId, name);
+			PanelDefinition definition = PanelDefinition.find(this.moduleId, name, player);
 			player.openMenu(new SimpleMenuProvider((id, inventory, who) -> {
 				PanelMenu panel = new PanelMenu(id, inventory, player, definition, container, stillThere, behavior, action -> guard(this, action));
 				this.panels.removeIf(open -> open.player().containerMenu != open);
 				this.panels.add(panel);
 				return panel;
 			}, Component.literal(definition.title())));
+		}
+
+		@Override
+		public MutableComponent text(String name, Object... args) {
+			String key = textKey(name);
+			return Words.say(key, english(key, name), args);
+		}
+
+		@Override
+		public String textFor(Player player, String name, Object... args) {
+			String key = textKey(name);
+			return Words.shown(player, key, english(key, name), args);
+		}
+
+		/** The name it has in the resource pack, which the broker works out the same way, so that it gives nothing away. */
+		private String textKey(String name) {
+			try {
+				byte[] digest = MessageDigest.getInstance("SHA-256").digest((name.contains("/") ? name : this.moduleId + "/" + name).getBytes(StandardCharsets.UTF_8));
+				return "text.gm.t" + HexFormat.of().formatHex(digest).substring(0, TEXT_ID_LENGTH);
+			} catch (NoSuchAlgorithmException error) {
+				throw new IllegalStateException(error);
+			}
+		}
+
+		private static String english(String key, String name) {
+			String found = ServerNames.english(key);
+			if (found == null) {
+				throw new IllegalArgumentException("No text is called " + name + ". It has to be in \"texts\" in feature.json");
+			}
+			return found;
 		}
 
 		@Override
