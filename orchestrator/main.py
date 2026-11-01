@@ -533,7 +533,8 @@ class Agent:
         briefs = "\n".join(llm.untrusted("brief", json.dumps(brief)) for brief in self.briefs())
         unfinished_file = STATE / "unfinished.jsonl"
         unfinished = "\n".join(unfinished_file.read_text(encoding="utf-8").splitlines()[-10:]) if unfinished_file.exists() else "(none)"
-        prompt = (f"Player requests:\n{body}\n\nBeing built or waiting to be built, so don't ask for these again:\n{self.work_list()}\n\n"
+        prompt = (f"Player requests:\n{body}\n\n{self.waiting()} features are waiting to be built, and {self.governor.builders_allowed()} can be built at once.\n\n"
+                  f"Being built or waiting to be built, so don't ask for these again:\n{self.work_list()}\n\n"
                   f"What you've already decided, so be consistent with it and don't build anything twice:\n{self.decided_so_far()}\n\n"
                   f"What players have found and learned:\n{llm.untrusted('progress', progress)}\n\n"
                   f"What each player privately said they wanted, never to be quoted or attributed:\n{briefs}\n\n"
@@ -595,8 +596,12 @@ class Agent:
             self.save()
             self.wake_director.set()
 
+    def waiting(self):
+        return sum(not feature.get("small") for feature in self.queue)
+
     def out_of_work(self):
-        return not any(not feature.get("small") for feature in [*self.queue, *self.building.values()])
+        """Fewer waiting than can be built at once, so the director plans ahead rather than leaving builders idle until everything's finished."""
+        return self.waiting() < self.governor.builders_allowed()
 
     def should_plan(self):
         # While requests are being sorted, some of them may be about to become small jobs.

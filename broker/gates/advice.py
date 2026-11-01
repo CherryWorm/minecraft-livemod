@@ -23,9 +23,21 @@ def _used_anywhere(features, recipes):
     return used
 
 
+def only_turns_into_vanilla(recipes):
+    """Everything whose only recipes turn it into the game's own things. That isn't a use, because players had those already."""
+    uses = {}
+    for recipe in recipes:
+        for alternatives, _ in recipe["inputs"]:
+            for node in alternatives:
+                if not balance._is_vanilla(node):
+                    uses.setdefault(node, []).append(recipe)
+    return {node for node, found in uses.items() if all(balance._is_vanilla(output[0]) for recipe in found for output in recipe["outputs"])}
+
+
 def run(features):
     recipes = balance._read_recipes(features)
     used = _used_anywhere(features, recipes)
+    back_to_vanilla = only_turns_into_vanilla(recipes)
     notes = []
     for feature_id, feature in features.items():
         manifest = feature["manifest"]
@@ -39,6 +51,8 @@ def run(features):
             if not does_something and node not in used:
                 source = " It drops from something, but" if name in dropped else ""
                 notes.append(f"{feature_id}/{name}:{source} nothing uses it yet, so players can't do anything with it.")
+            elif node in back_to_vanilla and not components and not item.get("tier"):
+                notes.append(f"{feature_id}/{name}: all its recipes turn it into vanilla things, which isn't a real use. Reviewers will send this back unless your module gives it one.")
             if "minecraft:food" in components and "minecraft:consumable" not in components:
                 notes.append(f"{feature_id}/{name} has food values but no minecraft:consumable, so it can't be eaten.")
             if "minecraft:tool" in components:

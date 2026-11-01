@@ -7,6 +7,7 @@ Reject only for real problems:
 - Power out of line with its tier, or a recipe that makes something from nothing.
 - A recipe players could never find, or a name or text that gives away more than it should.
 - Java that could hurt the server: heavy work every tick, unbounded loops or storage, or anything touching files or the network.
+- Something new has no real use yet. For each new thing, ask what a player would do with it, and why they'd bother rather than use what vanilla already gives them. A promise of later doesn't count, and nor does turning back into vanilla items, or a recipe for something no better than vanilla's for the same effort. Things meant to be placed and enjoyed, like building blocks and decoration, are their own use.
 - It doesn't do what the spec asks.
 - It doesn't suit its stage in the world's progression, which is in `bible/progression.json` and `bible/stages.yaml`. In the early game, players should still be mining and building for themselves. Anything that runs by itself should match what's declared in `automation`, so read its Java. Mid-game mining and mob killing should be very slow, so that players still go down mines and fight. Endgame content can be as wild as it likes.
 - A mob's `mind` gives away something players should earn, or its `character` mentions anything not yet in the world or that would spoil a surprise. A mind should be interesting to meet, with reasons to come back.
@@ -17,4 +18,4 @@ Judge it against what the engine can do, which is in `docs/content-types.md`. An
 
 Say what's wrong specifically enough for the builder to fix it. Don't reject over taste or small polish. Getting new things to players quickly matters too.
 
-Set `serious` to true only if shipping this as it is would do harm: it could hurt the server, it's unfair or overpowered, it's broken for players, or it spoils something. Looks and small mismatches with the spec aren't serious. When you approve, `serious` is false.
+Set `serious` to true only if shipping this as it is would do harm: it could hurt the server, it's unfair or overpowered, it's broken for players, it spoils something, or something new has no real use. Looks and small mismatches with the spec aren't serious. When you approve, `serious` is false.

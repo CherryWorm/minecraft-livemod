@@ -330,7 +330,7 @@ class ThePlan(Base):
 class WhenToPlan(Base):
     def setUp(self):
         super().setUp()
-        self.agent.queue.append({"id": "big", "node": "e_one", "spec": "x"})
+        self.agent.queue.extend({"id": f"big{number}", "node": "e_one", "spec": "x"} for number in range(self.agent.governor.builders_allowed()))
 
     def asked(self, *wants, player="Dana"):
         super().asked(*wants, player=player)
@@ -366,6 +366,11 @@ class WhenToPlan(Base):
         self.assertTrue(self.agent.should_plan())
         self.agent.director_rest_until = time.time() + 100
         self.assertFalse(self.agent.should_plan())
+
+    def test_it_plans_ahead_without_waiting_for_everything_to_finish(self):
+        self.agent.queue.pop()
+        self.agent.building["big"] = {"id": "big", "node": "e_one", "spec": "x"}
+        self.assertTrue(self.agent.should_plan())
 
 
 class Building(Base):

@@ -26,9 +26,10 @@ FEATURE_RESEARCH = 4
 TUNES_PER_HOUR = 6
 REQUEST_TIMEOUT = {"lint": 300, "check": 300, "gates": 1800, "release": 1800, "javap": 300, "server_icon": 300, "set_rule": 300}  # Generous, because they queue behind whatever's running.
 KEEP_ASKING = ("gates", "release")  # A broker that's down or far behind isn't something a builder can fix, so these wait for it, which costs nothing.
-# Turns and usage for one attempt, and how many attempts. The later a stage is, the bigger its features can be, and
+# Turns and usage for one attempt, and how many attempts. A feature is everything that has to arrive together, so these leave
+# room for that, and most use far less. The later a stage is, the bigger its features can be, and
 # nobody's waiting on them, because they're built in the background while people play.
-STAGE_LIMITS = {"early": (60, 8.0, 3), "mid": (120, 16.0, 4), "end": (200, 30.0, 5)}
+STAGE_LIMITS = {"early": (100, 14.0, 3), "mid": (160, 24.0, 4), "end": (240, 40.0, 5)}
 SMALL_LIMITS = (40, 3.0, 2)
 STALE = "is in the ledger but no feature declares it"
 STALE_RETRIES = 4

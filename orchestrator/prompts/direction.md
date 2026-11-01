@@ -19,7 +19,7 @@ Produce, in the required JSON:
   - `early`: players still mine and build for themselves, just with more to explore, more to build and more to work out, and maybe some first conveniences. Nothing runs by itself yet.
   - `mid`: much more elaborate, and gated by resources like vanilla's own technology, so reaching it takes materials from the early game. Limited automation: crafting, machining and sorting, plus very slow automated mining and mob killing, so players still go down mines, fight and explore. Stronger gear and power-ups.
   - `end`: this can get arbitrarily crazy, and it should. Huge machines in the spirit of BuildCraft's quarries, completely overpowered mobs that take crazy gear, power-ups or spells to beat, and something big to work towards.
-- `first_features`: the first features to build, in order, as short specs, each naming its `node` and the `category` that players will see it listed under before it's out. These are all early-game: lead with what players can find straight away, such as ores and how they're distributed, then tools, plants and food, and early mobs. Keep each one small enough to build in a few minutes, and make the first one something players can find as soon as it lands.
+- `first_features`: the first features to build, in order, as short specs, each naming its `node` and the `category` that players will see it listed under before it's out. These are all early-game: lead with what players can find straight away and use, then more to explore, eat and fight. Each one has to be worth having the day it ships, so an ore comes with what it makes and why that beats what vanilla gives, not with a promise of later. Build features can be big when that's what it takes, and they're built in parallel, so each must stand on its own. Make the first one something players can find as soon as it lands.
 
 What the engine can do today, so your specs can be built quickly. Each of these needs no restart unless noted, and specs should lean on them:
 - Blocks and items with custom art, stats, tools, weapons and armor. Blocks come in families: stone, ore, deep ore, metal, wood, soil, glowing, machine, leaves and a very limited number of plants.
@@ -33,4 +33,4 @@ What the engine can do today, so your specs can be built quickly. Each of these 
 - Crafting and machine recipes, and knowledge entries learned by obtaining, examining, killing, reading or collecting pieces.
 - Java on the server for anything else: machines that run every tick, custom items and block behaviour, world events and the time and tide of the world.
 - Java on players' clients for HUDs.
-Ambitious systems are welcome, but the first version of anything should be simple, and later features can build on it.
+Ambitious systems are welcome. The first version of anything can be simple, and later features can build on it, but it has to be useful from the start.
