@@ -34,7 +34,12 @@ rm -rf "${RUNTIME_DIR:?}/lanes"
 rm -rf "${RUNTIME_DIR:?}/releases/history"
 rm -f "${RUNTIME_DIR:?}/timeline.jsonl" "$RUNTIME_DIR/control/decide_now" "$RUNTIME_DIR/control/agent_disabled"
 rm -f "$RUNTIME_DIR/velocity/server-icon.png"
-timeout 2 bash -c 'echo "velocity reload" >"$RUNTIME_DIR/velocity/console.pipe"' || true
+# A running proxy is told to drop the icon. Anything but a pipe here stops the proxy starting, and writing to it would make one.
+if [[ -p "$RUNTIME_DIR/velocity/console.pipe" ]]; then
+  timeout 2 bash -c 'echo "velocity reload" >"$RUNTIME_DIR/velocity/console.pipe"' || true
+else
+  rm -f "$RUNTIME_DIR/velocity/console.pipe"
+fi
 # The agent's container runs as another user, so some of these files aren't ours to remove directly.
 docker run --rm -v "$RUNTIME_DIR:/runtime" alpine:3.22 rm -rf /runtime/agent-workspace </dev/null
 ./scripts/prepare-workspace.sh
