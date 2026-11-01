@@ -8,6 +8,7 @@ are run on the result. Start with a blank world from reset-dev-world.sh and a ba
 
 Usage: python3 -m broker.tests.m30_test
 """
+import collections
 import json
 import os
 import pathlib
@@ -281,6 +282,19 @@ def blocks_in(chunk):
     return {section["Y"]: section.get("block_states") for section in chunk.get("sections", [])}
 
 
+def changes_between(before, after):
+    """What each block that's different became, and how many, between two copies of a chunk's blocks."""
+    found = collections.Counter()
+    for y, states in before.items():
+        if after.get(y) != states:
+            old_blocks, old_palette = world_diff.decode({"block_states": states})
+            new_blocks, new_palette = world_diff.decode({"block_states": after.get(y) or {}})
+            for old, new in zip(old_blocks, new_blocks):
+                if old_palette[old] != new_palette[new]:
+                    found[(old_palette[old], new_palette[new])] += 1
+    return found
+
+
 def chunks_of(decision, ruin):
     return {((decision["x"] + cell[0]) >> 4, (decision["z"] + cell[2]) >> 4) for part in ruin["parts"] for cell in box_cells(part)}
 
@@ -523,7 +537,12 @@ def check_crash_recovery(manifest, crash):
     missing, count = missing_from(raw, entry, ruin)
     report("after a crash partway, it finishes", not missing, f"{len(missing)} of {count} blocks missing, like {missing[:2]}")
     report("every one of its chunks now has its share", all(marker in raw.applied(*chunk) for chunk in chunks), f"{sum(marker in raw.applied(*chunk) for chunk in chunks)} of {len(chunks)}")
-    report("what was already saved wasn't changed by finishing", all(blocks_in(raw.chunk(*chunk)) == blocks for chunk, blocks in snapshot.items()), f"{len(snapshot)} chunks")
+    # Something else can still go in these chunks after the restart, like a small ruin that was waiting for the chunks next to it. Only this one's own blocks have to stay.
+    changed = collections.Counter()
+    for chunk, blocks in snapshot.items():
+        changed += changes_between(blocks, blocks_in(raw.chunk(*chunk)))
+    own = set(expected_blocks(ruin).values())
+    report("what of it was already saved wasn't changed by finishing", not any(old in own for old, _ in changed), f"{len(snapshot)} chunks, with these other changes: {changed.most_common(5)}")
     same = [item for item in decisions() if item["ruin"] == entry["ruin"] and (item["chunkX"], item["chunkZ"]) == (entry["chunkX"], entry["chunkZ"])]
     report("it was only ever decided on once", len(same) == 1, f"{len(same)} decisions")
     chest_chunk = raw.chunk((entry["x"] + 24) >> 4, (entry["z"] + 24) >> 4) if entry["ruin"] == "great_hall_v1" else None
