@@ -136,8 +136,9 @@ def setup_repo():
         source = pathlib.Path("/reference") / name
         if source.exists():
             subprocess.run(["rsync", "-a", "--delete", f"{source}/", f"{target}/"], check=False)
+    clear_strays()
     # Feature worktrees start from main, so anything they should see has to be committed there.
-    commit_all("Reference material")
+    commit_files("Reference material", ".gitignore", "docs", "assetkit")
 
 
 def _commit_staged(message, cwd):
@@ -146,9 +147,32 @@ def _commit_staged(message, cwd):
 
 
 def commit_all(message, cwd=REPO):
+    """For a builder's own tree, where everything in it is the builder's work. The main checkout uses commit_files."""
     _git("add", "-A", cwd=cwd)
     _commit_staged(message, cwd)
     return _git("rev-parse", "HEAD", cwd=cwd)
+
+
+def commit_files(message, *paths):
+    """The main checkout only ever commits what it means to. A builder has a shell and can wander in there, and adding everything
+    once put what one had left straight onto main, past review, where it stopped every voice and every release."""
+    paths = [path for path in paths if (REPO / path).exists()]
+    if not paths:
+        return
+    _git("add", "-A", "--", *paths)
+    if subprocess.run(["git", "diff", "--cached", "--quiet", "--", *paths], cwd=REPO, check=False).returncode != 0:
+        _git("commit", "-q", "-m", message, "--", *paths)
+
+
+def clear_strays():
+    """Only what's been released belongs in main's features, so anything else there was left by a builder. It would stop a merge."""
+    folder = "mods/genesis/features"
+    stray = _git("status", "--porcelain", "--", folder)
+    if stray:
+        print(f"a builder left this in the main checkout, so it's been thrown away:\n{stray}", flush=True)
+        _git("reset", "-q", "--", folder)
+        subprocess.run(["git", "checkout", "-q", "--", folder], cwd=REPO, check=False, capture_output=True)
+        _git("clean", "-fdq", "--", folder)
 
 
 def _stamp_node(tree, feature_id, node):
@@ -399,7 +423,9 @@ BUILDER_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Agent", "Task
 SMALL_TOOLS = [name for name in BUILDER_TOOLS if name not in ("Agent", "Task", research.TOOL_NAME)]
 BUILDER_DENIED = ["Read(//proc/**)", "Read(//run/**)", "Read(//home/agent/.claude/**)", "Read(//workspace/state/**)",
                   "Grep(//proc/**)", "Grep(//run/**)", "Grep(//workspace/state/**)",
-                  "Glob(//workspace/state/**)", "WebFetch", "WebSearch"]
+                  "Glob(//workspace/state/**)", "WebFetch", "WebSearch",
+                  # What's out is theirs to read and not to change. A shell can still reach it, which is why nothing commits or keeps what's left there.
+                  "Write(//workspace/repo/**)", "Edit(//workspace/repo/**)"]
 
 
 def _art_in(folder):
@@ -439,7 +465,7 @@ class Workshop:
         self.ready = []  # What's passed everything and is waiting for the next release.
         self.releasing = None
         self.art_made = json.loads(ART_MADE.read_text(encoding="utf-8")) if ART_MADE.exists() else {}  # What Opus made, by feature and file.
-        self.translator = translation.Translator(governor, REPO, commit_all)
+        self.translator = translation.Translator(governor, REPO, lambda message: commit_files(message, "bible/lang"))
 
     # Releases -----------------------------------------------------------------------------------------------
 
@@ -490,6 +516,7 @@ class Workshop:
             answer = await request("release", commit=_git("rev-parse", "HEAD", cwd=RELEASE_TREE), release_id=f"{name}-{int(time.time())}",
                                    why=feedback.release_reason(ready.about for ready in included))
             if answer.get("result") in WENT_OUT:
+                clear_strays()
                 _git("checkout", "-q", "main")
                 _git("merge", "-q", "--no-ff", "-m", f"Released {names}", RELEASE_BRANCH)
             return included, answer
@@ -595,6 +622,7 @@ class Workshop:
                 answer = await request("release", commit=commit, release_id=f"{branch}-{int(now)}", why=feedback.balance_reason(table, field))
                 if answer.get("result") not in ("released", "nothing_to_release"):
                     return f"Refused at {answer.get('gate')}: {answer.get('reason')}"
+                clear_strays()
                 _git("checkout", "-q", "main")
                 _git("merge", "-q", "--no-ff", "-m", f"Tuned {feature_id}: {reason[:80]}", branch)
             self.tune_times.append(now)

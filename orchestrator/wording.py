@@ -173,7 +173,12 @@ def known_names(root, features_dir, language):
     store = read_store(root, language)[NAMES]
     shown = {}
     for path in sorted(pathlib.Path(features_dir).glob("*/feature.json")):
-        manifest = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue  # A voice is waiting on this, and it can do without one feature's names.
+        if not isinstance(manifest, dict):
+            continue
         for table in ("blocks", "items", "mobs", "projectiles", "vehicles", "props"):
             for thing in (manifest.get(table) or {}).values():
                 english = thing.get("display")

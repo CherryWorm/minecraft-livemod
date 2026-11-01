@@ -198,10 +198,25 @@ def _guide_feature(manifest, say, not_out):
     return lines
 
 
+def manifests_in(features_dir):
+    """Every feature's manifest. One that can't be read is left out, because the voices read these for every answer, and one bad
+    file mustn't silence them."""
+    found = {}
+    for path in sorted(features_dir.glob("*/feature.json")):
+        try:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            print(f"couldn't read the feature.json of {path.parent.name}: {error}", flush=True)
+            continue
+        if isinstance(manifest, dict):
+            found[path.parent.name] = manifest
+    return found
+
+
 def _readable(features_dir):
     """What's out, a way to say things in the names players see, and the parts of the graph that nothing's out for yet.
     Only what's been released is ever merged into main, so nothing still being built can reach anyone through here."""
-    manifests = {path.parent.name: json.loads(path.read_text(encoding="utf-8")) for path in sorted(features_dir.glob("*/feature.json"))}
+    manifests = manifests_in(features_dir)
     others.apply_additions(manifests)
     names = {(feature_id, name): thing["display"] for feature_id, manifest in manifests.items()
              for table in ("blocks", "items", "mobs", "dimensions", "projectiles", "vehicles", "props") for name, thing in manifest.get(table, {}).items() if thing.get("display")}
@@ -252,8 +267,7 @@ def reached_nodes(features_dir, reached):
     """The nodes where players already have something. Those parts of the graph stay as they are."""
     reached = set(reached)
     nodes = set()
-    for path in features_dir.glob("*/feature.json"):
-        manifest = json.loads(path.read_text(encoding="utf-8"))
+    for manifest in manifests_in(features_dir).values():
         displays = {thing.get("display") for table in ("blocks", "items", "mobs", "projectiles", "vehicles", "props") for thing in manifest.get(table, {}).values()}
         if manifest.get("node") and displays & reached:
             nodes.add(manifest["node"])
@@ -263,9 +277,7 @@ def reached_nodes(features_dir, reached):
 def build(features_dir, reached=()):
     """Everything so far, by where it sits in the progression. Reached names are how players know them."""
     doc = graph.read(features_dir.parent.parent.parent / "bible" / "progression.json")
-    manifests = {}
-    for path in sorted(features_dir.glob("*/feature.json")):
-        manifests[path.parent.name] = json.loads(path.read_text(encoding="utf-8"))
+    manifests = manifests_in(features_dir)
     others.apply_additions(manifests)
     reached = set(reached)
     lines = []

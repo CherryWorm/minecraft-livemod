@@ -309,7 +309,7 @@ class Agent:
         (BIBLE / "discovery.json").write_text(json.dumps({"scope": direction["discovery_scope"]}), encoding="utf-8")
         (BIBLE / "stages.yaml").write_text(STAGES_TEMPLATE, encoding="utf-8")
         progression.save(PROGRESSION, graph)
-        workshop.commit_all("The direction for this world")
+        workshop.commit_files("The direction for this world", "bible")
         self.queue.extend(direction["first_features"])
         self.state["direction_chosen"] = True
         self.save()
@@ -687,7 +687,7 @@ class Agent:
             print(f"a change to the progression was refused: {problem}", flush=True)
         if merged is not graph:
             progression.save(PROGRESSION, merged)
-            workshop.commit_all("The progression grew")
+            workshop.commit_files("The progression grew", workshop.PROGRESSION)
 
     async def build_one(self, feature):
         shipped = False
