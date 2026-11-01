@@ -257,10 +257,17 @@ public final class PanelMenu extends AbstractContainerMenu implements PanelView 
 		if (!moved) {
 			return ItemStack.EMPTY;
 		}
+		// A slot can hand back what it's given, like one that only remembers which item to filter, and it can land right back here. Then nothing
+		// moved overall, and the game asks again for as long as this says something did, which would hang the whole server.
+		ItemStack now = slot.getItem();
+		if (ItemStack.isSameItemSameComponents(now, before) && now.getCount() >= before.getCount()) {
+			slot.setChanged();
+			return ItemStack.EMPTY;
+		}
 		if (index < this.chestSize) {
 			slot.onTake(mover, before.copyWithCount(before.getCount() - stack.getCount()));
 		}
-		if (stack.isEmpty()) {
+		if (now.isEmpty()) {
 			slot.setByPlayer(ItemStack.EMPTY);
 		} else {
 			slot.setChanged();
