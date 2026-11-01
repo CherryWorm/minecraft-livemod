@@ -34,6 +34,16 @@ def features(*ruins):
     return {"f": {"manifest": {"ruins": {f"r{index}": entry for index, entry in enumerate(ruins)}}}}
 
 
+class SlotBlockClasses(unittest.TestCase):
+    def test_every_block_family_keeps_its_light(self):
+        """Every family works out its light from a state its block has to have, so one that forgets stops the server starting."""
+        slots = pathlib.Path(__file__).resolve().parents[2] / "mods/conduit/src/main/java/gm/conduit/slots"
+        for path in slots.glob("*.java"):
+            text = path.read_text(encoding="utf-8")
+            if path.name != "SlotBlock.java" and "void createBlockStateDefinition" in text:
+                self.assertIn("super.createBlockStateDefinition(builder)", text, f"{path.name} has to start from what SlotBlock's states have")
+
+
 class BlockSettings(unittest.TestCase):
     def manifest(self, name="thing", **fields):
         return {"blocks": {name: {"family": "stone", "display": "Thing", "texture": "thing", **fields}}}
