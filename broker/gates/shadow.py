@@ -51,8 +51,11 @@ def _running():
 
 
 def clone_prod_world():
+    copy_live_world(runtime.server_folder("shadow") / "world")
+
+
+def copy_live_world(target):
     """Copies the live world for testing, briefly pausing saves so the copy is consistent."""
-    target = runtime.server_folder("shadow") / "world"
     source = runtime.RUNTIME / "prod" / "world"
     if not source.exists():
         target.mkdir(parents=True, exist_ok=True)

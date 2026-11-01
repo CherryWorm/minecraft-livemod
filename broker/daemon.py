@@ -20,7 +20,7 @@ import time
 
 from PIL import Image, ImageStat
 
-from broker import reference_textures, runtime
+from broker import far, reference_textures, runtime
 
 WORKSPACE = runtime.RUNTIME / "agent-workspace"
 REQUESTS = WORKSPACE / "requests"
@@ -83,16 +83,19 @@ def assemble(commit, lane=""):
 
 def promote(commit, release_id, *flags, lane=""):
     source = assemble(commit, lane)
-    # If this run dies before reporting, the agent must hear that rather than the previous run's result.
-    last = runtime.lane_folder(lane) / "last.json"
-    last.unlink(missing_ok=True)
-    result = subprocess.run(
-        [sys.executable, "-m", "broker.promote", "--source", str(source), "--release-id", release_id, *flags],
-        cwd=runtime.REPO, env={**os.environ, "BROKER_LANE": lane}, stdin=subprocess.DEVNULL, capture_output=True, text=True, check=False, timeout=1200,
-    )
-    if not last.exists():
-        return {"result": "blocked", "gate": "broker", "reason": f"The broker crashed:\n{result.stderr[-1500:]}"}
-    report = json.loads(last.read_text(encoding="utf-8"))
+    if far.is_far(lane):
+        report = far.run(source, release_id, flags, lane)
+    else:
+        # If this run dies before reporting, the agent must hear that rather than the previous run's result.
+        last = runtime.lane_folder(lane) / "last.json"
+        last.unlink(missing_ok=True)
+        result = subprocess.run(
+            [sys.executable, "-m", "broker.promote", "--source", str(source), "--release-id", release_id, *flags],
+            cwd=runtime.REPO, env={**os.environ, "BROKER_LANE": lane}, stdin=subprocess.DEVNULL, capture_output=True, text=True, check=False, timeout=1200,
+        )
+        if not last.exists():
+            return {"result": "blocked", "gate": "broker", "reason": f"The broker crashed:\n{result.stderr[-1500:]}"}
+        report = json.loads(last.read_text(encoding="utf-8"))
     # Screenshots go where the agent can read them.
     copied = []
     for path in report.get("screenshots", []):
@@ -193,16 +196,28 @@ def handle(request, lane=""):
     return {"result": "blocked", "gate": "broker", "reason": f"Unknown request {kind}"}
 
 
+def _save_started(started):
+    temporary = STARTED.with_suffix(".tmp")
+    temporary.write_text(json.dumps(started), encoding="utf-8")
+    temporary.replace(STARTED)
+
+
 def started_again(request_id):
     """How many times this request has been started. The record outlives the broker, because that's what it's for: a job
     that kills the broker is otherwise picked up again as soon as it's back, and everything else waits behind it forever."""
     started = json.loads(STARTED.read_text(encoding="utf-8")) if STARTED.exists() else {}
     started = {key: count for key, count in started.items() if (REQUESTS / f"{key}.json").exists()}
     started[request_id] = started.get(request_id, 0) + 1
-    temporary = STARTED.with_suffix(".tmp")
-    temporary.write_text(json.dumps(started), encoding="utf-8")
-    temporary.replace(STARTED)
+    _save_started(started)
     return started[request_id]
+
+
+def didnt_count(request_id):
+    """The machine it was sent to let it down, which didn't harm the broker, so that wasn't one of its tries."""
+    started = json.loads(STARTED.read_text(encoding="utf-8")) if STARTED.exists() else {}
+    if started.get(request_id):
+        started[request_id] -= 1
+        _save_started(started)
 
 
 def next_request(pending):
@@ -222,7 +237,9 @@ def lanes_for(kind):
         return [f"{kind}-{number}" for number in range(MOST_AT_ONCE)]
     if kind == "check":
         return [f"check-{number}" for number in range(CHECK_LANES)]
-    return ["", *(f"gates-{number}" for number in range(1, GATE_LANES))]
+    here = ["", *(f"gates-{number}" for number in range(1, GATE_LANES))]
+    # A test run goes to another machine if there is one, which keeps this one's lanes free for releases, and those are only ever proved here.
+    return [*far.lanes(), *here] if kind == "gates" else here
 
 
 def memory_available_gb():
@@ -233,9 +250,9 @@ def memory_available_gb():
 
 
 def room_for(kind, lane, running):
-    """Only big jobs need room, and only beside other big jobs. One by itself always goes ahead, or a small machine would never do anything."""
-    big = [job for job in running.values() if job.kind in BIG_JOBS]
-    if kind not in BIG_JOBS or not big:
+    """Only big jobs need room, and only beside other big jobs on this machine. One by itself always goes ahead, or a small machine would never do anything."""
+    big = [job for job in running.values() if job.kind in BIG_JOBS and not far.is_far(job.lane)]
+    if kind not in BIG_JOBS or not big or far.is_far(lane):
         return True
     new_lane = NEW_LANE_GB if lane.startswith("gates-") and lane not in lanes_used else 0
     settling = sum(BIG_JOBS[job.kind] for job in big if time.monotonic() - job.began < SETTLING_SECONDS)
@@ -261,6 +278,7 @@ def draining():
 
 Job = collections.namedtuple("Job", "kind lane thread began release_id", defaults=(None,))
 lanes_used = set()
+given_back = set()  # Requests another machine let down, which go round again here without anyone hearing about it.
 
 
 def finish(path, request, answer, seconds, waited):
@@ -277,6 +295,11 @@ def run_job(path, request, lane, waited):
     began = time.monotonic()
     try:
         answer = handle(request, lane)
+    except far.Gone as error:
+        sys.stdout.write(f"{request['kind']} {request['id']}: the test machine let it down, so it's going again here: {error}\n")
+        sys.stdout.flush()
+        given_back.add(path.name)
+        return
     except Exception as error:  # noqa: BLE001 - the agent should hear about any failure, not hang
         answer = {"result": "blocked", "gate": "broker", "reason": f"{type(error).__name__}: {error}"}
     finish(path, request, answer, time.monotonic() - began, waited)
@@ -311,10 +334,17 @@ def can_start(path, running):
     return free_lane(request["kind"], running) is not None
 
 
+def note_if_given_back(name):
+    if name in given_back:
+        given_back.discard(name)
+        didnt_count(name.removesuffix(".json"))
+
+
 def tick(running):
     """Starts the next job there's room for. Returns whether it did, because then there may be room for another straight away."""
     for name in [name for name, job in running.items() if not job.thread.is_alive()]:
         del running[name]
+        note_if_given_back(name)
     if draining():
         return False
     try:
@@ -349,6 +379,7 @@ def retry_suspects():
             continue
         for job in running.values():
             job.thread.join()
+        note_if_given_back(path.name)
 
 
 def look_over_lanes():
