@@ -41,6 +41,7 @@ OWNER_UUID=
 EOF
   if [[ -n "$public" ]]; then
     token=$(head -c 32 /dev/urandom | base64 | tr -d '/+=\n')
+    update_token=$(head -c 32 /dev/urandom | base64 | tr -d '/+=\n')
     cat >>.env <<EOF
 # The password is what keeps people out here, so there's no whitelist to manage as well.
 WHITE_LIST=false
@@ -52,6 +53,8 @@ SITE_HTTPS_BIND=443
 # Minecraft can't send a password for a resource pack, so this token is the only thing guarding the pack's address.
 PACK_TOKEN=$token
 PACK_PUBLIC_URL=https://$public/pack/$token/
+# The pack's updater has no password either, so this token guards the address it updates from.
+UPDATE_TOKEN=$update_token
 TOOLS_CPUS=8
 AGENT_RESTART=unless-stopped
 OPENING_BORDER=128

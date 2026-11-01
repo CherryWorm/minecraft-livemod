@@ -31,9 +31,23 @@ bash infra/fetch-mods.sh infra/mods.lock client "$instance/minecraft/mods" >/dev
 cp mods/companion/libs/patchouli-fabric-*.jar "$instance/minecraft/mods/"
 
 cat >"$instance/instance.cfg" <<EOF
+[General]
 InstanceType=OneSix
 name=Living Mod
 EOF
+# After this, the pack keeps itself up to date: Prism runs the updater before each launch, in the game's folder. See updater/Updater.java.
+if [[ -n "${UPDATE_TOKEN:-}" ]]; then
+  ./scripts/build-updater.sh infra/client_release.pub "$instance/minecraft/livingmod-updater.jar"
+  echo "url=https://$SITE_ADDRESS/update/$UPDATE_TOKEN" >"$instance/minecraft/livingmod-updater.properties"
+  {
+    echo "generation 0"
+    for path in "$instance"/minecraft/mods/*; do echo "managed mods/$(basename "$path")"; done
+  } >"$instance/minecraft/livingmod-updater.state"
+  cat >>"$instance/instance.cfg" <<'EOF'
+OverrideCommands=true
+PreLaunchCommand="\"$INST_JAVA\" -jar livingmod-updater.jar"
+EOF
+fi
 cat >"$instance/mmc-pack.json" <<EOF
 {
   "formatVersion": 1,

@@ -17,6 +17,16 @@
 		reverse_proxy prod:25567
 	}
 
+	# The updater in friends' games has no password either, so this is the same idea: the token is only in the pack, which is behind the
+	# password. Everything here is signed, and it's only the mods anyone downloading the pack already gets.
+	@update path /update/{$UPDATE_TOKEN}/*
+	handle @update {
+		uri strip_prefix /update/{$UPDATE_TOKEN}
+		header Cache-Control no-store
+		root * /srv/download/update
+		file_server
+	}
+
 	# Other machines' builders, which have tokens of their own that the agent checks. Nothing's served here unless one's been added.
 	handle /worker/* {
 		reverse_proxy agent:8790 {

@@ -91,6 +91,7 @@ services:
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
       GAME_ADDRESS: ${GAME_ADDRESS:-localhost}
       PACK_TOKEN: ${PACK_TOKEN:-none}
+      UPDATE_TOKEN: ${UPDATE_TOKEN:-none}
     ports:
       - "${SITE_HTTP_BIND:-127.0.0.1:8080}:80"
       - "${SITE_HTTPS_BIND:-127.0.0.1:8443}:443"

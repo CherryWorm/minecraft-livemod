@@ -31,5 +31,5 @@ sudo -u "$user" -H ./scripts/agent-up.sh </dev/null
 
 if ! git -c safe.directory='*' diff --quiet "$before" HEAD -- mods/companion/src/main infra/mods.lock; then
   sudo -u "$user" -H ./scripts/make-friend-pack.sh </dev/null
-  echo "The companion changed, so everyone needs to download the pack from the site and import it again."
+  echo "The companion changed. Run scripts/publish-client.sh on the owner's PC, and everyone gets it the next time they start the game."
 fi
