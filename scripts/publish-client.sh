@@ -15,7 +15,8 @@ echo "publishing $commit" >&2
 module_key=$(ssh -o BatchMode=yes "$remote" cat /srv/livingmod/runtime/broker/signing/module_key.pub)
 
 # Nobody has to restart, because the server keeps working with older versions, so they only hear about it if something really changed.
-wsl.exe -d livingmod -- bash -s -- "$url" "$commit" "$module_key" <scripts/publish-client-build.sh |
+# Through a pipe, because wsl.exe hangs on a script redirected from a file.
+cat scripts/publish-client-build.sh | wsl.exe -d livingmod -- bash -s -- "$url" "$commit" "$module_key" |
   ssh -o BatchMode=yes "$remote" '
     set -e
     folder=/srv/livingmod/runtime/friend-pack/update

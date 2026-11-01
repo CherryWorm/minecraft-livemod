@@ -18,6 +18,8 @@ printf '%s\n' "$module_key" >mods/companion/src/main/resources/module_key.pub
 chmod +x mods/gradlew
 
 # A Gradle home of its own, because Loom holds a lock on one for as long as anything's using it, and tests here can run for a long time.
+# Started from a copy of the shared one, so the first build needn't download everything again.
+[[ -d "$runtime_dir/cache/gradle-publish" ]] || rsync -a --exclude "*.lock" "$runtime_dir/cache/gradle/" "$runtime_dir/cache/gradle-publish/" >&2
 docker run --rm --user "$(id -u):$(id -g)" -e GRADLE_USER_HOME=/cache/gradle-publish -e HOME=/cache/home \
   -v "$work/repo/mods":/work -v "$runtime_dir/cache":/cache -w /work eclipse-temurin:25-jdk \
   ./gradlew --no-daemon --console=plain :companion:build </dev/null >&2
