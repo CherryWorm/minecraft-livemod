@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from orchestrator import bugs, feedback, llm, main, progression, workshop
+from orchestrator import bugs, feedback, lanes, llm, main, progression, workshop
 
 PLAYER = "Dana"
 GRAPH = {"nodes": {"e_one": {"stage": "early", "name": "One", "requires": [], "opens_with": "", "holds": ""}}}
@@ -179,6 +179,14 @@ class Investigating(Base):
         await self.report()
         self.assertEqual(self.status(), bugs.ENGINE_LIMIT)
         self.assertIn("on the list of what's still broken", self.told()[0])
+
+    async def test_a_model_that_stopped_answering_says_nothing_about_the_bug(self):
+        stopped = lanes.Lane(lanes.SELF_HOSTED, {}, is_failing=lambda: True)
+        self.ask.side_effect = [RuntimeError("API Error: 400 Invalid model"), finding(bugs.NOT_A_BUG)]
+        with mock.patch.dict(llm.MOVED, {"bug_investigator": stopped}), mock.patch.object(bugs, "WAIT_SECONDS", 0):
+            await self.report()
+        self.assertEqual(self.status(), bugs.NOT_A_BUG)
+        self.assertFalse([line for line in self.told() if "still broken" in line])
 
     async def test_a_private_phrase_never_reaches_the_player(self):
         self.agent.briefs.return_value = [{"wants": "exploring long dark caves with my friends every evening"}]

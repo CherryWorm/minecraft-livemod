@@ -119,6 +119,12 @@ class BugDesk:
             if entry["status"] == FIXING:
                 await self._fix(number, entry)
         except Exception as error:  # noqa: BLE001 - someone's waiting to hear, whatever went wrong
+            if llm.model_in_trouble("bug_investigator" if entry["status"] == INVESTIGATING else "bug_fixer"):
+                # That says nothing about the bug, so nobody gets told it can't be fixed, and the status still says what's left to do.
+                print(f"bug {number}: its model isn't answering, so it's waiting", flush=True)
+                await asyncio.sleep(WAIT_SECONDS)
+                self._start(number)
+                return
             print(f"bug {number} failed: {type(error).__name__}: {error}", flush=True)
             await self._collect(number, entry, f"Working on it failed with {type(error).__name__}: {error}")
             await self._tell_all(entry, LABEL + "§7I couldn't finish with that bug, so it isn't fixed. It's on the list of what's still broken.")

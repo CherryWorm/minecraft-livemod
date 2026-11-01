@@ -66,6 +66,12 @@ def moved(role):
     return lane if lane and not lane.is_down() else None
 
 
+def model_in_trouble(role):
+    """Whether what went wrong for a role might only be that the model it was moved to has stopped answering."""
+    lane = MOVED.get(role)
+    return bool(lane and lane.in_trouble())
+
+
 async def ask(governor: Governor, role, prompt, *, lane=None, **options):
     """Runs one conversation turn for a role. By default it can use no tools at all, and it runs on Claude unless given a lane or moved."""
     lane = lane or moved(role)

@@ -27,6 +27,10 @@ class Lane:
     counted: bool = False  # Whether it uses up the plan's allowance.
     note: str = ""
     is_down: object = lambda: False
+    is_failing: object = lambda: False
+
+    def in_trouble(self):
+        return self.is_down() or self.is_failing()
 
 
 def _read_key():
@@ -54,7 +58,7 @@ class SelfHosted:
             # Claude Code can hide tools until they're asked for, in a way only Claude's service understands. It also starts every
             # request with a line for Claude's billing that changes each time, which stops another model's cache from working.
             env = {**self.bridge.client_env(), COMPACT_ENV: os.environ.get("AGENT_SELFHOSTED_CONTEXT", "128000"), "ENABLE_TOOL_SEARCH": "false", "CLAUDE_CODE_ATTRIBUTION_HEADER": "0"}
-            self.lane = Lane(SELF_HOSTED, env, note="" if vision else NO_IMAGES_NOTE, is_down=self.bridge.is_down)
+            self.lane = Lane(SELF_HOSTED, env, note="" if vision else NO_IMAGES_NOTE, is_down=self.bridge.is_down, is_failing=self.bridge.is_failing)
 
     def is_up(self):
         return self.lane is not None and not self.lane.is_down()

@@ -32,6 +32,8 @@ CHARS_PER_TOKEN = 4
 DOWN_SECONDS = 300  # How long after going down everything waits before trying the model again.
 FAILURES_TO_BE_DOWN = 3  # A builder waits and tries again after one, so one alone is no reason to move anything to Claude.
 NOT_AN_OUTAGE = (400, 413, 422, 429)  # The model's there. It's only this request that's wrong, or it's busy, which Claude Code waits for.
+# A server that's stopped offering the model says so with a 400 too, and then nothing gets through, whatever it asks.
+MODEL_GONE = re.compile(r"(invalid|unknown|unsupported) model|available models|model.{0,40}(not found|does not exist|doesn't exist|not available|isn't available)", re.IGNORECASE)
 
 
 def _text_of(content):
@@ -320,6 +322,10 @@ class ModelBridge:
     def is_down(self):
         return self.failures >= FAILURES_TO_BE_DOWN and time.monotonic() - self.failed_at < DOWN_SECONDS
 
+    def is_failing(self):
+        """The last thing it did was fail. That's too little to move everything to Claude, but enough not to blame a builder's feature."""
+        return self.failures > 0 and time.monotonic() - self.failed_at < DOWN_SECONDS
+
     def client_env(self):
         """What a builder's Claude Code needs to use this. The empty one stops it sending the owner's login here."""
         return {"ANTHROPIC_BASE_URL": f"http://127.0.0.1:{self.port}", "ANTHROPIC_AUTH_TOKEN": self.password,
@@ -337,7 +343,7 @@ class ModelBridge:
 
     def _failed(self, reply, message, code):
         """Claude Code waits and tries again after a 429 or a 5xx, and gives up straight away on anything else, like a wrong key."""
-        if code not in NOT_AN_OUTAGE:
+        if code not in NOT_AN_OUTAGE or MODEL_GONE.search(message):
             self.failed_at = time.monotonic()
             self.failures += 1
         if self.key:

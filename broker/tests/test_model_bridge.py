@@ -234,6 +234,32 @@ class WhenItFails(unittest.TestCase):
         self.fail(400, 20)
         self.assertFalse(self.bridge.is_down())
 
+    def test_a_server_that_stopped_offering_the_model_is_down(self):
+        refusal = 'The model\'s server said 400: {"error":{"message":"Invalid model, available models are: deepseek-v4.1-flash"}}'
+        for _ in range(bridge.FAILURES_TO_BE_DOWN):
+            self.bridge._failed(self.reply, refusal, 400)
+        self.assertTrue(self.bridge.is_down())
+
+    def test_a_request_that_mentions_the_model_isnt_that(self):
+        for _ in range(bridge.FAILURES_TO_BE_DOWN):
+            self.bridge._failed(self.reply, "The model's server said 400: this model can't take a request that long", 400)
+        self.assertFalse(self.bridge.is_failing())
+
+    def test_one_failure_is_failing_without_being_down(self):
+        self.assertFalse(self.bridge.is_failing())
+        self.fail(502, 1)
+        self.assertTrue(self.bridge.is_failing())
+        self.assertFalse(self.bridge.is_down())
+
+    def test_a_bad_request_isnt_failing(self):
+        self.fail(400, 1)
+        self.assertFalse(self.bridge.is_failing())
+
+    def test_failing_doesnt_last_for_ever(self):
+        self.fail(502, 1)
+        self.bridge.failed_at -= bridge.DOWN_SECONDS + 1
+        self.assertFalse(self.bridge.is_failing())
+
     def test_it_tries_again_after_a_while(self):
         self.fail(502)
         self.bridge.failed_at -= bridge.DOWN_SECONDS + 1

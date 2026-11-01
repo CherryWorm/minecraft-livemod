@@ -734,7 +734,14 @@ class Workshop:
                                   f"Your feature folder is mods/genesis/features/{feature_id}/.")
             began = time.monotonic()
             chosen = self._lane_for(self._role(small, fix), lane)
-            result = await self._attempt(feature_id, tree, prompt, session, small, lane, node, stage, max_turns, usage, tools, web, fix)
+            try:
+                result = await self._attempt(feature_id, tree, prompt, session, small, lane, node, stage, max_turns, usage, tools, web, fix)
+            except Exception:
+                # Claude Code raises when its model turns it away, and then the only thing wrong is the model. The work so far stays in the folder.
+                if not chosen or not chosen.in_trouble():
+                    raise
+                print(f"{feature_id}: its model isn't answering, which says nothing about the feature, so it's going back in the queue", flush=True)
+                return None
             if result.stop_reason in lanes.MACHINE_GONE:
                 print(f"{feature_id}: the machine it was on has gone, so it's going back in the queue", flush=True)
                 return None
@@ -742,7 +749,7 @@ class Workshop:
             session = result.session_id or session
             if result.is_error:
                 print(f"{feature_id}: builder failed: {result.stop_reason} {result.text[:200]}", flush=True)
-                if chosen and chosen.is_down():
+                if chosen and chosen.in_trouble():
                     print(f"{feature_id}: its model isn't answering, which says nothing about the feature, so it's going back in the queue", flush=True)
                     return None
                 last_problem = f"The builder stopped: {result.stop_reason}"
