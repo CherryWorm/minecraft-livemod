@@ -199,7 +199,8 @@ class BlockOptions(unittest.TestCase):
             model = read(out, "pack", "assets/gm/models/block", f"{ledger['blocks']['f/b']['slot']}.json")
             self.assertEqual(model["elements"][0]["light_emission"], 15)
             self.assertEqual(model["textures"]["up"], f"gm:block/{ledger['blocks']['f/b']['slot']}")
-            self.assertNotIn("parent", model)
+            # This one has no elements of its own to inherit, only how a block sits in an inventory.
+            self.assertEqual(model["parent"], "minecraft:block/block")
 
     def test_only_a_cube_can_be_emissive(self):
         refused(static.check_block_kinds, "only a plain cube", features={"f": feature(blocks={"b": {"family": "plant", "emissive": True}})})

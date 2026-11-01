@@ -118,7 +118,7 @@ A cube block can have different textures on its faces. `side` covers any side yo
           "faces": {"front": "press_front", "side": "press_side", "top": "press_top", "bottom": "press_top"}}
 ```
 
-A `model` block is any shape you can model, with moving parts, for machines that should look like machines. It works like a `machine` block for modules and saving data, and its hitbox is always one full block, though the model can reach beyond that. Its `texture` is what it looks like in an inventory. Make the model the way you'd make a mob's, as described in `assetkit/README.md`, with its feet on the block's floor at Y 0 and its centre over X 0, Z 0.
+A `model` block is any shape you can model, with moving parts, for machines that should look like machines. It works like a `machine` block for modules and saving data, and its hitbox is always one full block, though the model can reach beyond that. Its `texture` is what it looks like in an inventory, drawn flat like an item, so make it a picture of the block with nothing around it. Make the model the way you'd make a mob's, as described in `assetkit/README.md`, with its feet on the block's floor at Y 0 and its centre over X 0, Z 0.
 
 ```json
 "great_press": {"family": "model", "display": "Great Press", "texture": "great_press_icon", "model": "great_press", "tool": "pickaxe"}

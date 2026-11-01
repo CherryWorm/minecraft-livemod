@@ -17,6 +17,12 @@ TOKEN = re.compile(r"\$(block|item|mob|sound):([a-z0-9_]+(?:/[a-z0-9_]+)?)")
 TOOL_TAGS = {"pickaxe": "pickaxe", "axe": "axe", "shovel": "shovel", "hoe": "hoe"}
 LEVEL_TAGS = {"stone": "needs_stone_tool", "iron": "needs_iron_tool", "diamond": "needs_diamond_tool"}
 ORE_FAMILIES = {"ore", "deep_ore", "glow_ore"}
+# Not cubes, so like vanilla's flowers, what these look like in an inventory is a flat picture of the texture. A sculpted block's texture is a picture of it for just that.
+FLAT_ICON_FAMILIES = {"model", "plant", "glow_plant", "tinted_plant", "crop"}
+# What vanilla's grasses are coloured by when they're held, away from any biome.
+HELD_PLANT_TINT = {"type": "minecraft:grass", "temperature": 0.5, "downfall": 1.0}
+# How a block sits in an inventory or a hand. A model with no parent has none of this, so it's drawn flat on and too big.
+BLOCK_DISPLAY = "minecraft:block/block"
 CROP_STAGES = 4
 # In the order the game numbers directions, which is how a connected block's 64 shapes are numbered.
 CONNECTED_ARMS = (((6, 0, 6), (10, 6, 10)), ((6, 10, 6), (10, 16, 10)), ((6, 6, 0), (10, 10, 6)),
@@ -202,9 +208,19 @@ def _copy_texture(feature, kind, slot, texture, pack):
         shutil.copyfile(meta, target.with_suffix(".png.mcmeta"))
 
 
+def _flat_icon(feature, block, name, slot, pack):
+    """Draws a block in an inventory, in hand and on the ground the way an item is, instead of using its block model."""
+    _copy_texture(feature, "item", slot, block.get("texture", name), pack)
+    _write_json(pack / f"assets/gm/models/item/{slot}.json", {"parent": "minecraft:item/generated", "textures": {"layer0": f"gm:item/{slot}"}})
+    model = {"type": "minecraft:model", "model": f"gm:item/{slot}"}
+    if block["family"] == "tinted_plant":
+        model["tints"] = [HELD_PLANT_TINT]
+    _write_json(pack / f"assets/gm/items/{slot}.json", {"model": model})
+
+
 def _lit_cube(textures):
     """A cube that draws at full brightness whatever light it's in. Only a model's own elements can say so, not one that inherits them."""
-    return {"textures": {"particle": textures["particle"], **{side: textures[side] for side in CUBE_FACES}},
+    return {"parent": BLOCK_DISPLAY, "textures": {"particle": textures["particle"], **{side: textures[side] for side in CUBE_FACES}},
             "elements": [{"from": [0, 0, 0], "to": [16, 16, 16], "light_emission": LIGHT_EMISSION_FULL,
                           "faces": {side: {"texture": f"#{side}", "cullface": side} for side in CUBE_FACES}}]}
 
@@ -220,7 +236,7 @@ def _block_model(feature, feature_id, name, block, slot, ledger):
     custom = feature["dir"] / "assets" / "models" / f"{name}.json"
     if custom.exists():
         model = json.loads(custom.read_text(encoding="utf-8"))
-        return _resolve_tokens(model, feature_id, ledger)
+        return _resolve_tokens({"parent": BLOCK_DISPLAY, **model}, feature_id, ledger)
     if block.get("emissive"):
         def side(*names):
             found = next((name for name in names if name in block.get("faces", {})), None)
@@ -556,6 +572,8 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
                 block_models[slot] = _copy_model(feature, feature_id, name, block["model"], config)
             _write_json(pack / f"assets/gm/models/block/{slot}.json",
                         _block_model(feature, feature_id, name, block, slot, ledger))
+            if block["family"] in FLAT_ICON_FAMILIES:
+                _flat_icon(feature, block, name, slot, pack)
             if block["family"] == "crop":
                 for stage, texture in enumerate(block.get("stages") or []):
                     _copy_texture(feature, "block", f"{slot}_{stage}", texture, pack)

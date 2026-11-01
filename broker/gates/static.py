@@ -68,8 +68,8 @@ BLOCK_WITH_STATE = re.compile(r"[^\[\]\s]+(\[[a-z0-9_]+=[a-z0-9_]+(,[a-z0-9_]+=[
 # The vanilla blocks whose block entity takes a loot table. An ender chest looks like one, but it's the player's own.
 LOOT_CONTAINERS = re.compile(r"minecraft:(chest|trapped_chest|barrel|dispenser|dropper|hopper|crafter|([a-z]+_)?shulker_box|([a-z]+_)*copper_chest)")
 # Words that would give content away if they appeared in a path players can see.
-SAFE_PATH = re.compile(r"^assets/(gm/(textures/(block/s\d{4}(_(top|bottom|front|back|left|right|side|\d))?|item/i\d{4}(_[cv]\d+)?)\.png(\.mcmeta)?"
-                       r"|models/(block/s\d{4}(_c?\d+)?|item/i\d{4}(_[cv]\d+)?)\.json|items/i\d{4}\.json|lang/en_us\.json|sounds/[0-9a-f]+\.ogg|sounds\.json|shaders/post/p[0-9a-f]+\.fsh|post_effect/p[0-9a-f]+\.json|textures/gui/p[0-9a-f]+\.png)"
+SAFE_PATH = re.compile(r"^assets/(gm/(textures/(block/s\d{4}(_(top|bottom|front|back|left|right|side|\d))?|item/[is]\d{4}(_[cv]\d+)?)\.png(\.mcmeta)?"
+                       r"|models/(block/s\d{4}(_c?\d+)?|item/[is]\d{4}(_[cv]\d+)?)\.json|items/[is]\d{4}\.json|lang/en_us\.json|sounds/[0-9a-f]+\.ogg|sounds\.json|shaders/post/p[0-9a-f]+\.fsh|post_effect/p[0-9a-f]+\.json|textures/gui/p[0-9a-f]+\.png)"
                        r"|companion/patchouli_books/guide/en_us/(entries/k[0-9a-f]+|categories/(n[0-9a-f]+|s_[a-z]+(_\d+)?|other))\.json)$")
 
 
