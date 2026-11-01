@@ -427,6 +427,8 @@ def on_ground(item):
 def play_mob_drops(client):
     x, y, z = SPOT
     fang, scale = slot("api_fang", "items"), slot("api_scale", "items")
+    # Far enough away not to pick up what falls.
+    rcon("tp", PLAYER, str(x + 8.5), str(y), str(z + 8.5))
     rcon("kill", "@e[type=item]")
     spawn("api_ox", x, y, z)
     rcon("kill", "@n[tag=api_ox]")
@@ -448,9 +450,9 @@ def play_mob_drops(client):
 
 def play_flying(client):
     x, y, z = SPOT
-    tag = spawn("api_bat", x, y + 1, z, still=True)
+    tag = spawn("api_bat", x, y, z, still=True)
     check("a flying mob has no gravity", "1b" in mob_data(tag, "NoGravity") or "true" in mob_data(tag, "NoGravity"), mob_data(tag, "NoGravity"))
-    aim(tag, x, y + 1, z)
+    aim(tag, x, y, z)
     client.ask("rightclick")
     check("it's told to fly somewhere", holds(client, "bat flying true at"), client.text()[-200:])
     wake(tag)
