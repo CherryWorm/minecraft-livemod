@@ -1,0 +1,33 @@
+{
+  "id": "names",
+  "phase": 1,
+  "summary": "Test fixture for how this world's names and pictures reach players: a module naming things, an item used up in the hand, a recipe in the book, and icons.",
+  "blocks": {
+    "name_press": {"family": "model", "display": "Name Press", "texture": "name_press_icon", "model": "name_press", "retired": true},
+    "name_grass": {"family": "tinted_plant", "display": "Name Grass", "texture": "name_grass", "retired": true}
+  },
+  "items": {
+    "name_token": {"display": "Name Token", "texture": "name_token"},
+    "name_reader": {"display": "Name Reader", "texture": "name_token", "retired": true},
+    "name_kit": {"display": "Name Kit", "texture": "name_token"},
+    "name_chart": {"display": "Name Chart", "texture": "name_token", "from_module": true}
+  },
+  "recipes": {
+    "name_token": {
+      "mode": "open",
+      "json": {
+        "type": "minecraft:crafting_shapeless",
+        "ingredients": ["minecraft:paper", "minecraft:stick"],
+        "result": {"id": "$item:name_token", "count": 1}
+      }
+    },
+    "name_kit": {
+      "mode": "open",
+      "json": {
+        "type": "minecraft:crafting_shapeless",
+        "ingredients": ["$item:name_token", "minecraft:paper"],
+        "result": {"id": "$item:name_kit", "count": 1}
+      }
+    }
+  }
+}

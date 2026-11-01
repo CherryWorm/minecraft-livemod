@@ -15,6 +15,7 @@ import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.BookViewScreen;
+import net.minecraft.client.gui.screens.recipebook.RecipeCollection;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.core.BlockPos;
@@ -23,10 +24,14 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.numbers.BlankFormat;
 import net.minecraft.resources.Identifier;
+import net.minecraft.util.context.ContextMap;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.display.RecipeDisplayEntry;
+import net.minecraft.world.item.crafting.display.ShapelessCraftingRecipeDisplay;
+import net.minecraft.world.item.crafting.display.SlotDisplayContext;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.item.ItemStack;
@@ -37,6 +42,7 @@ import net.minecraft.world.scores.Scoreboard;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -172,6 +178,7 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				LOGGER.info("[M8] block light: {}", light);
 			}
 			case "say" -> context.runOnClient(client -> client.player.connection.sendChat(request.substring(4)));
+			case "recipebook" -> logRecipeBook(context);
 			case "jei" -> logJei(context, ItemStack.EMPTY);
 			case "jeimakes" -> logJei(context, context.computeOnClient(client -> client.player.getMainHandItem().copy()));
 			case "standin" -> {
@@ -333,6 +340,24 @@ public final class KnowledgeTest implements FabricClientGameTest {
 			data.setResourcePackStatus(ServerData.ServerPackStatus.ENABLED);
 			ConnectScreen.startConnecting(new TitleScreen(), client, ServerAddress.parseString(address), data, false, null);
 		});
+	}
+
+	/** Every shapeless recipe in the player's book, as what each of its slots cycles through when shown, going by what's drawn for it. */
+	private static void logRecipeBook(ClientGameTestContext context) {
+		String shown = context.computeOnClient(client -> {
+			ContextMap resolving = SlotDisplayContext.fromLevel(client.level);
+			List<List<List<String>>> recipes = new ArrayList<>();
+			for (RecipeCollection collection : client.player.getRecipeBook().getCollections()) {
+				for (RecipeDisplayEntry entry : collection.getRecipes()) {
+					if (entry.display() instanceof ShapelessCraftingRecipeDisplay shapeless) {
+						recipes.add(shapeless.ingredients().stream().map(place -> place.resolveForStacks(resolving).stream()
+								.map(stack -> String.valueOf(stack.get(DataComponents.ITEM_MODEL))).toList()).toList());
+					}
+				}
+			}
+			return new Gson().toJson(recipes);
+		});
+		LOGGER.info("[M8] recipe book: {}", shown);
 	}
 
 	private static void logJei(ClientGameTestContext context, ItemStack makes) {

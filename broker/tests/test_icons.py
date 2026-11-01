@@ -1,5 +1,5 @@
 """What the bundler makes of how blocks look in an inventory: flat for what isn't a cube, and always placed the way a block is. No servers
-needed. A real client looks at these in M21.
+needed. A real client looks at these in M23.
 
 Usage: python3 -m unittest broker.tests.test_icons
 """
