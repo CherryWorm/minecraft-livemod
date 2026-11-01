@@ -18,7 +18,7 @@ import subprocess
 import sys
 import time
 
-from PIL import Image
+from PIL import Image, ImageStat
 
 from broker import runtime, sign
 from broker.tests.m8_test import Client, make_model, report
@@ -36,9 +36,11 @@ WORLD_BOTTOM = -64
 HEIGHT_BITS = 9
 HEIGHT_PER_LONG = 64 // HEIGHT_BITS
 # The game's own numbers for these keys, which go by where they are on the keyboard.
-KEY_K, KEY_E, KEY_ESCAPE = 14, 8, 41
+KEY_K, KEY_E, KEY_ESCAPE, KEY_J = 14, 8, 41, 13
 OUT_OF_DATE = "out of date"
 MARK_COLOUR = (0x11, 0xEE, 0x77)
+# How far the average colour of a picture can be from what's expected, with a few things on it, like the hotbar, that don't change.
+EFFECT_TOLERANCE = 30
 
 
 def make_sound(path):
@@ -491,8 +493,20 @@ def play_inventory_hooks(client, results):
     client.ask("close")
     rcon("setblock", str(x), str(y), str(z + 1), "minecraft:air")
 
+    # A screen effect, on and off again, and then left on to see that it goes with the module.
+    rcon("tp", PLAYER, str(x), str(y), str(z), "0", "-30")
+    time.sleep(1)
+    client.ask("shot effect_off")
+    client.ask(f"press {KEY_J}")
+    client.ask("shot effect_on")
+    client.ask(f"press {KEY_J}")
+    client.ask("shot effect_off_again")
+    client.ask(f"press {KEY_J}")
+
     # Unloading has to take all of it away, with no help from the module.
     rcon("conduit", "module", "unload", "hooks")
+    time.sleep(2)
+    client.ask("shot effect_unloaded")
     time.sleep(2)
     empty_hands()
     for index, item in enumerate(("cobblestone", "dirt")):
@@ -521,6 +535,22 @@ def check_mark(results, shots):
     drawn, gone = marked("m8_inventory"), marked("m8_inventory_unloaded")
     results.append(report("a module can draw on an inventory screen", bool(drawn), f"{drawn} pixels of its colour"))
     results.append(report("and what it drew goes when it's unloaded", gone == 0, f"{gone} pixels of its colour"))
+
+    def looks(name):
+        shot = next(iter(sorted(shots.glob(f"*{name}.png"))), None)
+        if shot is None:
+            return None
+        with Image.open(shot) as image:
+            return ImageStat.Stat(image.convert("RGB")).mean
+
+    off, on, again, unloaded = looks("m8_effect_off"), looks("m8_effect_on"), looks("m8_effect_off_again"), looks("m8_effect_unloaded")
+    if None in (off, on, again, unloaded):
+        results.append(report("the screen effect was photographed", False, str(sorted(path.name for path in shots.glob("*.png")))))
+        return
+    near = lambda first, second: all(abs(a - b) < EFFECT_TOLERANCE for a, b in zip(first, second))
+    results.append(report("a module can put a shader over the screen, from the feature's own file", near([255 - value for value in off], on), f"off {off}, on {on}"))
+    results.append(report("and take it off again", near(off, again), str(again)))
+    results.append(report("and it goes when the module unloads", near(off, unloaded), str(unloaded)))
 
 
 def check_old_companions(results, client):

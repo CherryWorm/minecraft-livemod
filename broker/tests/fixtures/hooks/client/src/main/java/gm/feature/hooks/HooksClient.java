@@ -12,7 +12,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
  * Test fixture: what players asked for, built the way a builder would. Holding shift and dragging across slots moves each one,
  * K moves the first of the main rows, and a mark in the corner proves it can draw on the screen. It claims every key on an
  * inventory screen, to prove that Escape gets through anyway. With no screen open, K swaps the same slot into the first hotbar
- * position, so broker/tests/m16_test.py can see each of these from what really moved.
+ * position, so broker/tests/m16_test.py can see each of these from what really moved, and J turns a screen effect on and off.
  */
 public final class HooksClient implements ClientModule {
 	private static final int FIRST_MAIN_SLOT = 9;
@@ -20,6 +20,7 @@ public final class HooksClient implements ClientModule {
 	private static final int MARK_COLOUR = 0xFF11EE77;
 
 	private int lastSlot = -1;
+	private boolean warped;
 
 	@Override
 	public void enable(ModuleContext context) {
@@ -56,6 +57,10 @@ public final class HooksClient implements ClientModule {
 		context.onKeyPressed(key -> {
 			if (key.key() == KeyInput.of('K') && context.inventory() != null) {
 				context.inventory().swapWithHotbar(FIRST_MAIN_SLOT, 0);
+			}
+			if (key.key() == KeyInput.of('J')) {
+				this.warped = !this.warped;
+				context.screenEffect(this.warped ? "hook_warp" : null);
 			}
 		});
 	}

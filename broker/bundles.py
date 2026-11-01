@@ -390,6 +390,30 @@ def _copy_sounds(feature, feature_id, pack, sounds_json):
         sounds_json[hashed] = {"sounds": [f"gm:{hashed}"]}
 
 
+def _effect_id(feature_id, name):
+    """The companion works this out the same way, from the name a module asks for."""
+    return "p" + _sound_id(feature_id, name)
+
+
+def _copy_screen_effects(feature, feature_id, pack):
+    """A feature writes the shader, and this says how the game should run it: the picture through that, and the result back."""
+    for name in feature["manifest"].get("screen_effects", []):
+        source = feature["dir"] / "assets" / "shaders" / f"{name}.fsh"
+        if not source.exists():
+            raise BundleError(f"{feature_id}: screen effect {name}.fsh is missing")
+        hashed = _effect_id(feature_id, name)
+        target = pack / "assets/gm/shaders/post" / f"{hashed}.fsh"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        _write_json(pack / "assets/gm/post_effect" / f"{hashed}.json", {"targets": {"swap": {}}, "passes": [
+            {"vertex_shader": "minecraft:core/screenquad", "fragment_shader": f"gm:post/{hashed}",
+             "inputs": [{"sampler_name": "In", "target": "minecraft:main"}], "output": "swap"},
+            {"vertex_shader": "minecraft:core/screenquad", "fragment_shader": "minecraft:post/blit",
+             "inputs": [{"sampler_name": "In", "target": "swap"}], "output": "minecraft:main",
+             "uniforms": {"BlitConfig": [{"name": "ColorModulate", "type": "vec4", "value": [1.0, 1.0, 1.0, 1.0]}]}},
+        ]})
+
+
 def _link_knowledge(entries, gated, recipe_routes):
     """A recipe names the knowledge that unlocks it. Done last, because that may be in a later feature."""
     for recipe_id, source, route in recipe_routes:
@@ -537,6 +561,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
         for name, ruin in manifest.get("ruins", {}).items():
             ruin_patches.append(_render_ruin(feature_id, name, ruin, ledger, datapack))
         _copy_sounds(feature, feature_id, pack, sounds_json)
+        _copy_screen_effects(feature, feature_id, pack)
         # Marked as sounds, so one can share its name with a block or a mob, which are all in here by bare name.
         bindings.update({f"sound:{feature_id}/{name}": _sound_id(feature_id, name) for name in manifest.get("sounds", [])})
         for ore in manifest.get("ores", []):

@@ -36,6 +36,7 @@ CROP_STAGES = 4
 NOT_CUBES = {"plant", "glow_plant", "tinted_plant", "crop", "connected", "model", "cutout"}
 MOST_USE_SECONDS = 60
 USE_ANIMATIONS = {"none", "eat", "drink", "block", "bow", "trident", "crossbow", "spyglass", "toot_horn", "brush", "bundle", "spear"}
+MOST_SHADER_CHARACTERS = 16000
 MIN_COMPASS_FRAMES = 2
 MAX_COMPASS_FRAMES = 64
 BLOCK_WITH_STATE = re.compile(r"[^\[\]\s]+(\[[a-z0-9_]+=[a-z0-9_]+(,[a-z0-9_]+=[a-z0-9_]+)*\])?")
@@ -43,7 +44,7 @@ BLOCK_WITH_STATE = re.compile(r"[^\[\]\s]+(\[[a-z0-9_]+=[a-z0-9_]+(,[a-z0-9_]+=[
 LOOT_CONTAINERS = re.compile(r"minecraft:(chest|trapped_chest|barrel|dispenser|dropper|hopper|crafter|([a-z]+_)?shulker_box|([a-z]+_)*copper_chest)")
 # Words that would give content away if they appeared in a path players can see.
 SAFE_PATH = re.compile(r"^assets/(gm/(textures/(block/s\d{4}(_(top|bottom|front|back|left|right|side|\d))?|item/i\d{4}(_[cv]\d+)?)\.png(\.mcmeta)?"
-                       r"|models/(block/s\d{4}(_c?\d+)?|item/i\d{4}(_[cv]\d+)?)\.json|items/i\d{4}\.json|lang/en_us\.json|sounds/[0-9a-f]+\.ogg|sounds\.json))$")
+                       r"|models/(block/s\d{4}(_c?\d+)?|item/i\d{4}(_[cv]\d+)?)\.json|items/i\d{4}\.json|lang/en_us\.json|sounds/[0-9a-f]+\.ogg|sounds\.json|shaders/post/p[0-9a-f]+\.fsh|post_effect/p[0-9a-f]+\.json))$")
 
 
 def _fail(message):
@@ -324,6 +325,23 @@ def check_items(features):
                 _fail(f"{label} has variants {variants!r}. It's names and the texture for each, like {{\"gilded\": \"ledger_gilded\"}}.")
 
 
+def check_screen_effects(features):
+    """A shader runs for every pixel of every frame on friends' computers, and one that never finishes can hang a graphics card."""
+    for feature_id, feature in features.items():
+        for name in feature["manifest"].get("screen_effects", []):
+            label = f"Screen effect {feature_id}/{name}"
+            path = feature["dir"] / "assets" / "shaders" / f"{name}.fsh"
+            if not path.exists():
+                _fail(f"{label} needs assets/shaders/{name}.fsh.")
+            text = path.read_text(encoding="utf-8")
+            if len(text) > MOST_SHADER_CHARACTERS:
+                _fail(f"{label} is {len(text)} characters long, over the limit of {MOST_SHADER_CHARACTERS}. It runs for every pixel of every frame, so keep it simple.")
+            if not text.lstrip().startswith("#version 330"):
+                _fail(f"{label} has to start with #version 330, which is what the game's own are. See 'Screen effects' in docs/content-types.md.")
+            if re.search(r"\b(while|do)\b", text):
+                _fail(f"{label} uses a while or do loop, which could never finish and hang a player's graphics card. Use a for loop with a fixed count.")
+
+
 def check_machines(features):
     """A machine with no slots to take from, or a recipe that says what it makes in two ways, would quietly do less than it looks like."""
     for feature_id, feature in features.items():
@@ -458,6 +476,7 @@ def run(features, old_ledger, new_ledger, pool, content):
     check_block_drops(features)
     check_block_kinds(features)
     check_items(features)
+    check_screen_effects(features)
     check_machines(features)
     check_mob_sounds(features)
     check_model_costs(features)

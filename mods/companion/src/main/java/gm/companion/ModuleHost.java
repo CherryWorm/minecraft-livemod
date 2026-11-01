@@ -12,16 +12,21 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -216,6 +221,14 @@ public final class ModuleHost {
 		dispatch(module -> module.keyPressed(key));
 	}
 
+	public void addScreenEffects(List<Identifier> requested) {
+		for (LoadedModule module : this.modules.values()) {
+			if (module.screenEffect != null) {
+				requested.add(module.screenEffect);
+			}
+		}
+	}
+
 	private void dispatch(Consumer<LoadedModule> call) {
 		List<String> broken = new ArrayList<>();
 		for (LoadedModule module : this.modules.values()) {
@@ -236,6 +249,8 @@ public final class ModuleHost {
 	}
 
 	private static final class LoadedModule implements ModuleContext {
+		private static final int EFFECT_ID_LENGTH = 16;
+
 		private final String moduleId;
 		private final int generation;
 		private final List<HudElement> hudElements = new ArrayList<>();
@@ -243,6 +258,7 @@ public final class ModuleHost {
 		private final List<InventoryHooks> inventoryHooks = new ArrayList<>();
 		private final List<Consumer<KeyInput>> keyHooks = new ArrayList<>();
 		private ClientModule module;
+		private Identifier screenEffect;
 		private int failures;
 		private long windowNanos;
 		private int windowCalls;
@@ -291,6 +307,21 @@ public final class ModuleHost {
 		@Override
 		public InventoryView inventory() {
 			return InventoryScreens.current();
+		}
+
+		@Override
+		public void screenEffect(String name) {
+			this.screenEffect = name == null ? null : Identifier.fromNamespaceAndPath("gm", effectId(this.moduleId, name));
+		}
+
+		/** The name it has in the resource pack, which the broker works out the same way, so that it gives nothing away. */
+		private static String effectId(String moduleId, String name) {
+			try {
+				byte[] digest = MessageDigest.getInstance("SHA-256").digest((moduleId + "/" + name).getBytes(StandardCharsets.UTF_8));
+				return "p" + HexFormat.of().formatHex(digest).substring(0, EFFECT_ID_LENGTH);
+			} catch (NoSuchAlgorithmException error) {
+				throw new IllegalStateException(error);
+			}
 		}
 
 		/** An average over many calls, so one slow frame while chunks load doesn't count. */
@@ -353,6 +384,7 @@ public final class ModuleHost {
 			this.ticks.clear();
 			this.inventoryHooks.clear();
 			this.keyHooks.clear();
+			this.screenEffect = null;
 			this.module = null;
 		}
 	}

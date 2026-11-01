@@ -20,6 +20,7 @@
                  "sounds": {"idle": "$sound:hook_idle", "hurt": "$sound:hook_hurt", "death": "$sound:hook_death"}}
   },
   "sounds": ["hook_chime", "hook_idle", "hook_hurt", "hook_death"],
+  "screen_effects": ["hook_warp"],
   "knowledge": {
     "hook_lore": {"title": "Hook Lore", "text": "What a closer look at it taught you.", "routes": [{"type": "examine", "id": "$block:hook_block"}]}
   },

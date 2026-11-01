@@ -3,6 +3,7 @@ new looks for a mob. No servers needed.
 
 Usage: python3 -m unittest broker.tests.test_bigger
 """
+import hashlib
 import json
 import pathlib
 import tempfile
@@ -274,6 +275,54 @@ class Items(unittest.TestCase):
             refused(static.check_items, "clockwise", features={"f": feature(items={"t": {"compass": frames}})})
         for variants in ({}, ["a"], {"a": 1}):
             refused(static.check_items, "texture for each", features={"f": feature(items={"t": {"variants": variants}})})
+
+
+class ScreenEffects(unittest.TestCase):
+    GOOD = "#version 330\nvoid main() { }\n"
+
+    def effect(self, source):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        shaders = pathlib.Path(folder.name, "assets", "shaders")
+        shaders.mkdir(parents=True)
+        (shaders / "warp.fsh").write_text(source, encoding="utf-8")
+        return {"f": {"manifest": {"screen_effects": ["warp"]}, "dir": pathlib.Path(folder.name)}}
+
+    def test_a_plain_one_is_fine(self):
+        static.check_screen_effects(self.effect(self.GOOD))
+        static.check_screen_effects(self.effect("#version 330\nvoid main() { for (int i = 0; i < 4; i++) { } }\n"))
+
+    def test_it_has_to_exist(self):
+        refused(static.check_screen_effects, "needs assets/shaders", features={"f": {"manifest": {"screen_effects": ["warp"]}, "dir": pathlib.Path("does-not-exist")}})
+
+    def test_the_version_the_game_uses(self):
+        refused(static.check_screen_effects, "#version 330", features=self.effect("void main() { }\n"))
+
+    def test_nothing_that_could_never_finish(self):
+        for loop in ("while (true) { }", "do { } while (false);"):
+            refused(static.check_screen_effects, "hang", features=self.effect(f"#version 330\nvoid main() {{ {loop} }}\n"))
+
+    def test_nothing_enormous(self):
+        refused(static.check_screen_effects, "keep it simple", features=self.effect("#version 330\n" + "// " * 8000))
+
+    def test_the_game_is_told_how_to_run_it_under_a_name_that_gives_nothing_away(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        root = pathlib.Path(folder.name)
+        (root / "feature" / "assets" / "shaders").mkdir(parents=True)
+        (root / "feature" / "assets" / "shaders" / "warp.fsh").write_text(self.GOOD, encoding="utf-8")
+        bundles._copy_screen_effects({"manifest": {"screen_effects": ["warp"]}, "dir": root / "feature"}, "f", root / "pack")
+        hashed = bundles._effect_id("f", "warp")
+        self.assertTrue((root / "pack/assets/gm/shaders/post" / f"{hashed}.fsh").exists())
+        effect = read(root, "pack/assets/gm/post_effect", f"{hashed}.json")
+        self.assertEqual(effect["passes"][0]["fragment_shader"], f"gm:post/{hashed}")
+        self.assertEqual(effect["passes"][1]["output"], "minecraft:main")
+        self.assertTrue(static.SAFE_PATH.match(f"assets/gm/shaders/post/{hashed}.fsh"))
+        self.assertTrue(static.SAFE_PATH.match(f"assets/gm/post_effect/{hashed}.json"))
+
+    def test_the_name_is_worked_out_as_the_companion_does(self):
+        # The same text and the same sum as ModuleHost.effectId, so a change on one side has to be made on the other.
+        self.assertEqual(bundles._effect_id("hooks", "hook_warp"), "p" + hashlib.sha256(b"hooks/hook_warp").hexdigest()[:16])
 
 
 class AReleaseThatStopsTheServerStarting(unittest.TestCase):

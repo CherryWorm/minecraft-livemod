@@ -343,10 +343,42 @@ context.playSound("chime", level, pos, 1.0F, 1.0F);
 
 For anything more, `context.sound("chime")` gives the game's own `SoundEvent`, so `level.playSound(null, pos, context.sound("chime"), SoundSource.BLOCKS, 1.0F, 1.0F)` chooses its volume slider.
 
+## Screen effects
+
+A client module can put a shader over everything a player sees, for something like the air warping near a tear. It covers the whole screen and there's no way to limit it to one place, so turn it on as they come near. It's about the most expensive thing that can be done to a player's computer, so save it for something that matters, and don't leave it on.
+
+List names in `"screen_effects": ["warp"]`, with `assets/shaders/warp.fsh`:
+
+```glsl
+#version 330
+#extension GL_ARB_separate_shader_objects : require
+
+#moj_import <minecraft:globals.glsl>
+
+uniform sampler2D InSampler;
+
+layout(location = 0) in vec2 texCoord;
+layout(location = 0) out vec4 fragColor;
+
+void main() {
+    vec2 bent = texCoord + vec2(sin(texCoord.y * 40.0 + GameTime * 6000.0) * 0.004, 0.0);
+    fragColor = vec4(texture(InSampler, bent).rgb, 1.0);
+}
+```
+
+`InSampler` is the picture as it was going to be, and `fragColor` is what's shown instead. `GameTime` goes from 0 to 1 over a game day, so multiply it up for anything that moves. Keep it short, and don't use `while` or `do`, which could hang a player's graphics card. It can't read the world, so a client module only chooses when it's on:
+
+```java
+context.screenEffect("warp");
+context.screenEffect(null);
+```
+
+It goes by itself when the module unloads. Needing a client module, it won't show for anyone without the companion. A shader the game can't compile on someone's computer just doesn't appear for them, and test clients render in software, so it hasn't been seen on a real graphics card until a real player sees it.
+
 ## Using your content from a module
 
 `context.block("name")`, `context.item("name")`, `context.mob("name")` and `context.sound("name")` give you the real objects for names in `feature.json`, or `"other_feature/name"` for another feature's.
 
 ## What the engine doesn't do yet
 
-Structures larger than a chunk, new dimensions, and screens beyond chest-style menus, books and drawing on inventory screens. Armor can only look like vanilla's when worn, and custom tools can't take enchantments at an enchanting table. Build the closest thing that works, and say what you wanted in `host_requests`.
+Structures larger than a chunk, new dimensions, and screens beyond chest-style menus, books and drawing on inventory screens. A screen effect covers the whole screen, so there's no drawing a shader on one thing in the world. Armor can only look like vanilla's when worn, and custom tools can't take enchantments at an enchanting table. Build the closest thing that works, and say what you wanted in `host_requests`.

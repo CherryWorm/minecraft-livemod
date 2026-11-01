@@ -32,4 +32,11 @@ public interface ModuleContext {
 	 * other screen is open, and in the creative menu.
 	 */
 	InventoryView inventory();
+
+	/**
+	 * Puts one of this feature's "screen_effects" over everything the player sees, or takes it away with null. It covers the whole
+	 * screen, so turn it on as they come near whatever it's for. It goes by itself when this module unloads, and on a computer
+	 * that can't run it, it just doesn't appear.
+	 */
+	void screenEffect(String name);
 }
