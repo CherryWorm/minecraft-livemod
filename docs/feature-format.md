@@ -265,10 +265,16 @@ context.listen(new WorldEvents() {
     public void itemEaten(ServerPlayer player, ItemStack stack) { /* ... */ }
     @Override
     public void playerJoined(ServerPlayer player) { /* ... */ }
+    @Override
+    public void knowledgeLearned(ServerPlayer player, String entry, String title) { /* ... */ }
+    @Override
+    public void blockExamined(ServerPlayer player, ServerLevel level, BlockPos pos, BlockState state) { /* ... */ }
+    @Override
+    public void mobExamined(ServerPlayer player, Entity mob) { /* ... */ }
 });
 ```
 
-These fire for everything, vanilla's and every feature's, so check what it was first. `blockBroken` is only for what a player breaks, and the block is already gone, so `state` is what it was. `mobKilled` is anything living that dies, however it happened, including players, and `source.getEntity()` is who did it, if anyone. `itemEaten` is food and drink, including potions and milk, and `stack` is a copy of what they had just before. `playerJoined` doesn't include anyone already online when your module loads, so look through `context.server().getPlayerList().getPlayers()` in `enable` if that matters.
+These fire for everything, vanilla's and every feature's, so check what it was first. `blockBroken` is only for what a player breaks, and the block is already gone, so `state` is what it was. `mobKilled` is anything living that dies, however it happened, including players, and `source.getEntity()` is who did it, if anyone. `itemEaten` is food and drink, including potions and milk, and `stack` is a copy of what they had just before. `playerJoined` doesn't include anyone already online when your module loads, so look through `context.server().getPlayerList().getPlayers()` in `enable` if that matters. `knowledgeLearned` is any feature's knowledge being learned for the first time, however it happened, with `entry` as its full name, `feature/name`, and `title` as what players read. Where a world shares what's learned, that's once for everyone, with whoever got there first. `blockExamined` and `mobExamined` are a player using something while crouching with an empty hand, whether or not there was anything to learn from it, and anything it taught has been learned by then. `mobExamined` is any entity, so check what it is.
 
 A module that keeps throwing errors is switched off automatically.
 

@@ -43,7 +43,7 @@ def run(features):
         manifest = feature["manifest"]
         has_module = (feature["dir"] / "server" / "src").is_dir()
         # Ores and drops are the things found in the world on their way to something else.
-        dropped = {drops["item"] for table in ("blocks", "mobs") for thing in manifest.get(table, {}).values() if (drops := thing.get("drops"))}
+        dropped = {drop["item"] for table in ("blocks", "mobs") for thing in manifest.get(table, {}).values() for drop in balance.drops_of(thing)}
         for name, item in manifest.get("items", {}).items():
             node = f"item:{feature_id}/{name}"
             components = item.get("components") or {}

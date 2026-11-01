@@ -228,7 +228,7 @@ public final class OrePatchQueue {
 		int[] ground = patch.followTerrain() ? groundUnder(chunk, patch, parts) : null;
 		boolean suits = patch.followTerrain() ? ground != null
 				: origin.getY() >= patch.minY() && origin.getY() <= patch.maxY() && patch.on().contains(chunk.getBlockState(origin.below()).getBlock());
-		if (!suits || !(patch.biomes().isEmpty() || patch.biomes().stream().anyMatch(level.getBiome(origin)::is))) {
+		if (!suits || !onHighGround(level, chunk, patch) || !(patch.biomes().isEmpty() || patch.biomes().stream().anyMatch(level.getBiome(origin)::is))) {
 			return;
 		}
 		List<BlockPos> spots = parts.stream().map(part -> ground == null ? origin.offset(part.x(), part.y(), part.z())
@@ -242,13 +242,33 @@ public final class OrePatchQueue {
 		Provenance.untracked(() -> {
 			for (int i = 0; i < spots.size(); i++) {
 				BlockPos spot = spots.get(i);
-				level.setBlock(spot, parts.get(i).block().defaultBlockState(), Block.UPDATE_CLIENTS);
-				if (patch.loot() != null && level.getBlockEntity(spot) instanceof RandomizableContainerBlockEntity chest) {
-					chest.setLootTable(ResourceKey.create(Registries.LOOT_TABLE, Identifier.parse(patch.loot())), random.nextLong());
+				level.setBlock(spot, parts.get(i).state(), Block.UPDATE_CLIENTS);
+				String loot = parts.get(i).loot() != null ? parts.get(i).loot() : patch.loot();
+				if (loot != null && level.getBlockEntity(spot) instanceof RandomizableContainerBlockEntity chest) {
+					chest.setLootTable(ResourceKey.create(Registries.LOOT_TABLE, Identifier.parse(loot)), random.nextLong());
 				}
 			}
 		});
 		this.ruinsPlaced++;
+	}
+
+	/**
+	 * Compares the middle of this chunk with the average of the middles of the four around it, which are as far as it can look,
+	 * because further ones may not exist yet. On an even slope that's no difference, so only a real rise counts.
+	 */
+	private static boolean onHighGround(ServerLevel level, LevelChunk chunk, RuinPatch patch) {
+		if (patch.highGround() <= 0) {
+			return true;
+		}
+		int around = 0;
+		for (Direction direction : Direction.Plane.HORIZONTAL) {
+			LevelChunk next = level.getChunkSource().getChunkNow(chunk.getPos().x() + direction.getStepX(), chunk.getPos().z() + direction.getStepZ());
+			if (next == null) {
+				return false;
+			}
+			around += groundAt(next, 8, 8).getY();
+		}
+		return groundAt(chunk, 8, 8).getY() - around / 4.0 >= patch.highGround();
 	}
 
 	private static int column(RuinPatch.Part part) {

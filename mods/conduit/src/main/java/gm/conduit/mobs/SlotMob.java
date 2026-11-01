@@ -445,6 +445,26 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 		}
 	}
 
+	private SoundEvent ownSound(String kind, SoundEvent otherwise) {
+		SoundEvent own = this.applied == null ? null : this.applied.sounds().get(kind);
+		return own != null ? own : otherwise;
+	}
+
+	@Override
+	protected SoundEvent getAmbientSound() {
+		return ownSound(IDLE, super.getAmbientSound());
+	}
+
+	@Override
+	protected SoundEvent getHurtSound(DamageSource source) {
+		return ownSound(HURT, super.getHurtSound(source));
+	}
+
+	@Override
+	protected SoundEvent getDeathSound() {
+		return ownSound(DEATH, super.getDeathSound());
+	}
+
 	@Override
 	public boolean doHurtTarget(ServerLevel level, Entity target) {
 		Animator animator = animator();

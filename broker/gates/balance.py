@@ -85,6 +85,9 @@ _VANILLA_STORAGE = [("iron_nugget", "iron_ingot"), ("gold_nugget", "gold_ingot")
                     ("netherite_ingot", "netherite_block"), ("diamond", "diamond_block"), ("emerald", "emerald_block"),
                     ("lapis_lazuli", "lapis_block"), ("coal", "coal_block"), ("redstone", "redstone_block"),
                     ("raw_iron", "raw_iron_block"), ("raw_gold", "raw_gold_block"), ("raw_copper", "raw_copper_block")]
+# What vanilla makes players work hardest for. A chest in a ruin is one find, but a block that drops these is a mine of them.
+_VANILLA_PRECIOUS = {"diamond", "diamond_block", "emerald", "emerald_block", "ancient_debris", "netherite_scrap", "netherite_ingot", "netherite_block",
+                     "nether_star", "beacon", "elytra", "totem_of_undying", "enchanted_golden_apple", "heart_of_the_sea", "dragon_egg"}
 
 
 def _rock_fraction(low, high):
@@ -391,6 +394,19 @@ def _vanilla_changes():
         yield f"vanilla {small} from {big}", {big: -1, small: 9}
 
 
+def _breaking_changes(features):
+    """Crafting a block that breaks into vanilla's materials makes those materials, so it can close a loop like any recipe."""
+    things = _things(features)
+    breaking = {node: _yields(node, things) for node in things if any(_is_vanilla(what) for what, _ in _yields(node, things))}
+    for node, yields in breaking.items():
+        yield f"breaking {node.split(':', 1)[1]}", {node: -1, **dict(yields)}
+    for node, thing in things.items():
+        places = thing.get("places")
+        block = _node(str(places.get("block")), node.split(":")[1].split("/")[0]) if isinstance(places, dict) else None
+        if block in breaking:
+            yield f"planting {node.split(':', 1)[1]}", {node: -1, block: 1}
+
+
 def _find_free_material(changes):
     """Finds recipes that, repeated in some ratio, leave more of something and less of nothing.
 
@@ -442,11 +458,11 @@ def _find_free_material(changes):
     return runs, {node: change for node, change in left.items() if change}
 
 
-def _check_cycles(recipes):
+def _check_cycles(features, recipes):
     """Fails on loops that make material from nothing. A loop that pays with something from outside isn't one:
     it's a conversion, like vanilla's smithing template duplication, and whether that's a fair price is a design question."""
     problems = []
-    changes = list(_vanilla_changes())
+    changes = [*_vanilla_changes(), *_breaking_changes(features)]
     for recipe in recipes:
         combinations = math.prod(len(alternatives) for alternatives, _ in recipe["inputs"])
         if combinations > MAX_VARIANTS:
@@ -469,6 +485,22 @@ def ruin_layouts(ruin):
     return ruin.get("layouts") or [ruin.get("parts", [])]
 
 
+def ruin_loot(ruin):
+    """Every loot table in a ruin: its own, for any container, and those of the containers that have their own."""
+    return [table for table in [ruin.get("loot"), *(part.get("loot") for layout in ruin_layouts(ruin) for part in layout)] if table]
+
+
+def part_block(part):
+    """A part's block, leaving out any block state after its name."""
+    return str(part.get("block")).split("[")[0]
+
+
+def drops_of(thing):
+    """What a block or mob says it drops, which for a block can be one thing or a list of several."""
+    drops = thing.get("drops") or []
+    return drops if isinstance(drops, list) else [drops]
+
+
 def _natural_sources(features):
     """What exists without crafting: blocks the world places, and what mobs and ruin chests hand out."""
     placed, handed_out = set(), set()
@@ -481,17 +513,33 @@ def _natural_sources(features):
             if mob.get("drops"):
                 handed_out.add(f"item:{_key(feature_id, mob['drops']['item'])}")
         for ruin in manifest.get("ruins", {}).values():
-            placed.update(_node(part["block"], feature_id) for layout in ruin_layouts(ruin) for part in layout if str(part.get("block")).startswith("$block:"))
+            placed.update(_node(part_block(part), feature_id) for layout in ruin_layouts(ruin) for part in layout if part_block(part).startswith("$block:"))
             handed_out.update(f"{found.group(1)}:{_key(feature_id, found.group(2))}"
-                              for found in TOKEN.finditer(json.dumps(ruin.get("loot") or {})))
+                              for found in TOKEN.finditer(json.dumps(ruin_loot(ruin))))
     return placed, handed_out
 
 
-def _drop_of(node, things):
-    """What breaking a block gives: itself, unless it says otherwise. Silk touch can still get an ore itself, as in
-    vanilla, but that's too late in the game for a recipe to rely on, so it doesn't count here."""
-    drops = things.get(node, {}).get("drops")
-    return f"item:{_key(node.split(':')[1].split('/')[0], drops['item'])}" if drops else node
+def _yields(node, things):
+    """What breaking a block gives, with how many of each on average: itself, unless it says otherwise. Silk touch can still
+    get an ore itself, as in vanilla, but that's too late in the game for a recipe to rely on, so it doesn't count here."""
+    feature_id = node.split(":")[1].split("/")[0]
+    found = []
+    for drop in drops_of(things.get(node, {})):
+        count = drop.get("count")
+        mean = sum(count) / 2 if isinstance(count, list) and len(count) == 2 and all(map(_is_number, count)) else 1
+        found.append((drop["item"] if _is_vanilla(drop["item"]) else f"item:{_key(feature_id, drop['item'])}", mean))
+    return found or [(node, 1)]
+
+
+def _drops_of(node, things):
+    return {what for what, _ in _yields(node, things)}
+
+
+def _check_vanilla_drops(features):
+    return [f"Block {feature_id}/{name} drops {drop['item']}, and no block can hand that out, because anything the world keeps placing would "
+            "make it common. Make a material of this world instead, or put it in a ruin's loot if it's meant to be a rare find."
+            for feature_id, feature in features.items() for name, block in feature["manifest"].get("blocks", {}).items()
+            for drop in drops_of(block) if drop["item"].removeprefix("minecraft:") in _VANILLA_PRECIOUS]
 
 
 def _check_obtainable(features, recipes):
@@ -505,7 +553,7 @@ def _check_obtainable(features, recipes):
                     problems.append(f"Recipe {recipe['source']} uses {node}, which no feature declares. "
                                     "Refer to content with $item:name or $block:name.")
     placed, handed_out = _natural_sources(features)
-    holdable = handed_out | {_drop_of(node, things) for node in placed}
+    holdable = handed_out.union(*(_drops_of(node, things) for node in placed))
     # Every recipe mode counts the same. Known recipes get their routes checked elsewhere, and guessable ones can
     # be found by trying, so all that matters here is whether their inputs exist.
     while True:
@@ -513,7 +561,7 @@ def _check_obtainable(features, recipes):
         for recipe in recipes:
             if all(any(_is_vanilla(node) or node in holdable for node in alternatives) for alternatives, _ in recipe["inputs"]):
                 reachable.update(node for node, _, _ in recipe["outputs"])
-        reachable.update(_drop_of(node, things) for node in holdable if node.startswith("block:"))
+        reachable.update(*(_drops_of(node, things) for node in holdable if node.startswith("block:")))
         if reachable == holdable:
             break
         holdable = reachable
@@ -583,17 +631,17 @@ def check_ores(features, recipes):
             if "tier" in ore and ore["tier"] not in TIERS:
                 problems.append(f"Ore {label} declares tier {ore['tier']!r}, but a tier must be one of {', '.join(TIERS)}.")
             node = f"block:{_key(feature_id, ore.get('block', ''))}"
-            block = things.get(node, {})
-            count = (block.get("drops") or {}).get("count")
-            # Lots of drops per block is the same as lots of blocks, so the check counts what players end up with.
-            mean_drop = sum(count) / 2 if isinstance(count, list) and len(count) == 2 and all(map(_is_number, count)) else 1
-            entry = supply.setdefault(node, {"amount": 0, "start": _drop_of(node, things), "tiers": [block.get("tier")]})
-            entry["amount"] += _expected(*numbers) * mean_drop
-            entry["tiers"].append(ore.get("tier"))
+            # Lots of drops per block is the same as lots of blocks, so the check counts what players end up with. If it drops several things, it's a source of each.
+            for start, mean_drop in _yields(node, things):
+                entry = supply.setdefault((node, start), {"amount": 0, "start": start, "tiers": [things.get(node, {}).get("tier")]})
+                entry["amount"] += _expected(*numbers) * mean_drop
+                entry["tiers"].append(ore.get("tier"))
     ceiling = max(ORE_CURVE.values()) * ORE_TOLERANCE
-    for node, entry in supply.items():
+    for (node, _), entry in supply.items():
         label, amount = node.split(":", 1)[1], entry["amount"]
-        tier = _highest_tier(entry["tiers"] + _tiers_fed(entry["start"], recipes, things, features))
+        # So much is made from vanilla's own materials that what's made from them says nothing about an ore that drops them.
+        fed = [] if _is_vanilla(entry["start"]) else _tiers_fed(entry["start"], recipes, things, features)
+        tier = _highest_tier(entry["tiers"] + fed)
         about = f"gives about {amount:.1f} per chunk"
         if amount <= 0:
             problems.append(f"Ore {label} never generates: its veins or Y range give nothing inside rock, "
@@ -617,8 +665,8 @@ def run(features):
     """Reports every problem at once, so fixing a batch takes one try and not ten."""
     try:
         recipes = _read_recipes(features)
-        problems = (check_power(features, recipes) + _check_cycles(recipes)
-                    + _check_obtainable(features, recipes) + check_ores(features, recipes))
+        problems = (check_power(features, recipes) + _check_cycles(features, recipes) + _check_obtainable(features, recipes)
+                    + check_ores(features, recipes) + _check_vanilla_drops(features))
     except (AttributeError, KeyError, TypeError, ValueError) as error:
         # What couldn't be read hasn't been checked, so it can't pass. A crash here would also leave no answer at all.
         raise GateFailed(GATE, f"A feature.json has something in the wrong shape, so it can't be checked: {error!r}. "

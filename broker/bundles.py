@@ -191,33 +191,41 @@ def _block_model(feature, feature_id, name, block, slot, ledger):
 
 def _drop_entry(drops, feature_id, ledger, *bonuses):
     """One thing dropped, in Minecraft 26's loot format. The game ignores fields it doesn't know without saying so,
-    so the older "functions" and "conditions" look fine and do nothing."""
+    so the older "functions" and "conditions" look fine and do nothing. A vanilla item goes by its own name."""
     modifiers = []
     count = drops.get("count")
     if isinstance(count, list):
         modifiers.append({"type": "minecraft:set_count", "count": {"type": "minecraft:uniform", "min": count[0], "max": count[1]}})
     modifiers.extend(bonuses)
-    entry = {"type": "minecraft:item", "name": _resolve_tokens(f"$item:{drops['item']}", feature_id, ledger)}
+    item = drops["item"]
+    entry = {"type": "minecraft:item", "name": item if item.startswith("minecraft:") else _resolve_tokens(f"$item:{item}", feature_id, ledger)}
     if modifiers:
         entry["modifier"] = modifiers
     return entry
 
 
-def _loot_table(block, slot, feature_id, ledger):
-    """Like vanilla's: a block with its own drops gives itself to silk touch, and an ore's drops respect fortune."""
+def _loot_table(block, name, slot, feature_id, ledger):
+    """Like vanilla's: a block with its own drops gives itself to silk touch, and an ore's drops respect fortune. A pool only ever
+    gives one of what's in it, so of several drops, each after the first has a pool of its own, which silk touch has to turn off."""
     itself = {"type": "minecraft:item", "name": f"gm:{slot}"}
     drops = block.get("drops")
     if drops:
+        listed = drops if isinstance(drops, list) else [drops]
+        if not all(isinstance(drop, dict) and isinstance(drop.get("item"), str) for drop in listed):
+            raise BundleError(f"{feature_id}/{name}: drops is like {{\"item\": \"name\", \"count\": [1, 2]}}, or a list of those, not {drops!r}.")
         bonuses = [{"type": "minecraft:explosion_decay"}]
         if block.get("family") in ORE_FAMILIES:
             bonuses.insert(0, {"type": "minecraft:apply_bonus", "enchantment": "minecraft:fortune", "formula": "minecraft:ore_drops"})
-        entry = {"type": "minecraft:alternatives", "children": [
+        entries = [_drop_entry(drop, feature_id, ledger, *bonuses) for drop in listed]
+        pools = [{"rolls": 1, "entries": [{"type": "minecraft:alternatives", "children": [
             {**itself, "condition": "minecraft:tool/can_silk_touch"},
-            _drop_entry(drops, feature_id, ledger, *bonuses),
-        ]}
+            entries[0],
+        ]}]}]
+        no_silk = {"type": "minecraft:inverted", "term": {"type": "minecraft:any_of", "terms": ["minecraft:tool/can_silk_touch"]}}
+        pools += [{"rolls": 1, "condition": no_silk, "entries": [entry]} for entry in entries[1:]]
     else:
-        entry = {**itself, "condition": {"type": "minecraft:survives_explosion"}}
-    return {"type": "minecraft:block", "pools": [{"rolls": 1, "entries": [entry]}]}
+        pools = [{"rolls": 1, "entries": [{**itself, "condition": {"type": "minecraft:survives_explosion"}}]}]
+    return {"type": "minecraft:block", "pools": pools}
 
 
 def _copy_model(feature, feature_id, name, model_name, config):
@@ -237,6 +245,8 @@ def _render_mob(feature, feature_id, name, mob, ledger, pack_lang, datapack, con
     model = _copy_model(feature, feature_id, name, mob.get("model", name), config)
     pack_lang[f"entity.gm.{slot}"] = mob["display"]
     if mob.get("drops"):
+        if not isinstance(mob["drops"], dict) or ":" in str(mob["drops"].get("item")):
+            raise BundleError(f"{feature_id}/{name}: a mob drops one of this world's items, like {{\"item\": \"fang\", \"count\": [1, 2]}}, not {mob['drops']!r}.")
         _write_json(datapack / f"data/gm/loot_table/entities/{slot}.json", {
             "type": "minecraft:entity",
             "pools": [{"rolls": 1, "entries": [_drop_entry(mob["drops"], feature_id, ledger, {
@@ -248,6 +258,8 @@ def _render_mob(feature, feature_id, name, mob, ledger, pack_lang, datapack, con
     definition = {"model": model, **{field: mob[field] for field in fields if field in mob}}
     if mob.get("mind"):
         definition["mind"] = _render_mind(mob["mind"], feature_id, ledger)
+    if mob.get("sounds"):
+        definition["sounds"] = _resolve_tokens(mob["sounds"], feature_id, ledger)
     return slot, definition
 
 
@@ -284,14 +296,20 @@ def _render_biome(feature_id, name, biome, vanilla_biome, datapack):
 
 
 def _render_ruin(feature_id, name, ruin, ledger, datapack):
-    """A ruin's chest loot is a normal loot table, written here under a meaningless name."""
+    """A ruin's chest loot is a normal loot table, written here under a meaningless name. A chest nobody has opened yet
+    finds its loot by that name, so it has to stay the same from one release to the next, whatever's in the table."""
+    def write_table(table, where):
+        hashed = "l" + hashlib.sha256(where.encode()).hexdigest()[:10]
+        _write_json(datapack / f"data/gm/loot_table/chests/{hashed}.json", _resolve_tokens(table, feature_id, ledger))
+        return f"gm:chests/{hashed}"
+
     patch = _resolve_tokens({key: value for key, value in ruin.items() if key != "loot"}, feature_id, ledger)
     patch["id"] = ruin["id"]
-    patch["loot"] = None
-    if ruin.get("loot"):
-        hashed = "l" + hashlib.sha256(f"{feature_id}/{name}".encode()).hexdigest()[:10]
-        _write_json(datapack / f"data/gm/loot_table/chests/{hashed}.json", _resolve_tokens(ruin["loot"], feature_id, ledger))
-        patch["loot"] = f"gm:chests/{hashed}"
+    patch["loot"] = write_table(ruin["loot"], f"{feature_id}/{name}") if ruin.get("loot") else None
+    for index, layout in enumerate(patch.get("layouts") or [patch.get("parts", [])]):
+        for part in layout:
+            if part.get("loot"):
+                part["loot"] = write_table(part["loot"], f"{feature_id}/{name}/{index}/{part.get('x')}/{part.get('y')}/{part.get('z')}")
     return patch
 
 
@@ -363,7 +381,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
             _write_json(pack / f"assets/gm/models/block/{slot}.json",
                         _block_model(feature, feature_id, name, block, slot, ledger))
             _write_json(datapack / f"data/gm/loot_table/blocks/{slot}.json",
-                        _loot_table(block, slot, feature_id, ledger))
+                        _loot_table(block, name, slot, feature_id, ledger))
             tool = block.get("tool")
             if tool:
                 if tool not in TOOL_TAGS:

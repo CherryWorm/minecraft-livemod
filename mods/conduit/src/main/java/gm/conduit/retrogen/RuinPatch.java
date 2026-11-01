@@ -2,6 +2,8 @@ package gm.conduit.retrogen;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonParseException;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import net.minecraft.commands.arguments.blocks.BlockStateParser;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
@@ -10,6 +12,7 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -27,24 +30,28 @@ import java.util.stream.Collectors;
  * @param chance how likely a chunk is to get one, from 0 to 1. With spacing, it's how likely each spot is to get one
  * @param on what it can sit on, checked under its origin, or under every part that follows the terrain
  * @param replaces what its blocks may overwrite, so it never cuts through something unexpected
- * @param loot a loot table for any chest in it, or null
+ * @param loot a loot table for any chest in it that hasn't got its own, or null
  * @param followTerrain counts each part's height from the ground under it, instead of from one level
  * @param maxSlope how far the ground may rise and fall under one that follows the terrain
  * @param spacing how many chunks apart two of these always are, or 0 if that doesn't matter
+ * @param highGround how many blocks above the chunks around it, on average, its chunk has to stand, or 0 if that doesn't matter
  */
 public record RuinPatch(String id, List<List<Part>> layouts, Set<Block> on, Set<Block> replaces, float chance, int minY, int maxY,
-		boolean underground, Set<ResourceKey<Biome>> biomes, String loot, boolean followTerrain, int maxSlope, int spacing) {
+		boolean underground, Set<ResourceKey<Biome>> biomes, String loot, boolean followTerrain, int maxSlope, int spacing, int highGround) {
 	private static final Path FILE = Path.of("config", "conduit", "ruin_patches.json");
 	private static final int CHUNK_SIDE = 16;
 	private static final int DEFAULT_MAX_SLOPE = 8;
 
-	/** @param chance how often this part is there at all, from 0 to 1 */
-	public record Part(int x, int y, int z, Block block, float chance) {}
+	/**
+	 * @param chance how often this part is there at all, from 0 to 1
+	 * @param loot a loot table for this part alone, if it's a container, or null
+	 */
+	public record Part(int x, int y, int z, BlockState state, float chance, String loot) {}
 
-	private record PartDefinition(int x, int y, int z, String block, Float chance) {}
+	private record PartDefinition(int x, int y, int z, String block, Float chance, String loot) {}
 
 	private record Definition(String id, List<PartDefinition> parts, List<List<PartDefinition>> layouts, List<String> on, List<String> replaces,
-			Float chance, int minY, int maxY, boolean underground, List<String> biomes, String loot, boolean followTerrain, Integer maxSlope, int spacing) {}
+			Float chance, int minY, int maxY, boolean underground, List<String> biomes, String loot, boolean followTerrain, Integer maxSlope, int spacing, int highGround) {}
 
 	static List<RuinPatch> load() {
 		if (!Files.exists(FILE)) {
@@ -106,11 +113,21 @@ public record RuinPatch(String id, List<List<Part>> layouts, Set<Block> on, Set<
 				definition.loot(),
 				definition.followTerrain(),
 				definition.maxSlope() != null ? definition.maxSlope() : DEFAULT_MAX_SLOPE,
-				definition.spacing());
+				definition.spacing(),
+				definition.highGround());
 	}
 
 	private static Part part(PartDefinition part) {
-		return new Part(part.x(), part.y(), part.z(), block(part.block()), part.chance() != null ? part.chance() : 1);
+		return new Part(part.x(), part.y(), part.z(), state(part.block()), part.chance() != null ? part.chance() : 1, part.loot());
+	}
+
+	/** Reads a block the way commands do, so it can say which way it faces, like {@code minecraft:ladder[facing=north]}. */
+	private static BlockState state(String text) {
+		try {
+			return BlockStateParser.parseForBlock(BuiltInRegistries.BLOCK, text, false).blockState();
+		} catch (CommandSyntaxException error) {
+			throw new IllegalStateException("Can't read block in ruin: " + text + ": " + error.getMessage(), error);
+		}
 	}
 
 	private static Block block(String id) {

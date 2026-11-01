@@ -4,6 +4,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -26,4 +27,16 @@ public interface WorldEvents {
 
 	/** A player has joined. Anyone already online when a module loads doesn't count, so look through the player list in enable() if that matters. */
 	default void playerJoined(ServerPlayer player) {}
+
+	/**
+	 * Knowledge has just been learned for the first time, whichever feature's it is and however it happened. The entry is its full
+	 * name, {@code feature/name}, and the title is what players read. Where a world shares what's learned, this happens once, for whoever got there first.
+	 */
+	default void knowledgeLearned(ServerPlayer player, String entry, String title) {}
+
+	/** A player has examined a block, by using it while crouching with an empty hand, whether or not there was anything to learn from it. */
+	default void blockExamined(ServerPlayer player, ServerLevel level, BlockPos pos, BlockState state) {}
+
+	/** A player has examined a mob, or any other entity, in the same way. */
+	default void mobExamined(ServerPlayer player, Entity mob) {}
 }

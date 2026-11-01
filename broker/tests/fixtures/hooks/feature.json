@@ -1,10 +1,14 @@
 {
   "id": "hooks",
   "phase": 1,
-  "summary": "Test fixture for what modules can hook into: sounds by name, world events, a block leaving the world, feeding a mob, and ruins that vary.",
+  "summary": "Test fixture for what modules can hook into: sounds by name, world events, a block leaving the world, feeding a mob, a mob's and a block's own sounds and drops, and ruins that vary.",
   "blocks": {
     "hook_block": {"family": "soil", "display": "Hook Block", "texture": "hook_block", "retired": true},
-    "hook_machine": {"family": "machine", "display": "Hook Machine", "texture": "hook_machine", "retired": true}
+    "hook_machine": {"family": "machine", "display": "Hook Machine", "texture": "hook_machine", "retired": true},
+    "hook_scrap": {"family": "soil", "display": "Hook Scrap", "texture": "hook_block", "retired": true,
+                   "drops": {"item": "minecraft:copper_ingot", "count": [2, 2]}},
+    "hook_pile": {"family": "soil", "display": "Hook Pile", "texture": "hook_block", "retired": true,
+                  "drops": [{"item": "minecraft:glass_pane"}, {"item": "hook_token", "count": [2, 2]}]}
   },
   "items": {
     "hook_food": {"display": "Hook Food", "texture": "hook_food", "retired": true,
@@ -12,9 +16,13 @@
     "hook_token": {"display": "Hook Token", "texture": "hook_token", "retired": true}
   },
   "mobs": {
-    "hook_mob": {"category": "creature", "display": "Hook Mob", "model": "hook_mob", "behaviour": "passive", "health": 8, "damage": 0, "speed": 0.2, "width": 0.8, "height": 0.8}
+    "hook_mob": {"category": "creature", "display": "Hook Mob", "model": "hook_mob", "behaviour": "passive", "health": 8, "damage": 0, "speed": 0.2, "width": 0.8, "height": 0.8,
+                 "sounds": {"idle": "$sound:hook_idle", "hurt": "$sound:hook_hurt", "death": "$sound:hook_death"}}
   },
-  "sounds": ["hook_chime"],
+  "sounds": ["hook_chime", "hook_idle", "hook_hurt", "hook_death"],
+  "knowledge": {
+    "hook_lore": {"title": "Hook Lore", "text": "What a closer look at it taught you.", "routes": [{"type": "examine", "id": "$block:hook_block"}]}
+  },
   "ruins": {
     "bending_wall": {
       "id": "hooks_bending_wall_v1",
@@ -23,8 +31,8 @@
         {"x": 6, "y": 0, "z": 8, "block": "minecraft:magenta_concrete"}, {"x": 9, "y": 0, "z": 8, "block": "minecraft:magenta_concrete"},
         {"x": 12, "y": 0, "z": 8, "block": "minecraft:magenta_concrete"}, {"x": 15, "y": 0, "z": 8, "block": "minecraft:magenta_concrete"}
       ],
-      "on": ["minecraft:grass_block", "minecraft:dirt", "minecraft:stone", "minecraft:sand", "minecraft:gravel", "minecraft:snow_block", "minecraft:andesite", "minecraft:granite", "minecraft:diorite", "minecraft:red_sand", "minecraft:terracotta", "minecraft:podzol"],
-      "replaces": ["minecraft:air", "minecraft:short_grass", "minecraft:tall_grass", "minecraft:fern", "minecraft:snow", "minecraft:water", "minecraft:dandelion", "minecraft:poppy"],
+      "on": ["minecraft:grass_block", "minecraft:dirt", "minecraft:stone", "minecraft:sand", "minecraft:gravel", "minecraft:snow_block", "minecraft:andesite", "minecraft:granite", "minecraft:diorite", "minecraft:red_sand", "minecraft:terracotta", "minecraft:podzol", "minecraft:coarse_dirt", "minecraft:rooted_dirt", "minecraft:mud", "minecraft:moss_block", "minecraft:clay", "minecraft:packed_ice", "minecraft:mycelium", "minecraft:sandstone", "minecraft:red_sandstone"],
+      "replaces": ["minecraft:air", "minecraft:short_grass", "minecraft:tall_grass", "minecraft:fern", "minecraft:snow", "minecraft:water", "minecraft:dandelion", "minecraft:poppy", "minecraft:seagrass", "minecraft:tall_seagrass", "minecraft:kelp", "minecraft:kelp_plant", "minecraft:leaf_litter", "minecraft:bush", "minecraft:firefly_bush", "minecraft:short_dry_grass", "minecraft:tall_dry_grass", "minecraft:wildflowers", "minecraft:pink_petals", "minecraft:dead_bush", "minecraft:large_fern"],
       "chance": 0.5, "minY": 20, "maxY": 250, "followTerrain": true, "maxSlope": 12
     },
     "two_shapes": {
@@ -33,16 +41,40 @@
         [{"x": 4, "y": 0, "z": 4, "block": "minecraft:lime_concrete"}, {"x": 4, "y": 1, "z": 4, "block": "minecraft:target", "chance": 0.5}],
         [{"x": 11, "y": 0, "z": 11, "block": "minecraft:orange_concrete"}]
       ],
-      "on": ["minecraft:grass_block", "minecraft:dirt", "minecraft:stone", "minecraft:sand", "minecraft:gravel", "minecraft:snow_block", "minecraft:andesite", "minecraft:granite", "minecraft:diorite", "minecraft:red_sand", "minecraft:terracotta", "minecraft:podzol"],
-      "replaces": ["minecraft:air", "minecraft:short_grass", "minecraft:tall_grass", "minecraft:fern", "minecraft:snow", "minecraft:water", "minecraft:dandelion", "minecraft:poppy"],
+      "on": ["minecraft:grass_block", "minecraft:dirt", "minecraft:stone", "minecraft:sand", "minecraft:gravel", "minecraft:snow_block", "minecraft:andesite", "minecraft:granite", "minecraft:diorite", "minecraft:red_sand", "minecraft:terracotta", "minecraft:podzol", "minecraft:coarse_dirt", "minecraft:rooted_dirt", "minecraft:mud", "minecraft:moss_block", "minecraft:clay", "minecraft:packed_ice", "minecraft:mycelium", "minecraft:sandstone", "minecraft:red_sandstone"],
+      "replaces": ["minecraft:air", "minecraft:short_grass", "minecraft:tall_grass", "minecraft:fern", "minecraft:snow", "minecraft:water", "minecraft:dandelion", "minecraft:poppy", "minecraft:seagrass", "minecraft:tall_seagrass", "minecraft:kelp", "minecraft:kelp_plant", "minecraft:leaf_litter", "minecraft:bush", "minecraft:firefly_bush", "minecraft:short_dry_grass", "minecraft:tall_dry_grass", "minecraft:wildflowers", "minecraft:pink_petals", "minecraft:dead_bush", "minecraft:large_fern"],
       "chance": 0.5, "minY": 20, "maxY": 250, "followTerrain": true
     },
     "far_apart": {
       "id": "hooks_far_apart_v1",
       "parts": [{"x": 7, "y": 0, "z": 7, "block": "minecraft:lodestone"}],
-      "on": ["minecraft:grass_block", "minecraft:dirt", "minecraft:stone", "minecraft:sand", "minecraft:gravel", "minecraft:snow_block", "minecraft:andesite", "minecraft:granite", "minecraft:diorite", "minecraft:red_sand", "minecraft:terracotta", "minecraft:podzol"],
-      "replaces": ["minecraft:air", "minecraft:short_grass", "minecraft:tall_grass", "minecraft:fern", "minecraft:snow", "minecraft:water", "minecraft:dandelion", "minecraft:poppy"],
+      "on": ["minecraft:grass_block", "minecraft:dirt", "minecraft:stone", "minecraft:sand", "minecraft:gravel", "minecraft:snow_block", "minecraft:andesite", "minecraft:granite", "minecraft:diorite", "minecraft:red_sand", "minecraft:terracotta", "minecraft:podzol", "minecraft:coarse_dirt", "minecraft:rooted_dirt", "minecraft:mud", "minecraft:moss_block", "minecraft:clay", "minecraft:packed_ice", "minecraft:mycelium", "minecraft:sandstone", "minecraft:red_sandstone"],
+      "replaces": ["minecraft:air", "minecraft:short_grass", "minecraft:tall_grass", "minecraft:fern", "minecraft:snow", "minecraft:water", "minecraft:dandelion", "minecraft:poppy", "minecraft:seagrass", "minecraft:tall_seagrass", "minecraft:kelp", "minecraft:kelp_plant", "minecraft:leaf_litter", "minecraft:bush", "minecraft:firefly_bush", "minecraft:short_dry_grass", "minecraft:tall_dry_grass", "minecraft:wildflowers", "minecraft:pink_petals", "minecraft:dead_bush", "minecraft:large_fern"],
       "spacing": 4, "minY": 20, "maxY": 250, "followTerrain": true
+    },
+    "furnished": {
+      "id": "hooks_furnished_v1",
+      "parts": [
+        {"x": 2, "y": 0, "z": 2, "block": "minecraft:yellow_concrete"},
+        {"x": 3, "y": 0, "z": 2, "block": "minecraft:ladder[facing=east]"},
+        {"x": 2, "y": 0, "z": 3, "block": "minecraft:yellow_concrete"},
+        {"x": 2, "y": 1, "z": 3, "block": "minecraft:yellow_concrete"},
+        {"x": 3, "y": 0, "z": 3, "block": "minecraft:lantern[hanging=true]"},
+        {"x": 5, "y": 0, "z": 2, "block": "minecraft:barrel[facing=up]", "loot": {"type": "minecraft:chest", "pools": [{"rolls": 1, "entries": [{"type": "minecraft:item", "name": "minecraft:brick"}]}]}},
+        {"x": 6, "y": 0, "z": 2, "block": "minecraft:chest[facing=west]", "loot": {"type": "minecraft:chest", "pools": [{"rolls": 1, "entries": [{"type": "minecraft:item", "name": "$item:hook_token"}]}]}},
+        {"x": 7, "y": 0, "z": 2, "block": "minecraft:trapped_chest"}
+      ],
+      "on": ["minecraft:grass_block", "minecraft:dirt", "minecraft:stone", "minecraft:sand", "minecraft:gravel", "minecraft:snow_block", "minecraft:andesite", "minecraft:granite", "minecraft:diorite", "minecraft:red_sand", "minecraft:terracotta", "minecraft:podzol", "minecraft:coarse_dirt", "minecraft:rooted_dirt", "minecraft:mud", "minecraft:moss_block", "minecraft:clay", "minecraft:packed_ice", "minecraft:mycelium", "minecraft:sandstone", "minecraft:red_sandstone"],
+      "replaces": ["minecraft:air", "minecraft:short_grass", "minecraft:tall_grass", "minecraft:fern", "minecraft:snow", "minecraft:water", "minecraft:dandelion", "minecraft:poppy", "minecraft:seagrass", "minecraft:tall_seagrass", "minecraft:kelp", "minecraft:kelp_plant", "minecraft:leaf_litter", "minecraft:bush", "minecraft:firefly_bush", "minecraft:short_dry_grass", "minecraft:tall_dry_grass", "minecraft:wildflowers", "minecraft:pink_petals", "minecraft:dead_bush", "minecraft:large_fern"],
+      "loot": {"type": "minecraft:chest", "pools": [{"rolls": 1, "entries": [{"type": "minecraft:item", "name": "minecraft:flint"}]}]},
+      "chance": 0.5, "minY": 20, "maxY": 250, "followTerrain": true
+    },
+    "on_a_rise": {
+      "id": "hooks_on_a_rise_v1",
+      "parts": [{"x": 1, "y": 0, "z": 1, "block": "minecraft:cyan_concrete"}],
+      "on": ["minecraft:grass_block", "minecraft:dirt", "minecraft:stone", "minecraft:sand", "minecraft:gravel", "minecraft:snow_block", "minecraft:andesite", "minecraft:granite", "minecraft:diorite", "minecraft:red_sand", "minecraft:terracotta", "minecraft:podzol", "minecraft:coarse_dirt", "minecraft:rooted_dirt", "minecraft:mud", "minecraft:moss_block", "minecraft:clay", "minecraft:packed_ice", "minecraft:mycelium", "minecraft:sandstone", "minecraft:red_sandstone"],
+      "replaces": ["minecraft:air", "minecraft:short_grass", "minecraft:tall_grass", "minecraft:fern", "minecraft:snow", "minecraft:water", "minecraft:dandelion", "minecraft:poppy", "minecraft:seagrass", "minecraft:tall_seagrass", "minecraft:kelp", "minecraft:kelp_plant", "minecraft:leaf_litter", "minecraft:bush", "minecraft:firefly_bush", "minecraft:short_dry_grass", "minecraft:tall_dry_grass", "minecraft:wildflowers", "minecraft:pink_petals", "minecraft:dead_bush", "minecraft:large_fern"],
+      "chance": 1, "minY": 20, "maxY": 250, "followTerrain": true, "highGround": 3
     }
   }
 }

@@ -131,6 +131,8 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				context.waitTicks(40);
 				context.takeScreenshot("m8_" + words[1]);
 			}
+			case "sneak" -> context.getInput().holdShift();
+			case "unsneak" -> context.getInput().releaseShift();
 			default -> LOGGER.warn("[M8] unknown request {}", request);
 		}
 		context.waitTicks(10);

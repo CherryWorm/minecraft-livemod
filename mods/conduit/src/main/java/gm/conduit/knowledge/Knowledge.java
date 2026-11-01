@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import gm.conduit.api.MachineAttempt;
 import gm.conduit.bridge.Bridge;
+import gm.conduit.modules.ServerModuleHost;
 import net.fabricmc.fabric.api.entity.event.v1.ServerEntityCombatEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -17,6 +18,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
@@ -28,6 +30,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.LevelResource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -85,14 +88,18 @@ public final class Knowledge {
 			if (level.isClientSide() || !isExamining(player, hand)) {
 				return InteractionResult.PASS;
 			}
-			String block = BuiltInRegistries.BLOCK.getKey(level.getBlockState(hit.getBlockPos()).getBlock()).toString();
-			return INSTANCE.examine((ServerPlayer) player, block);
+			BlockState state = level.getBlockState(hit.getBlockPos());
+			InteractionResult result = INSTANCE.examine((ServerPlayer) player, BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
+			ServerModuleHost.instance().fire(events -> events.blockExamined((ServerPlayer) player, (ServerLevel) level, hit.getBlockPos(), state));
+			return result;
 		});
 		UseEntityCallback.EVENT.register((player, level, hand, entity, hit) -> {
 			if (level.isClientSide() || !isExamining(player, hand)) {
 				return InteractionResult.PASS;
 			}
-			return INSTANCE.examine((ServerPlayer) player, BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
+			InteractionResult result = INSTANCE.examine((ServerPlayer) player, BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
+			ServerModuleHost.instance().fire(events -> events.mobExamined((ServerPlayer) player, entity));
+			return result;
 		});
 		ServerEntityCombatEvents.AFTER_KILLED_OTHER_ENTITY.register((level, killer, killed, source) -> {
 			if (killer instanceof ServerPlayer player) {
@@ -179,6 +186,7 @@ public final class Knowledge {
 		player.level().playSound(null, player.blockPosition(), SoundEvents.ENCHANTMENT_TABLE_USE, SoundSource.PLAYERS, 1.0F, 1.0F);
 		emitDiscovery(player, "learned " + entry.title());
 		LOGGER.info("{} learned {}", player.getGameProfile().name(), entry.id());
+		ServerModuleHost.instance().fire(events -> events.knowledgeLearned(player, entry.id(), entry.title()));
 	}
 
 	/** Looks up an entry by its full name, for modules that teach something themselves. */

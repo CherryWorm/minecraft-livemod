@@ -36,12 +36,17 @@ def _describe_item(item):
     return ", ".join(parts)
 
 
+def _block_drops(block):
+    drops = block.get("drops") or []
+    return drops if isinstance(drops, list) else [drops]
+
+
 def _describe_block(block):
     parts = [f'"{block.get("display", "?")}"', str(block.get("family"))]
     if block.get("tool_level"):
         parts.append(f"needs {block['tool_level']} tool")
     if block.get("drops"):
-        parts.append(f"drops {block['drops'].get('item')} x{block['drops'].get('count', 1)}")
+        parts.append("drops " + ", ".join(f"{drop.get('item')} x{drop.get('count', 1)}" for drop in _block_drops(block)))
     return ", ".join(parts)
 
 
@@ -137,7 +142,7 @@ def _guide_feature(manifest, say, not_out):
     for name, block in manifest.get("blocks", {}).items():
         facts = [f"needs {block['tool_level']} tool or better"] if block.get("tool_level") else []
         if block.get("drops"):
-            facts.append(f"drops {say(block['drops'].get('item'))}")
+            facts.append(f"drops {', '.join(say(drop.get('item')) for drop in _block_drops(block))}")
         if facts:
             lines.append(f"- {block.get('display', name)}: {', '.join(facts)}")
     for name, mob in manifest.get("mobs", {}).items():
@@ -151,7 +156,8 @@ def _guide_feature(manifest, say, not_out):
         # With spacing, a chance is per spot rather than per chunk, so the distance is the thing worth saying.
         if ruin.get("spacing"):
             chance = f", at least {ruin['spacing']} chunks apart"
-        loot =[say(entry.get("name")) for pool in (ruin.get("loot") or {}).get("pools", []) for entry in pool.get("entries", []) if entry.get("name")]
+        tables = [ruin.get("loot"), *(part.get("loot") for layout in ruin.get("layouts") or [ruin.get("parts", [])] for part in layout)]
+        loot = [say(entry.get("name")) for table in tables if table for pool in table.get("pools", []) for entry in pool.get("entries", []) if entry.get("name")]
         holds = f", its chest can hold {', '.join(dict.fromkeys(loot))}" if loot else ""
         lines.append(f"- site {name.replace('_', ' ')}: {side}, {places({**ruin, 'underground': False})}{chance}{holds}")
     for name in manifest.get("biomes", {}):

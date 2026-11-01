@@ -783,7 +783,7 @@ def _mob_spawn(spawn, category):
 
 
 def _mob_drops(draft, drops, secondary, seed):
-    """Drops name an item of this feature, or another's as other/name. The loot table can only be written for those, so a
+    """Drops name an item of this feature, or another's as other/name. A mob's can't be anything else, so a
     vanilla item stops the release, and an item nobody has declared yet gets made here, ready to be given a use."""
     if isinstance(drops, str):
         drops = {"item": drops}
@@ -791,7 +791,7 @@ def _mob_drops(draft, drops, secondary, seed):
         raise TemplateError(f"drops must be like {{\"item\": \"name\", \"count\": [1, 2]}}, not {drops!r}.")
     item = drops["item"].removeprefix("$item:")
     if ":" in item:
-        raise TemplateError(f"A mob can only drop this world's items, not {item}, because feature.json can't name a vanilla item in drops.")
+        raise TemplateError(f"A mob can only drop this world's items, not {item}, because only a block's drops can name a vanilla item.")
     count = _drop_count(drops.get("count", [1, 2]), "drops count")
     if "/" in item:
         _ingredient(draft, f"$item:{item}", "drops")

@@ -16,6 +16,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -58,6 +59,21 @@ public final class HooksModule implements ServerModule {
 			@Override
 			public void playerJoined(ServerPlayer player) {
 				say("joined " + player.getName().getString());
+			}
+
+			@Override
+			public void knowledgeLearned(ServerPlayer player, String entry, String title) {
+				say("learned " + entry + " called " + title);
+			}
+
+			@Override
+			public void blockExamined(ServerPlayer player, ServerLevel level, BlockPos pos, BlockState state) {
+				say("examined block " + state.is(context.block("hook_block")));
+			}
+
+			@Override
+			public void mobExamined(ServerPlayer player, Entity mob) {
+				say("examined mob " + (mob.getType() == context.mob("hook_mob")));
 			}
 		});
 		context.bindBlock("hook_block", new BlockBehavior() {

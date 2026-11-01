@@ -301,7 +301,7 @@ class Ores(Case):
         self.assertEqual(manifest["recipes"]["tin_ingot_from_block"]["json"]["result"]["count"], 9)
         self.assertEqual("".join(manifest["recipes"]["tin_block"]["json"]["pattern"]), "X" * 9)
         features = bundles.load_features(self.features)
-        self.assertEqual(balance._check_cycles(balance._read_recipes(features)), [])
+        self.assertEqual(balance._check_cycles(features, balance._read_recipes(features)), [])
 
     def test_tool_level_follows_the_tier(self):
         wanted = {"wood": None, "stone": "stone", "iron": "stone", "diamond": "iron", "netherite": "diamond", "beyond": "diamond", "mythic": "diamond"}

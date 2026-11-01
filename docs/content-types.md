@@ -91,6 +91,7 @@ Use `known` with a `route` for recipes learned elsewhere, `open` for ones that a
 - `model` is `assets/models/<model>.bbmodel`. Model each creature for itself with `assetkit/sculpt.py`, so it looks like nothing else in the world. See `assetkit/README.md`. It needs animations named `idle` and `walk`, and `attack` if it fights, and should have `hurt` and `death`. The game plays all of these by itself, and a mob stays until its `death` finishes, up to 5 seconds. Set `width` and `height` from what `sculpt.stats` says.
 - `behaviour` is `hostile`, `neutral` (fights back), `passive` or `skittish` (avoids players).
 - `spawn` is optional. Leave it out for something only a module summons. `light` is `dark`, `bright` or `any`. `cap` limits how many gather near one player. Biomes can be ids or `#tags`.
+- `sounds` is optional, and the game plays these by itself: `"sounds": {"idle": "$sound:crab_click", "hurt": "$sound:crab_yelp", "death": "minecraft:entity.fox.death"}`. Each is one of this world's from `"sounds"` below, or vanilla's by its name. `idle` plays every so often. With none of its own it's quiet when idle, and gets the game's plain hurt and death sounds.
 
 For anything more, bind code to it: `context.bindMob("rune_crab", new MobBehavior() { ... })`, with `tick(mob)`, `hurt(mob, source)` and `interact(mob, player, hand)`. A model's animations are played with `mob.animator().playAnimation("name")`.
 
@@ -233,6 +234,9 @@ Without any of what follows, the ground under its corner at `x` 0, `z` 0 is what
 - **`"layouts": [[...], [...]]`** replaces `parts` with several shapes, and each one placed picks one of them.
 - **`"chance": 0.5` on a part** means it's only there half the time, so counts can vary without a layout for each.
 - **`"spacing": 40`** keeps any two of this ruin at least that many chunks apart. It also makes them rare: that spacing gives one possible spot in every 60 by 60 chunks, which is one and a half times as wide. `chance` is then how likely each spot is to get one, and you can leave it out for all of them. Some spots won't suit it and stay empty, so allow for fewer than that.
+- **`"highGround": 3`** only places it where the ground in the middle of its chunk is at least that many blocks above the average of the middles of the four chunks around it, so it sits on a rise, and not just on a slope. It's only for the surface, and it can't move a ruin to the top of a hill, only leave out the chunks that aren't one. In the worlds it's been tried on, 3 leaves between one chunk in ten and one in four, depending how hilly the land is, on top of what `chance` or `spacing` leave, so allow for that.
+- **A block state** goes after a part's block, written the way commands write it: `"minecraft:ladder[facing=north]"`, or `"minecraft:lantern[hanging=true]"`. Nothing else is checked when it's placed, so one that needs something to hold on to will stay there until something next to it changes, and then fall off if there's nothing there. With `followTerrain`, the columns next to it may not be at the height you drew.
+- **`"loot": {...}` on a part** gives that one container its own loot table. The ruin's own `loot` is for any container that hasn't got one. Only vanilla's chests, barrels, shulker boxes, dispensers, droppers, hoppers and crafters can hold loot.
 
 ```json
 "crater": {
@@ -264,6 +268,14 @@ Minecraft 26 changed this format, and the game ignores fields it doesn't know wi
 ```
 
 A block's `drops` handles the rest for you: silk touch gives the block itself, and fortune works on `ore` and `deep_ore`. A mob's `drops` respect looting.
+
+A block's `drops` can also name vanilla's items, and can be a list, all of which come together:
+
+```json
+"drops": [{"item": "minecraft:copper_ingot"}, {"item": "minecraft:glass_pane", "count": [0, 2]}, {"item": "brass_scrap"}]
+```
+
+Diamonds, emeralds, netherite and vanilla's other rarest things can't come from a block this way, because what the world keeps placing soon makes them common. Put those in a ruin's loot instead, as a rare find. And something crafted can't break into more of vanilla's materials than it took, on average, or it would make them from nothing. A mob's `drops` is still one thing, and from this world.
 
 ## Ores by biome
 

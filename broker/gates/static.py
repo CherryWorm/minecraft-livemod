@@ -8,6 +8,7 @@ import re
 
 from PIL import Image
 
+from broker.bundles import TOKEN
 from broker.gates import GateFailed, balance
 
 GATE = "static"
@@ -26,6 +27,10 @@ MIND_ACTIONS = {"follow", "flee", "stay", "wander", "lead", "give", "teach", "at
 MIND_VOICES = {"words", "cries", "silent"}
 MAX_CHARACTER = 800
 MAX_STASH = 8
+MOB_SOUNDS = {"idle", "hurt", "death"}
+BLOCK_WITH_STATE = re.compile(r"[^\[\]\s]+(\[[a-z0-9_]+=[a-z0-9_]+(,[a-z0-9_]+=[a-z0-9_]+)*\])?")
+# The vanilla blocks whose block entity takes a loot table. An ender chest looks like one, but it's the player's own.
+LOOT_CONTAINERS = re.compile(r"minecraft:(chest|trapped_chest|barrel|dispenser|dropper|hopper|crafter|([a-z]+_)?shulker_box|([a-z]+_)*copper_chest)")
 # Words that would give content away if they appeared in a path players can see.
 SAFE_PATH = re.compile(r"^assets/(gm/(textures/(block/s\d{4}(_(top|bottom|front|back|left|right|side))?|item/i\d{4})\.png(\.mcmeta)?"
                        r"|models/(block/s\d{4}|item/i\d{4})\.json|lang/en_us\.json|sounds/[0-9a-f]+\.ogg|sounds\.json))$")
@@ -156,7 +161,7 @@ def check_loot_format(features):
     """The game ignores fields it doesn't know without a word, so an old-style loot table loads and quietly does less."""
     for feature_id, feature in features.items():
         for name, ruin in feature["manifest"].get("ruins", {}).items():
-            found = sorted(set(_old_loot_fields(ruin.get("loot") or {})))
+            found = sorted(set(_old_loot_fields(balance.ruin_loot(ruin))))
             if found:
                 _fail(f"Ruin {feature_id}/{name} has loot using {', '.join(found)}, which Minecraft 26 ignores. "
                       "See 'Loot tables' in docs/content-types.md.")
@@ -226,6 +231,14 @@ def check_ruins(features):
                         _fail(f"{label} has a part at x {part.get('x')}, z {part.get('z')}. A ruin has to fit in one chunk, so both run from 0 to 15.")
                     if "chance" in part and not _is_share(part["chance"]):
                         _fail(f"{label} has a part with chance {part['chance']!r}. It's how often that part is there, above 0 and up to 1.")
+                    if not isinstance(part.get("block"), str) or not BLOCK_WITH_STATE.fullmatch(part["block"]):
+                        _fail(f"{label} has a part with block {part.get('block')!r}. A block state goes after the name, like minecraft:ladder[facing=north].")
+                    if "loot" in part and not isinstance(part["loot"], dict):
+                        _fail(f"{label} has a part with loot {part['loot']!r}, which isn't a loot table.")
+                    # With nowhere to put it, it would count as a source of what's in it and never hand any of it out.
+                    if "loot" in part and not LOOT_CONTAINERS.fullmatch(balance.part_block(part)):
+                        _fail(f"{label} gives loot to {part.get('block')}, which can't hold any. Only vanilla's chests, barrels, shulker boxes, "
+                              "dispensers, droppers, hoppers and crafters can.")
             spacing = ruin.get("spacing")
             if spacing is not None and (not isinstance(spacing, int) or isinstance(spacing, bool) or spacing < 1):
                 _fail(f"{label} has spacing {spacing!r}. It's a whole number of chunks, at least 1.")
@@ -240,6 +253,37 @@ def check_ruins(features):
                     _fail(f"{label} has a maxSlope, which only means something with followTerrain.")
                 if not isinstance(ruin["maxSlope"], int) or isinstance(ruin["maxSlope"], bool) or ruin["maxSlope"] < 0:
                     _fail(f"{label} has maxSlope {ruin['maxSlope']!r}. It's a whole number of blocks.")
+            if "highGround" in ruin:
+                if ruin.get("underground"):
+                    _fail(f"{label} wants high ground and is underground. Only something on the surface can stand above what's around it.")
+                if not isinstance(ruin["highGround"], int) or isinstance(ruin["highGround"], bool) or ruin["highGround"] < 1:
+                    _fail(f"{label} has highGround {ruin['highGround']!r}. It's a whole number of blocks, at least 1.")
+
+
+def check_block_drops(features):
+    """An empty list looks like a block that drops nothing, but it's the same as leaving it out, and then the block drops itself."""
+    for feature_id, feature in features.items():
+        for name, block in feature["manifest"].get("blocks", {}).items():
+            if block.get("drops") == []:
+                _fail(f"Block {feature_id}/{name} has an empty list of drops. Leave it out, and it drops itself.")
+
+
+def check_mob_sounds(features):
+    """A sound the pack doesn't have plays nothing, and a kind of sound nothing asks for never plays, and neither says so."""
+    sounds = {f"{feature_id}/{name}" for feature_id, feature in features.items() for name in feature["manifest"].get("sounds", [])}
+    for feature_id, feature in features.items():
+        for name, mob in feature["manifest"].get("mobs", {}).items():
+            label = f"Mob {feature_id}/{name}"
+            own = mob.get("sounds", {})
+            if not isinstance(own, dict) or not set(own) <= MOB_SOUNDS:
+                _fail(f"{label} has sounds {own!r}. It's an object with any of {sorted(MOB_SOUNDS)}, like {{\"hurt\": \"$sound:yelp\"}}.")
+            for kind, sound in own.items():
+                found = TOKEN.fullmatch(str(sound))
+                if found and found.group(1) == "sound":
+                    if balance._key(feature_id, found.group(2)) not in sounds:
+                        _fail(f"{label} has {kind} sound {sound}, which no feature lists in its sounds.")
+                elif not str(sound).startswith("minecraft:"):
+                    _fail(f"{label} has {kind} sound {sound!r}. Use one of this world's as $sound:name, or vanilla's as minecraft:name.")
 
 
 def _model_cost(path):
@@ -329,6 +373,8 @@ def run(features, old_ledger, new_ledger, pool, content):
     check_loot_format(features)
     check_no_tags_in_patches(features)
     check_ruins(features)
+    check_block_drops(features)
+    check_mob_sounds(features)
     check_model_costs(features)
     check_minds(features)
     balance.run(features)
