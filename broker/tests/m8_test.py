@@ -111,13 +111,13 @@ def promote():
 
 
 class Client:
-    def __init__(self, mods_dir, log, env=None):
+    def __init__(self, mods_dir, log, env=None, gradle_home=None):
         self.log = log
         subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True, check=False)
         with log.open("w", encoding="utf-8") as stream:
             self.process = subprocess.Popen(
                 ["./scripts/stack.sh", "--profile", "tools", "run", "--rm", "-T", "--name", CONTAINER, "testclient",
-                 "./gradlew", "--no-daemon", "--console=plain", ":companion:runClientGameTest"],
+                 "./gradlew", *(("-g", gradle_home) if gradle_home else ()), "--no-daemon", "--console=plain", ":companion:runClientGameTest"],
                 cwd=runtime.REPO, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT,
                 env={**__import__("os").environ, "MODS_DIR": str(mods_dir), "CLIENT_TEST": "knowledge", "TEST_SERVER": "localhost:25565", **(env or {})},
             )

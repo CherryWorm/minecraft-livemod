@@ -178,6 +178,15 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				LOGGER.info("[M8] block light: {}", light);
 			}
 			case "say" -> context.runOnClient(client -> client.player.connection.sendChat(request.substring(4)));
+			case "where" -> {
+				String shown = context.computeOnClient(client -> {
+					BlockPos at = client.player.blockPosition();
+					return new Gson().toJson(java.util.Map.of("dimension", client.level.dimension().identifier().toString(), "x", at.getX(), "y", at.getY(), "z", at.getZ(),
+							"under", client.level.getBlockState(at.below()).getBlock().toString(), "biome", client.level.getBiome(at).getRegisteredName(),
+							"ambient", client.level.dimensionType().ambientLight()));
+				});
+				LOGGER.info("[M8] where: {}", shown);
+			}
 			case "recipebook" -> logRecipeBook(context);
 			case "jei" -> logJei(context, ItemStack.EMPTY);
 			case "jeimakes" -> logJei(context, context.computeOnClient(client -> client.player.getMainHandItem().copy()));

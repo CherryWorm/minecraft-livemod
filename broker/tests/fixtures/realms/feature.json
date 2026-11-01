@@ -1,0 +1,45 @@
+{
+  "id": "realms",
+  "phase": 1,
+  "summary": "Test fixture for dimensions: a flat land with its own type and biome and things in it, an empty one, and doors to them.",
+  "blocks": {
+    "realm_ore": {"family": "ore", "display": "Realm Ore", "texture": "realm_ore", "tool": "pickaxe"},
+    "realm_bloom": {"family": "plant", "display": "Realm Bloom", "texture": "realm_bloom", "retired": true}
+  },
+  "items": {
+    "moor_key": {"display": "Moor Key", "texture": "realm_key", "retired": true},
+    "void_key": {"display": "Void Key", "texture": "realm_key", "retired": true},
+    "dell_key": {"display": "Dell Key", "texture": "realm_key", "retired": true},
+    "way_home": {"display": "Way Home", "texture": "realm_key", "retired": true}
+  },
+  "biomes": {
+    "realm_moor": {"base": "minecraft:plains", "effects": {"grass_color": "#ff00ff"}, "spread": false}
+  },
+  "dimensions": {
+    "moor": {
+      "display": "The Moor",
+      "type": {"base": "minecraft:overworld", "ambient_light": 0.5},
+      "generator": {"type": "minecraft:flat", "settings": {"biome": "$biome:realm_moor", "structure_overrides": [],
+        "layers": [{"block": "minecraft:bedrock", "height": 1}, {"block": "minecraft:stone", "height": 60}, {"block": "minecraft:grass_block", "height": 1}]}},
+      "spawn": {"x": 8, "z": 8}
+    },
+    "void": {
+      "display": "The Void",
+      "generator": {"type": "minecraft:flat", "settings": {"biome": "minecraft:the_void", "structure_overrides": [], "layers": []}}
+    }
+  },
+  "ores": [
+    {"id": "realm_ore_v1", "block": "realm_ore", "replaces": ["minecraft:stone"], "veinsPerChunk": 8, "veinSize": 6, "minY": -60, "maxY": -10, "dimension": "$dimension:moor"}
+  ],
+  "plants": [
+    {"id": "realm_bloom_v1", "block": "realm_bloom", "on": ["minecraft:grass_block"], "perChunk": 4, "minY": -10, "maxY": 10, "underground": false, "dimension": "$dimension:moor"}
+  ],
+  "ruins": {
+    "realm_ruin": {"id": "realm_ruin_v1", "parts": [{"x": 4, "y": 0, "z": 4, "block": "minecraft:gold_block"}], "on": ["minecraft:grass_block"], "replaces": ["minecraft:air"],
+                   "chance": 0.5, "minY": -10, "maxY": 10, "dimension": "$dimension:moor"}
+  },
+  "mobs": {
+    "realm_grazer": {"category": "creature", "display": "Realm Grazer", "model": "realm_grazer", "behaviour": "passive", "health": 4, "damage": 0, "speed": 0.2, "width": 0.6, "height": 0.6,
+                     "spawn": {"weight": 10, "light": "any", "minY": -10, "maxY": 10, "cap": 4, "dimension": "$dimension:moor"}}
+  }
+}
