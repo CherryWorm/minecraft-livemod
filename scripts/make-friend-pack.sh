@@ -1,7 +1,7 @@
 #!/bin/bash
 # Makes the one file a friend imports into Prism Launcher: Minecraft and Fabric at the versions the server runs,
-# Fabric API, and the companion with this server's signing key pinned inside it. The pinned versions are what
-# stop a launcher moving someone to a newer Minecraft the server doesn't speak.
+# Fabric API, the companion with this server's signing key pinned inside it, and the client mods everyone plays with.
+# The pinned versions are what stop a launcher moving someone to a newer Minecraft the server doesn't speak.
 # Usage: make-friend-pack.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -26,6 +26,7 @@ line=$(grep -P '^server\tfabric-api-' infra/mods.lock)
 file=$(cut -f2 <<<"$line"); url=$(cut -f3 <<<"$line"); sha=$(cut -f4 <<<"$line")
 curl -fsSL --retry 3 -o "$instance/minecraft/mods/$file" "$url"
 echo "$sha  $instance/minecraft/mods/$file" | sha512sum -c - >/dev/null
+bash infra/fetch-mods.sh infra/mods.lock client "$instance/minecraft/mods" >/dev/null
 
 cat >"$instance/instance.cfg" <<EOF
 InstanceType=OneSix

@@ -9,7 +9,8 @@ import pathlib
 import urllib.parse
 import urllib.request
 
-# role: which image gets the jar. server = prod and shadow, shadow = test server only.
+# role: where the jar goes. server = prod and shadow, shadow = test server only, client = the friend pack.
+# Some projects use one version number for every loader and game version, so those are pinned by Modrinth's version id.
 MODS = [
     ("server", "fabric-api", "0.165.0+26.3"),
     ("server", "polymer", "0.18.5+26.3"),
@@ -17,9 +18,17 @@ MODS = [
     ("server", "spark", "1.10.187-fabric"),
     ("server", "blockbench-import-library", "2.2.0+26.3-rc-3"),
     ("server", "biolith", "3.8.0-beta.2"),
-    ("server", "jei", "31.17.0.108"),
+    ("server", "jei", "1Uzmw8Mr"),
     ("shadow", "carpet", "26.3"),
     ("velocity", "Ri89j7v5", "1.1.0"),
+    ("client", "balm", "26.3.0.3+fabric-26.3"),
+    ("client", "ferrite-core", "9.0.0-fabric"),
+    ("client", "inventory-essentials", "26.3.0.5+fabric-26.3"),
+    ("client", "journeymap", "26.3-6.0.10+fabric"),
+    ("client", "jei", "1Uzmw8Mr"),
+    ("client", "mezzconfig", "kWsxPwbN"),
+    ("client", "mezzconfiggui", "2uTmuupR"),
+    ("client", "modmenu", "21.0.0"),
 ]
 
 
