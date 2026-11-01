@@ -2,6 +2,7 @@ package gm.companion.test;
 
 import com.google.gson.Gson;
 import com.mojang.blaze3d.platform.InputConstants;
+import gm.companion.guide.Guide;
 import gm.companion.jei.CompanionJeiPlugin;
 import gm.companion.mixin.AbstractContainerScreenAccessor;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
@@ -112,6 +113,52 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				context.waitTicks(20);
 				context.takeScreenshot("m8_codex");
 				LOGGER.info("[M8] the codex opened");
+				context.runOnClient(client -> client.gui.setScreen(null));
+			}
+			case "guide" -> LOGGER.info("[M8] guide: {}", Guide.describe());
+			case "guideopen" -> {
+				context.runOnClient(client -> client.player.connection.sendCommand("codex"));
+				context.waitFor(client -> Guide.isOpen(), TICKS_PER_MINUTE);
+				context.waitTicks(20);
+				context.takeScreenshot("m22_landing");
+				context.runOnClient(client -> client.gui.setScreen(null));
+			}
+			case "guidekey" -> {
+				context.getInput().pressKey(options -> Guide.openKey());
+				context.waitFor(client -> Guide.isOpen(), TICKS_PER_MINUTE);
+				context.waitTicks(20);
+				context.runOnClient(client -> client.gui.setScreen(null));
+			}
+			case "guideat" -> {
+				context.runOnClient(client -> client.player.connection.sendCommand("codex " + words[1]));
+				context.waitFor(client -> Guide.isOpen(), TICKS_PER_MINUTE);
+				context.waitTicks(20);
+				context.takeScreenshot("m22_opened_at");
+				context.runOnClient(client -> {
+					LOGGER.info("[M8] screen: {}", client.gui.screen().getClass().getSimpleName());
+					client.gui.setScreen(null);
+				});
+			}
+			case "guidecategory" -> {
+				context.runOnClient(client -> Guide.showCategory(request.substring(request.indexOf(' ') + 1)));
+				context.waitFor(client -> Guide.isOpen(), TICKS_PER_MINUTE);
+				context.waitTicks(20);
+				context.takeScreenshot("m22_category_" + words[1]);
+				context.runOnClient(client -> client.gui.setScreen(null));
+			}
+			case "guideindex" -> {
+				context.runOnClient(client -> Guide.showIndex());
+				context.waitFor(client -> Guide.isOpen(), TICKS_PER_MINUTE);
+				context.waitTicks(20);
+				context.takeScreenshot("m22_index");
+				context.runOnClient(client -> client.gui.setScreen(null));
+			}
+			case "guideshow" -> {
+				int page = Integer.parseInt(words[1]);
+				context.runOnClient(client -> Guide.show(request.substring(request.indexOf(' ', "guideshow ".length()) + 1), page));
+				context.waitFor(client -> Guide.isOpen(), TICKS_PER_MINUTE);
+				context.waitTicks(20);
+				context.takeScreenshot("m22_entry_" + page);
 				context.runOnClient(client -> client.gui.setScreen(null));
 			}
 			case "eat" -> {

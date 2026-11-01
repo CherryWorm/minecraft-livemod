@@ -1,0 +1,1444 @@
+diff --git a/Fabric/src/main/java/vazkii/patchouli/fabric/client/FabricClientInitializer.java b/Fabric/src/main/java/vazkii/patchouli/fabric/client/FabricClientInitializer.java
+index be8498c..3242431 100644
+--- a/Fabric/src/main/java/vazkii/patchouli/fabric/client/FabricClientInitializer.java
++++ b/Fabric/src/main/java/vazkii/patchouli/fabric/client/FabricClientInitializer.java
+@@ -4,10 +4,8 @@ import net.fabricmc.api.ClientModInitializer;
+ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+ import net.fabricmc.fabric.api.client.recipe.v1.sync.ClientRecipeSynchronizedEvent;
+-import net.fabricmc.fabric.api.client.rendering.v1.PictureInPictureRendererRegistry;
+ import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+ import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
+-import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
+ import net.fabricmc.fabric.api.event.player.UseBlockCallback;
+ import net.fabricmc.fabric.api.resource.v1.ResourceLoader;
+ import net.minecraft.client.renderer.item.ItemModels;
+@@ -19,10 +17,7 @@ import vazkii.patchouli.client.book.BookContentResourceListenerLoader;
+ import vazkii.patchouli.client.book.BookReloadHook;
+ import vazkii.patchouli.client.book.ClientBookRegistry;
+ import vazkii.patchouli.client.handler.BookRightClickHandler;
+-import vazkii.patchouli.client.handler.MultiblockVisualizationHandler;
+ import vazkii.patchouli.client.hud.BookOverlayHud;
+-import vazkii.patchouli.client.hud.MultiblockProgressHud;
+-import vazkii.patchouli.client.multiblock.MultiblockPiPRenderer;
+ import vazkii.patchouli.fabric.network.FabricMessageOpenBookGui;
+ import vazkii.patchouli.fabric.network.FabricMessageReloadBookContents;
+ import vazkii.patchouli.network.MessageOpenBookGui;
+@@ -35,10 +30,7 @@ public class FabricClientInitializer implements ClientModInitializer {
+ 		PersistentData.setup();
+ 		ClientTickEvents.END_CLIENT_TICK.register(ClientTicker::endClientTick);
+ 		HudElementRegistry.attachElementAfter(VanillaHudElements.CROSSHAIR, BookOverlayHud.ID, BookOverlayHud::extractRenderState);
+-		HudElementRegistry.attachElementBefore(VanillaHudElements.BOSS_BAR, MultiblockProgressHud.ID, MultiblockProgressHud::extractRenderState);
+ 		UseBlockCallback.EVENT.register(BookRightClickHandler::onRightClick);
+-		UseBlockCallback.EVENT.register(MultiblockVisualizationHandler.INSTANCE::onPlayerInteract);
+-		ClientTickEvents.END_CLIENT_TICK.register(MultiblockVisualizationHandler.INSTANCE::onClientTick);
+ 		ClientPlayNetworking.registerGlobalReceiver(MessageOpenBookGui.TYPE, FabricMessageOpenBookGui::handle);
+ 		ClientPlayNetworking.registerGlobalReceiver(MessageReloadBookContents.TYPE, FabricMessageReloadBookContents::handle);
+ 
+@@ -51,9 +43,5 @@ public class FabricClientInitializer implements ClientModInitializer {
+ 		ClientRecipeSynchronizedEvent.EVENT.register((minecraft, synchronizedRecipes) -> {
+ 			ClientRecipes.INSTANCE.receivedRecipes(synchronizedRecipes.recipes());
+ 		});
+-		LevelRenderEvents.END_MAIN.register(context -> {
+-			MultiblockVisualizationHandler.INSTANCE.onWorldRenderLast(context.poseStack(), context.levelState().cameraRenderState.viewRotationMatrix);
+-		});
+-		PictureInPictureRendererRegistry.register(ctx -> new MultiblockPiPRenderer(ctx.bufferSource()));
+ 	}
+ }
+diff --git a/Fabric/src/main/java/vazkii/patchouli/fabric/common/FabricModInitializer.java b/Fabric/src/main/java/vazkii/patchouli/fabric/common/FabricModInitializer.java
+index 28370ff..4446ddb 100644
+--- a/Fabric/src/main/java/vazkii/patchouli/fabric/common/FabricModInitializer.java
++++ b/Fabric/src/main/java/vazkii/patchouli/fabric/common/FabricModInitializer.java
+@@ -15,7 +15,6 @@ import net.minecraft.world.item.CreativeModeTabs;
+ import net.minecraft.world.item.ItemStackTemplate;
+ 
+ import vazkii.patchouli.api.PatchouliAPI;
+-import vazkii.patchouli.common.advancement.PatchouliCriteriaTriggers;
+ import vazkii.patchouli.common.base.PatchouliSounds;
+ import vazkii.patchouli.common.book.BookRegistry;
+ import vazkii.patchouli.common.command.OpenBookCommand;
+@@ -33,7 +32,6 @@ public class FabricModInitializer implements ModInitializer {
+ 		PatchouliSounds.submitRegistrations((id, e) -> Registry.register(BuiltInRegistries.SOUND_EVENT, id, e));
+ 		PatchouliDataComponents.submitDataComponentRegistrations((id, e) -> Registry.register(BuiltInRegistries.DATA_COMPONENT_TYPE, id, e));
+ 		PatchouliItems.init();
+-		PatchouliCriteriaTriggers.submitTriggerRegistrations((id, e) -> Registry.register(BuiltInRegistries.TRIGGER_TYPES, id, e));
+ 		FiberPatchouliConfig.setup();
+ 		CommandRegistrationCallback.EVENT.register((disp, _, _) -> OpenBookCommand.register(disp));
+ 		UseBlockCallback.EVENT.register(LecternEventHandler::rightClick);
+diff --git a/Fabric/src/main/java/vazkii/patchouli/mixin/client/MixinAbstractContainerScreen.java b/Fabric/src/main/java/vazkii/patchouli/mixin/client/MixinAbstractContainerScreen.java
+index c120264..385f55b 100644
+--- a/Fabric/src/main/java/vazkii/patchouli/mixin/client/MixinAbstractContainerScreen.java
++++ b/Fabric/src/main/java/vazkii/patchouli/mixin/client/MixinAbstractContainerScreen.java
+@@ -15,7 +15,7 @@ import vazkii.patchouli.client.handler.TooltipHandler;
+ 
+ @Mixin(AbstractContainerScreen.class)
+ public class MixinAbstractContainerScreen {
+-	@Inject(at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/GuiGraphicsExtractor;setTooltipForNextFrame(Lnet/minecraft/client/gui/Font;Ljava/util/List;Ljava/util/Optional;IILnet/minecraft/resources/Identifier;)V"), method = "extractTooltip(Lnet/minecraft/client/gui/GuiGraphicsExtractor;II)V")
++	@Inject(at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/GuiGraphicsExtractor;setTooltipForNextFrame(Lnet/minecraft/client/gui/Font;Ljava/util/List;Ljava/util/Optional;IILnet/minecraft/resources/Identifier;Z)V"), method = "extractTooltip(Lnet/minecraft/client/gui/GuiGraphicsExtractor;II)V")
+ 	public void patchouli_onExtractTooltip(GuiGraphicsExtractor extractor, int x, int y, CallbackInfo info, @Local ItemStack stack) {
+ 		TooltipHandler.onTooltip(extractor, stack, x, y);
+ 	}
+diff --git a/Fabric/src/main/java/vazkii/patchouli/mixin/client/MixinGameRenderer.java b/Fabric/src/main/java/vazkii/patchouli/mixin/client/MixinGameRenderer.java
+index d58925e..62fa5cb 100644
+--- a/Fabric/src/main/java/vazkii/patchouli/mixin/client/MixinGameRenderer.java
++++ b/Fabric/src/main/java/vazkii/patchouli/mixin/client/MixinGameRenderer.java
+@@ -12,12 +12,12 @@ import vazkii.patchouli.client.base.ClientTicker;
+ 
+ @Mixin(GameRenderer.class)
+ public class MixinGameRenderer {
+-	@Inject(at = @At("HEAD"), method = "render(Lnet/minecraft/client/DeltaTracker;Z)V")
++	@Inject(at = @At("HEAD"), method = "extract(Lnet/minecraft/client/DeltaTracker;Z)V")
+ 	public void patchouli_renderStart(DeltaTracker deltaTracker, boolean tick, CallbackInfo info) {
+ 		ClientTicker.renderTickStart(deltaTracker.getGameTimeDeltaPartialTick(false));
+ 	}
+ 
+-	@Inject(at = @At("RETURN"), method = "render(Lnet/minecraft/client/DeltaTracker;Z)V")
++	@Inject(at = @At("RETURN"), method = "extract(Lnet/minecraft/client/DeltaTracker;Z)V")
+ 	public void patchouli_renderEnd(DeltaTracker deltaTracker, boolean tick, CallbackInfo info) {
+ 		ClientTicker.renderTickEnd();
+ 	}
+diff --git a/Fabric/src/main/resources/fabric.mod.json b/Fabric/src/main/resources/fabric.mod.json
+index e900a6f..4b82b53 100644
+--- a/Fabric/src/main/resources/fabric.mod.json
++++ b/Fabric/src/main/resources/fabric.mod.json
+@@ -17,7 +17,7 @@
+   "license": "CC BY-NC-SA 3.0",
+   "icon": "assets/patchouli/icon.png",
+ 
+-  "environment": "*",
++  "environment": "client",
+   "entrypoints": {
+     "main": [
+       "vazkii.patchouli.fabric.common.FabricModInitializer"
+diff --git a/Xplat/src/main/java/vazkii/patchouli/client/base/ClientAdvancements.java b/Xplat/src/main/java/vazkii/patchouli/client/base/ClientAdvancements.java
+index bd96781..af7eda3 100644
+--- a/Xplat/src/main/java/vazkii/patchouli/client/base/ClientAdvancements.java
++++ b/Xplat/src/main/java/vazkii/patchouli/client/base/ClientAdvancements.java
+@@ -59,7 +59,7 @@ public class ClientAdvancements {
+ 	}
+ 
+ 	public static void sendBookToast(Book book) {
+-		ToastManager gui = Minecraft.getInstance().getToastManager();
++		ToastManager gui = Minecraft.getInstance().gui.toastManager();
+ 		if (gui.getToast(LexiconToast.class, book) == null) {
+ 			gui.addToast(new LexiconToast(book));
+ 		}
+diff --git a/Xplat/src/main/java/vazkii/patchouli/client/book/BookContents.java b/Xplat/src/main/java/vazkii/patchouli/client/book/BookContents.java
+index 6789bb8..d56f190 100644
+--- a/Xplat/src/main/java/vazkii/patchouli/client/book/BookContents.java
++++ b/Xplat/src/main/java/vazkii/patchouli/client/book/BookContents.java
+@@ -91,11 +91,11 @@ public class BookContents extends AbstractReadStateHolder {
+ 	public void openLexiconGui(GuiBook gui, boolean push) {
+ 		if (gui.canBeOpened()) {
+ 			Minecraft mc = Minecraft.getInstance();
+-			if (push && mc.screen instanceof GuiBook guiBook && gui != mc.screen) {
++			if (push && mc.gui.screen() instanceof GuiBook guiBook && gui != mc.gui.screen()) {
+ 				guiStack.push(guiBook);
+ 			}
+ 
+-			mc.setScreen(gui);
++			mc.gui.setScreen(gui);
+ 			gui.onFirstOpened();
+ 		}
+ 	}
+diff --git a/Xplat/src/main/java/vazkii/patchouli/client/book/ClientBookRegistry.java b/Xplat/src/main/java/vazkii/patchouli/client/book/ClientBookRegistry.java
+index 32ed83f..9a512c5 100644
+--- a/Xplat/src/main/java/vazkii/patchouli/client/book/ClientBookRegistry.java
++++ b/Xplat/src/main/java/vazkii/patchouli/client/book/ClientBookRegistry.java
+@@ -52,7 +52,6 @@ public class ClientBookRegistry {
+ 		pageTypes.put(Identifier.fromNamespaceAndPath(PatchouliAPI.MOD_ID, "image"), PageImage.class);
+ 		pageTypes.put(Identifier.fromNamespaceAndPath(PatchouliAPI.MOD_ID, "spotlight"), PageSpotlight.class);
+ 		pageTypes.put(Identifier.fromNamespaceAndPath(PatchouliAPI.MOD_ID, "empty"), PageEmpty.class);
+-		pageTypes.put(Identifier.fromNamespaceAndPath(PatchouliAPI.MOD_ID, "multiblock"), PageMultiblock.class);
+ 		pageTypes.put(Identifier.fromNamespaceAndPath(PatchouliAPI.MOD_ID, "link"), PageLink.class);
+ 		pageTypes.put(Identifier.fromNamespaceAndPath(PatchouliAPI.MOD_ID, "relations"), PageRelations.class);
+ 		pageTypes.put(Identifier.fromNamespaceAndPath(PatchouliAPI.MOD_ID, "entity"), PageEntity.class);
+diff --git a/Xplat/src/main/java/vazkii/patchouli/client/book/LiquidBlockVertexConsumer.java b/Xplat/src/main/java/vazkii/patchouli/client/book/LiquidBlockVertexConsumer.java
+deleted file mode 100644
+index dde67f8..0000000
+--- a/Xplat/src/main/java/vazkii/patchouli/client/book/LiquidBlockVertexConsumer.java
++++ /dev/null
+@@ -1,62 +0,0 @@
+-package vazkii.patchouli.client.book;
+-
+-import com.mojang.blaze3d.vertex.PoseStack;
+-import com.mojang.blaze3d.vertex.VertexConsumer;
+-
+-import net.minecraft.core.BlockPos;
+-
+-/**
+- * Since {@link net.minecraft.client.renderer.block.LiquidBlockRenderer} doesn't use the pose stack at all, we need to
+- * both (1) un-transform the positions by {@code pos}, and also re-transform them using the {@link PoseStack}.
+- */
+-public record LiquidBlockVertexConsumer(VertexConsumer prior, PoseStack pose, BlockPos pos) implements VertexConsumer {
+-
+-	@Override
+-	public VertexConsumer addVertex(float x, float y, float z) {
+-		final float dx = pos.getX() & 15;
+-		final float dy = pos.getY() & 15;
+-		final float dz = pos.getZ() & 15;
+-		return prior.addVertex(pose.last().pose(), x - dx, y - dy, z - dz);
+-	}
+-
+-	@Override
+-	public VertexConsumer setColor(int r, int g, int b, int a) {
+-		return prior.setColor(r, g, b, a);
+-	}
+-
+-	@Override
+-	public VertexConsumer setColor(int i) {
+-		return prior.setColor(i);
+-	}
+-
+-	@Override
+-	public VertexConsumer setUv(float u, float v) {
+-		return prior.setUv(u, v);
+-	}
+-
+-	@Override
+-	public VertexConsumer setUv1(int u, int v) {
+-		return prior.setUv1(u, v);
+-	}
+-
+-	@Override
+-	public VertexConsumer setOverlay(int uv) {
+-		return prior.setUv1(uv & 65535, uv >> 16 & 65535);
+-	}
+-
+-	@Override
+-	public VertexConsumer setUv2(int u, int v) {
+-		return prior.setUv2(u, v);
+-	}
+-
+-	@Override
+-	public VertexConsumer setNormal(float x, float y, float z) {
+-		return prior.setNormal(pose.last(), x, y, z);
+-	}
+-
+-	@Override
+-	public VertexConsumer setLineWidth(float v) {
+-		return prior.setLineWidth(v);
+-	}
+-
+-}
+diff --git a/Xplat/src/main/java/vazkii/patchouli/client/book/gui/GuiBook.java b/Xplat/src/main/java/vazkii/patchouli/client/book/gui/GuiBook.java
+index 72a92d5..5953b5a 100644
+--- a/Xplat/src/main/java/vazkii/patchouli/client/book/gui/GuiBook.java
++++ b/Xplat/src/main/java/vazkii/patchouli/client/book/gui/GuiBook.java
+@@ -243,9 +243,9 @@ public abstract class GuiBook extends Screen {
+ 				tooltip.add(t);
+ 				targetPage = provider;
+ 			}
+-			graphics.tooltip(this.font, tooltip.stream().map(Component::getVisualOrderText).map(ClientTooltipComponent::create).toList(), mouseX, mouseY, DefaultTooltipPositioner.INSTANCE, null);
++			graphics.tooltip(this.font, tooltip.stream().map(Component::getVisualOrderText).map(ClientTooltipComponent::create).toList(), mouseX, mouseY, DefaultTooltipPositioner.INSTANCE, null, false);
+ 		} else if (tooltip != null && !tooltip.isEmpty()) {
+-			graphics.tooltip(this.font, tooltip.stream().map(Component::getVisualOrderText).map(ClientTooltipComponent::create).toList(), mouseX, mouseY, DefaultTooltipPositioner.INSTANCE, null);
++			graphics.tooltip(this.font, tooltip.stream().map(Component::getVisualOrderText).map(ClientTooltipComponent::create).toList(), mouseX, mouseY, DefaultTooltipPositioner.INSTANCE, null, false);
+ 		}
+ 	}
+ 
+@@ -340,7 +340,7 @@ public abstract class GuiBook extends Screen {
+ 		} else if (event.key() == InputConstants.KEY_BACKSPACE) {
+ 			back(true);
+ 			return true;
+-		} else if (tooltipStack != null && IXplatAbstractions.INSTANCE.handleRecipeKeybind(event.key(), event.scancode(), tooltipStack)) {
++		} else if (tooltipStack != null && IXplatAbstractions.INSTANCE.handleRecipeKeybind(event.key(), event.keycode(), tooltipStack)) {
+ 			return true;
+ 		} else if (tooltipStack != null && IXplatAbstractions.INSTANCE.isModLoaded("jei")
+ 				&& PatchouliJeiPlugin.handleRecipeKeybind(event, tooltipStack)) {
+@@ -567,14 +567,7 @@ public abstract class GuiBook extends Screen {
+ 	}
+ 
+ 	public static void openWebLink(Screen prevScreen, String address) {
+-		var mc = Minecraft.getInstance();
+-		mc.setScreen(new ConfirmLinkScreen(yes -> {
+-			if (yes) {
+-				Util.getPlatform().openUri(address);
+-			}
+-
+-			mc.setScreen(prevScreen);
+-		}, address, false));
++		ConfirmLinkScreen.confirmLinkNow(prevScreen, java.net.URI.create(address));
+ 	}
+ 
+ 	public void displayLexiconGui(GuiBook gui, boolean push) {
+diff --git a/Xplat/src/main/java/vazkii/patchouli/client/book/gui/GuiBookCategory.java b/Xplat/src/main/java/vazkii/patchouli/client/book/gui/GuiBookCategory.java
+index e1de3fd..939488b 100644
+--- a/Xplat/src/main/java/vazkii/patchouli/client/book/gui/GuiBookCategory.java
++++ b/Xplat/src/main/java/vazkii/patchouli/client/book/gui/GuiBookCategory.java
+@@ -116,7 +116,7 @@ public class GuiBookCategory extends GuiBookEntryList {
+ 
+ 	@Override
+ 	public boolean canBeOpened() {
+-		return !category.isLocked() && !equals(Minecraft.getInstance().screen);
++		return !category.isLocked() && !equals(Minecraft.getInstance().gui.screen());
+ 	}
+ 
+ }
+diff --git a/Xplat/src/main/java/vazkii/patchouli/client/book/gui/GuiBookEntry.java b/Xplat/src/main/java/vazkii/patchouli/client/book/gui/GuiBookEntry.java
+index a00c27a..31f43cd 100644
+--- a/Xplat/src/main/java/vazkii/patchouli/client/book/gui/GuiBookEntry.java
++++ b/Xplat/src/main/java/vazkii/patchouli/client/book/gui/GuiBookEntry.java
+@@ -169,7 +169,7 @@ public class GuiBookEntry extends GuiBook implements IComponentRenderContext {
+ 
+ 	@Override
+ 	public boolean canBeOpened() {
+-		return !entry.isLocked() && !equals(Minecraft.getInstance().screen);
++		return !entry.isLocked() && !equals(Minecraft.getInstance().gui.screen());
+ 	}
+ 
+ 	@Override
+diff --git a/Xplat/src/main/java/vazkii/patchouli/client/book/gui/GuiBookLanding.java b/Xplat/src/main/java/vazkii/patchouli/client/book/gui/GuiBookLanding.java
+index e99173e..0a62831 100644
+--- a/Xplat/src/main/java/vazkii/patchouli/client/book/gui/GuiBookLanding.java
++++ b/Xplat/src/main/java/vazkii/patchouli/client/book/gui/GuiBookLanding.java
+@@ -227,7 +227,7 @@ public class GuiBookLanding extends GuiBook {
+ 		if (minecraft.player == null) {
+ 			return;
+ 		}
+-		minecraft.setScreen(new GuiAdvancementsExt(minecraft.player.connection.getAdvancements(), this, book.advancementsTab));
++		minecraft.gui.setScreen(new GuiAdvancementsExt(minecraft.player.connection.getAdvancements(), this, book.advancementsTab));
+ 	}
+ 
+ 	private void handleButtonEdit(Button button) {
+diff --git a/Xplat/src/main/java/vazkii/patchouli/client/book/page/PageMultiblock.java b/Xplat/src/main/java/vazkii/patchouli/client/book/page/PageMultiblock.java
+deleted file mode 100644
+index 89afb71..0000000
+--- a/Xplat/src/main/java/vazkii/patchouli/client/book/page/PageMultiblock.java
++++ /dev/null
+@@ -1,290 +0,0 @@
+-package vazkii.patchouli.client.book.page;
+-
+-import com.google.gson.annotations.SerializedName;
+-import com.mojang.math.Axis;
+-
+-import net.minecraft.client.gui.GuiGraphicsExtractor;
+-import net.minecraft.client.gui.components.Button;
+-import net.minecraft.client.renderer.RenderPipelines;
+-import net.minecraft.client.renderer.block.BlockModelRenderState;
+-import net.minecraft.client.renderer.block.BlockModelResolver;
+-import net.minecraft.client.renderer.block.model.BlockDisplayContext;
+-import net.minecraft.core.BlockPos;
+-import net.minecraft.resources.Identifier;
+-import net.minecraft.world.level.Level;
+-import net.minecraft.world.level.block.Rotation;
+-import net.minecraft.world.level.block.state.BlockState;
+-
+-import org.joml.Matrix4f;
+-import org.joml.Quaternionf;
+-import org.joml.Vector2f;
+-import org.joml.Vector3f;
+-
+-import vazkii.patchouli.api.IMultiblock;
+-import vazkii.patchouli.client.base.ClientTicker;
+-import vazkii.patchouli.client.base.PersistentData;
+-import vazkii.patchouli.client.base.PersistentData.Bookmark;
+-import vazkii.patchouli.client.book.BookContentsBuilder;
+-import vazkii.patchouli.client.book.BookEntry;
+-import vazkii.patchouli.client.book.gui.GuiBook;
+-import vazkii.patchouli.client.book.gui.GuiBookEntry;
+-import vazkii.patchouli.client.book.gui.button.GuiButtonBookEye;
+-import vazkii.patchouli.client.book.page.abstr.PageWithText;
+-import vazkii.patchouli.client.handler.MultiblockVisualizationHandler;
+-import vazkii.patchouli.client.multiblock.MultiblockPiPRenderState;
+-import vazkii.patchouli.common.multiblock.MultiblockRegistry;
+-import vazkii.patchouli.common.multiblock.SerializedMultiblock;
+-import vazkii.patchouli.xplat.IClientXplatAbstractions;
+-
+-import java.util.ArrayList;
+-import java.util.List;
+-
+-public class PageMultiblock extends PageWithText {
+-	private static final int WIDTH = 99;
+-	private static final int HEIGHT = 99;
+-	private static boolean debug = false;
+-
+-	String name = "";
+-	@SerializedName("multiblock_id") Identifier multiblockId;
+-
+-	@SerializedName("multiblock") SerializedMultiblock serializedMultiblock;
+-
+-	@SerializedName("enable_visualize") boolean showVisualizeButton = true;
+-
+-	private transient final Camera camera = new Camera();
+-	private transient IMultiblock multiblockObj;
+-	private transient Button visualizeButton;
+-
+-	@Override
+-	public void build(Level level, BookEntry entry, BookContentsBuilder builder, int pageNum) {
+-		super.build(level, entry, builder, pageNum);
+-		if (multiblockId != null) {
+-			multiblockObj = MultiblockRegistry.MULTIBLOCKS.get(multiblockId);
+-		}
+-
+-		if (multiblockObj == null && serializedMultiblock != null) {
+-			multiblockObj = serializedMultiblock.toMultiblock();
+-		}
+-
+-		if (multiblockObj == null) {
+-			throw new IllegalArgumentException("No multiblock located for " + multiblockId);
+-		}
+-	}
+-
+-	@Override
+-	public void onDisplayed(GuiBookEntry parent, int left, int top) {
+-		super.onDisplayed(parent, left, top);
+-
+-		if (showVisualizeButton) {
+-			addButton(visualizeButton = new GuiButtonBookEye(parent, 12, 97, this::handleButtonVisualize));
+-		}
+-	}
+-
+-	@Override
+-	public int getTextHeight() {
+-		return 115;
+-	}
+-
+-	@Override
+-	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float pticks) {
+-		graphics.pose().pushMatrix();
+-		graphics.pose().translate(GuiBook.PAGE_WIDTH / 2f, 0);
+-		GuiBook.drawFromTexture(graphics, book, -53, 7, 405, 149, WIDTH + 7, HEIGHT + 7);
+-
+-		parent.drawCenteredStringNoShadow(graphics, i18n(name), 0, 0, book.headerColor);
+-
+-		if (multiblockObj != null) {
+-
+-			float time = parent.ticksInBook * 0.5F;
+-			if (!mc.hasShiftDown()) {
+-				time += ClientTicker.partialTicks;
+-			}
+-
+-			var simulated = multiblockObj.simulate(mc.level, BlockPos.ZERO, Rotation.NONE, true);
+-			//camera.setSceneOrigin(simulated.getFirst().getCenter().toVector3f());
+-			camera.setYaw(time % 360);
+-			camera.setPitch(30);
+-
+-			List<MultiblockPiPRenderState.BlockRenderState> blocks = new ArrayList<>();
+-			BlockModelResolver blockModelResolver = new BlockModelResolver(mc.getModelManager());
+-			BlockDisplayContext context = BlockDisplayContext.create();
+-			for (IMultiblock.SimulateResult simulateResult : simulated.getSecond()) {
+-				BlockPos pos = simulateResult.getWorldPosition();
+-				BlockState state = simulateResult.getStateMatcher().getDisplayedState(Math.round(time));
+-
+-				if (state.isAir())
+-					continue;
+-
+-				BlockModelRenderState modelRenderState = new BlockModelRenderState();
+-				blockModelResolver.update(modelRenderState, state, context);
+-				blocks.add(new MultiblockPiPRenderState.BlockRenderState(pos.immutable(), modelRenderState));
+-			}
+-
+-			if (!blocks.isEmpty()) {
+-				graphics.pose().pushMatrix();
+-				graphics.pose().translate(-49, 11);
+-				graphics.enableScissor(0, 0, WIDTH, HEIGHT);
+-
+-				if (debug) {
+-					graphics.fill(RenderPipelines.GUI, -10, -10, WIDTH + 10, HEIGHT + 10, 0xFF000000);
+-				}
+-
+-				graphics.pose().pushMatrix();
+-				final float offsetX = (WIDTH / 2f);
+-				final float offsetY = (HEIGHT / 2f);
+-				graphics.pose().translate(offsetX, offsetY);
+-				renderMultiblock(graphics, -offsetX, -offsetY, WIDTH, HEIGHT, camera.viewMatrix(), blocks);
+-				graphics.pose().popMatrix();
+-
+-				if (debug) {
+-					graphics.fill(RenderPipelines.GUI, Math.round(offsetX - 1), Math.round(offsetY - 1), Math.round(offsetX + 1), Math.round(offsetY + 1), 0xFFFF0000);
+-				}
+-
+-				graphics.disableScissor();
+-				graphics.pose().popMatrix();
+-			}
+-		}
+-		graphics.pose().popMatrix();
+-
+-		super.extractRenderState(graphics, mouseX, mouseY, pticks);
+-	}
+-
+-	private static void renderMultiblock(GuiGraphicsExtractor graphics, float x, float y, int width, int height, Matrix4f viewMatrix, List<MultiblockPiPRenderState.BlockRenderState> blocks) {
+-		Vector2f start = graphics.pose().transformPosition(new Vector2f(x, y));
+-		Vector2f end = graphics.pose().transformPosition(new Vector2f(x + width, y + height));
+-
+-		int startX = Math.round(start.x);
+-		int startY = Math.round(start.y);
+-		int endX = Math.round(end.x);
+-		int endY = Math.round(end.y);
+-		IClientXplatAbstractions.INSTANCE.submitPiPRenderState(graphics, scissor -> new MultiblockPiPRenderState(startX, startY, endX, endY, 1f, scissor, viewMatrix, blocks));
+-	}
+-
+-	public void handleButtonVisualize(Button button) {
+-		var entryKey = parent.getEntry().getId();
+-		Bookmark bookmark = new Bookmark(entryKey, pageNum / 2);
+-		MultiblockVisualizationHandler.INSTANCE.setMultiblock(multiblockObj, i18nText(name), bookmark, true);
+-		parent.addBookmarkButtons();
+-
+-		if (!PersistentData.data.clickedVisualize) {
+-			PersistentData.data.clickedVisualize = true;
+-			PersistentData.save();
+-		}
+-	}
+-
+-	// Code donated by EnderIO
+-	public static final class Camera {
+-		private static final Quaternionf ROT_180_Z = Axis.ZP.rotation((float) Math.PI);
+-
+-		private Vector3f sceneOrigin;
+-
+-		private float scale;
+-		private float pitch;
+-		private float yaw;
+-
+-		private Quaternionf blockTransform;
+-		private Matrix4f viewMatrix;
+-		private boolean isDirty = true;
+-
+-		public Camera(Vector3f sceneOrigin, float scale, float pitch, float yaw) {
+-			this.sceneOrigin = new Vector3f(sceneOrigin.x, sceneOrigin.y, sceneOrigin.z);
+-			this.scale = scale;
+-			this.pitch = pitch;
+-			this.yaw = yaw;
+-		}
+-
+-		public Camera() {
+-			this(new Vector3f(), 20, 0, 0);
+-		}
+-
+-		public Vector3f sceneOrigin() {
+-			return sceneOrigin;
+-		}
+-
+-		public float scale() {
+-			return scale;
+-		}
+-
+-		public float pitch() {
+-			return pitch;
+-		}
+-
+-		public float yaw() {
+-			return yaw;
+-		}
+-
+-		public void setSceneOrigin(Vector3f sceneOrigin) {
+-			if (this.sceneOrigin.equals(sceneOrigin)) {
+-				return;
+-			}
+-
+-			this.sceneOrigin = sceneOrigin;
+-			isDirty = true;
+-		}
+-
+-		public void setScale(float scale) {
+-			if (this.scale == scale) {
+-				return;
+-			}
+-
+-			this.scale = scale;
+-			isDirty = true;
+-		}
+-
+-		public void setPitch(float pitch) {
+-			if (this.pitch == pitch) {
+-				return;
+-			}
+-
+-			this.pitch = pitch;
+-			isDirty = true;
+-		}
+-
+-		public void setYaw(float yaw) {
+-			if (this.yaw == yaw) {
+-				return;
+-			}
+-
+-			this.yaw = yaw;
+-			isDirty = true;
+-		}
+-
+-		public Quaternionf blockTransform() {
+-			if (isDirty) {
+-				recompute();
+-			}
+-
+-			return blockTransform;
+-		}
+-
+-		public Matrix4f viewMatrix() {
+-			if (isDirty) {
+-				recompute();
+-			}
+-
+-			return viewMatrix;
+-		}
+-
+-		private void recompute() {
+-			// Compute rotation
+-			Quaternionf rotPitch = Axis.XN.rotationDegrees(pitch);
+-			Quaternionf rotYaw = Axis.YP.rotationDegrees(yaw);
+-
+-			// Build block transformation matrix
+-			// Rotate 180 around Z, otherwise the block is upside down
+-			blockTransform = new Quaternionf(ROT_180_Z);
+-			// Rotate around X (pitch) in negative direction
+-			blockTransform.mul(rotPitch);
+-			// Rotate around Y (yaw)
+-			blockTransform.mul(rotYaw);
+-
+-			// Create view matrix
+-			viewMatrix = new Matrix4f();
+-			viewMatrix.scale(scale, scale, scale);
+-			viewMatrix.translate(-sceneOrigin.x, -sceneOrigin.y, -sceneOrigin.z);
+-			viewMatrix.rotate(blockTransform);
+-
+-			isDirty = false;
+-		}
+-	}
+-}
+diff --git a/Xplat/src/main/java/vazkii/patchouli/client/book/template/VariableAssigner.java b/Xplat/src/main/java/vazkii/patchouli/client/book/template/VariableAssigner.java
+index fe2b07f..bd7a469 100644
+--- a/Xplat/src/main/java/vazkii/patchouli/client/book/template/VariableAssigner.java
++++ b/Xplat/src/main/java/vazkii/patchouli/client/book/template/VariableAssigner.java
+@@ -172,9 +172,7 @@ public class VariableAssigner {
+ 	}
+ 
+ 	private static IVariable stacks(IVariable arg, HolderLookup.Provider registries) {
+-		return IVariable.from(arg.as(Ingredient.class).display().resolveForStacks(new ContextMap.Builder()
+-				.withParameter(SlotDisplayContext.REGISTRIES, registries)
+-				.create(SlotDisplayContext.CONTEXT)).toArray(new ItemStack[0]), registries);
++		return IVariable.from(arg.as(Ingredient.class).display().resolveForStacks(SlotDisplayContext.fromLevel(net.minecraft.client.Minecraft.getInstance().level)).toArray(new ItemStack[0]), registries);
+ 	}
+ 
+ 	private static String ename(String arg) {
+diff --git a/Xplat/src/main/java/vazkii/patchouli/client/gui/GuiAdvancementsExt.java b/Xplat/src/main/java/vazkii/patchouli/client/gui/GuiAdvancementsExt.java
+index 8ba0ca2..bc6a10d 100644
+--- a/Xplat/src/main/java/vazkii/patchouli/client/gui/GuiAdvancementsExt.java
++++ b/Xplat/src/main/java/vazkii/patchouli/client/gui/GuiAdvancementsExt.java
+@@ -24,8 +24,8 @@ public class GuiAdvancementsExt extends AdvancementsScreen {
+ 
+ 	@Override
+ 	public boolean keyPressed(KeyEvent event) {
+-		if (minecraft.options.keyAdvancements.matches(event) || event.scancode() == 1) {
+-			minecraft.setScreen(parent);
++		if (minecraft.options.keyAdvancements.matches(event) || event.keycode() == 1) {
++			minecraft.gui.setScreen(parent);
+ 			return true;
+ 		} else {
+ 			return super.keyPressed(event);
+diff --git a/Xplat/src/main/java/vazkii/patchouli/client/handler/BookCrashHandler.java b/Xplat/src/main/java/vazkii/patchouli/client/handler/BookCrashHandler.java
+index ddf2f16..d65d2fa 100644
+--- a/Xplat/src/main/java/vazkii/patchouli/client/handler/BookCrashHandler.java
++++ b/Xplat/src/main/java/vazkii/patchouli/client/handler/BookCrashHandler.java
+@@ -21,11 +21,11 @@ public class BookCrashHandler implements Supplier<String> {
+ 
+ 	public static void appendToCrashReport(SystemReport report) {
+ 		var mc = Minecraft.getInstance();
+-		if (mc == null || !(mc.screen instanceof GuiBook)) {
++		if (mc == null || mc.gui == null || !(mc.gui.screen() instanceof GuiBook)) {
+ 			return;
+ 		}
+ 		try {
+-			report.setDetail(LABEL, new BookCrashHandler());
++			report.setDetail(LABEL, new BookCrashHandler().get());
+ 		} catch (Exception e) {
+ 			PatchouliAPI.LOGGER.fatal("Failed to extend crash report system info", e);
+ 		}
+@@ -33,7 +33,7 @@ public class BookCrashHandler implements Supplier<String> {
+ 
+ 	@Override
+ 	public String get() {
+-		Screen screen = Minecraft.getInstance().screen;
++		Screen screen = Minecraft.getInstance().gui.screen();
+ 		if (!(screen instanceof GuiBook gui)) {
+ 			return "n/a";
+ 		}
+diff --git a/Xplat/src/main/java/vazkii/patchouli/client/handler/MultiblockVisualizationHandler.java b/Xplat/src/main/java/vazkii/patchouli/client/handler/MultiblockVisualizationHandler.java
+index 49031a1..0155028 100644
+--- a/Xplat/src/main/java/vazkii/patchouli/client/handler/MultiblockVisualizationHandler.java
++++ b/Xplat/src/main/java/vazkii/patchouli/client/handler/MultiblockVisualizationHandler.java
+@@ -1,324 +1,34 @@
+ package vazkii.patchouli.client.handler;
+ 
+-import com.mojang.blaze3d.vertex.ByteBufferBuilder;
+-import com.mojang.blaze3d.vertex.PoseStack;
+-import com.mojang.blaze3d.vertex.VertexConsumer;
+-import com.mojang.datafixers.util.Pair;
+-
+-import it.unimi.dsi.fastutil.objects.Object2ObjectLinkedOpenHashMap;
+-
+-import net.minecraft.client.Minecraft;
+-import net.minecraft.client.renderer.MultiBufferSource;
+-import net.minecraft.client.renderer.SubmitNodeStorage;
+-import net.minecraft.client.renderer.rendertype.RenderType;
+-import net.minecraft.client.renderer.rendertype.RenderTypes;
+-import net.minecraft.client.resources.sounds.SimpleSoundInstance;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.network.chat.Component;
+-import net.minecraft.sounds.SoundEvents;
+-import net.minecraft.world.InteractionHand;
+-import net.minecraft.world.InteractionResult;
+-import net.minecraft.world.entity.Entity;
+-import net.minecraft.world.entity.player.Player;
+-import net.minecraft.world.level.Level;
+-import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.block.Rotation;
+-import net.minecraft.world.level.block.state.BlockState;
+-import net.minecraft.world.phys.BlockHitResult;
+-import net.minecraft.world.phys.Vec3;
+-
+-import org.joml.Matrix4fc;
+ 
+ import vazkii.patchouli.api.IMultiblock;
+-import vazkii.patchouli.client.base.ClientTicker;
+-import vazkii.patchouli.client.base.PersistentData.Bookmark;
+-import vazkii.patchouli.client.multiblock.GhostBlockGeometry;
+-import vazkii.patchouli.common.multiblock.StateMatcher;
+-import vazkii.patchouli.common.util.RotationUtil;
+-import vazkii.patchouli.mixin.client.AccessorMultiBufferSource;
++import vazkii.patchouli.client.book.gui.GuiBook;
++import vazkii.patchouli.client.base.PersistentData;
+ 
+-import java.util.Collection;
+-import java.util.Map;
+-import java.util.Objects;
+-import java.util.SequencedMap;
+-import java.util.function.Function;
++import org.jetbrains.annotations.Nullable;
+ 
++/** Multiblock previews draw through renderer classes Minecraft 26.3 removed, so in this port there's never one showing. */
+ public final class MultiblockVisualizationHandler {
+ 	public static final MultiblockVisualizationHandler INSTANCE = new MultiblockVisualizationHandler();
+ 
+-	private boolean hasMultiblock;
+-	private Bookmark bookmark;
+-	private IMultiblock multiblock;
+-	private Component name;
+-	private BlockPos pos;
+-	private boolean isAnchored;
+-	private Rotation facingRotation;
+-	private Function<BlockPos, BlockPos> offsetApplier;
+-	private int blocks, blocksDone, airFilled;
+-	private int timeComplete;
+-	private BlockState lookingState;
+-	private BlockPos lookingPos;
++	private MultiblockVisualizationHandler() {}
+ 
+ 	public boolean hasMultiblock() {
+-		return hasMultiblock;
+-	}
+-
+-	public void setHasMultiblock(boolean hasMultiblock) {
+-		this.hasMultiblock = hasMultiblock;
+-	}
+-
+-	public Bookmark bookmark() {
+-		return bookmark;
+-	}
+-
+-	public Component name() {
+-		return name;
+-	}
+-
+-	public BlockState getLookingState() {
+-		return lookingState;
+-	}
+-
+-	public BlockPos getLookingPos() {
+-		return lookingPos;
+-	}
+-
+-	public int getTimeComplete() {
+-		return timeComplete;
+-	}
+-
+-	public float getProgress() {
+-		return (float) blocksDone / Math.max(1, blocks);
+-	}
+-
+-	public String getProgressString() {
+-		return blocksDone + "/" + blocks;
+-	}
+-
+-	public boolean isComplete() {
+-		return blocksDone == blocks && airFilled > 0;
+-	}
+-
+-	public void setMultiblock(IMultiblock multiblock, Component name, Bookmark bookmark, boolean flip) {
+-		setMultiblock(multiblock, name, bookmark, flip, pos -> pos);
+-	}
+-
+-	public void setMultiblock(IMultiblock multiblock, Component name, Bookmark bookmark, boolean flip, Function<BlockPos, BlockPos> offsetApplier) {
+-		if (flip && hasMultiblock) {
+-			hasMultiblock = false;
+-		} else {
+-			this.multiblock = multiblock;
+-			this.name = name;
+-			this.bookmark = bookmark;
+-			this.offsetApplier = offsetApplier;
+-			pos = null;
+-			hasMultiblock = multiblock != null;
+-			isAnchored = false;
+-		}
+-	}
+-
+-	public void onWorldRenderLast(PoseStack ms, Matrix4fc pose) {
+-		if (hasMultiblock && multiblock != null) {
+-			renderMultiblock(Minecraft.getInstance().level, ms, pose);
+-		}
+-	}
+-
+-	public void anchorTo(BlockPos target, Rotation rot) {
+-		pos = target;
+-		facingRotation = rot;
+-		isAnchored = true;
+-	}
+-
+-	public InteractionResult onPlayerInteract(Player player, Level world, InteractionHand hand, BlockHitResult hit) {
+-		if (hasMultiblock && !isAnchored && player == Minecraft.getInstance().player) {
+-			anchorTo(hit.getBlockPos(), getRotation(player));
+-			return InteractionResult.SUCCESS;
+-		}
+-		return InteractionResult.PASS;
+-	}
+-
+-	public void onClientTick(Minecraft mc) {
+-		if (Minecraft.getInstance().level == null) {
+-			hasMultiblock = false;
+-		} else if (isAnchored && blocks == blocksDone && airFilled == 0) {
+-			timeComplete++;
+-			if (timeComplete == 14) {
+-				Minecraft.getInstance().getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.EXPERIENCE_ORB_PICKUP, 1.0F));
+-			}
+-		} else {
+-			timeComplete = 0;
+-		}
+-	}
+-
+-	public void renderMultiblock(Level world, PoseStack ms, Matrix4fc pose) {
+-		ms.pushPose();
+-		ms.mulPose(pose);
+-		Minecraft mc = Minecraft.getInstance();
+-		if (!isAnchored) {
+-			facingRotation = getRotation(mc.player);
+-			if (mc.hitResult instanceof BlockHitResult) {
+-				pos = ((BlockHitResult) mc.hitResult).getBlockPos();
+-			}
+-		} else if (pos.distToCenterSqr(mc.player.position()) > 64 * 64) {
+-			return;
+-		}
+-
+-		if (pos == null) {
+-			return;
+-		}
+-		if (multiblock.isSymmetrical()) {
+-			facingRotation = Rotation.NONE;
+-		}
+-
+-		ms.pushPose();
+-		Vec3 cameraPosition = mc.getEntityRenderDispatcher().camera.position();
+-		ms.translate(cameraPosition.multiply(-1, -1, -1));
+-
+-		BlockPos checkPos = null;
+-		if (mc.hitResult instanceof BlockHitResult blockRes) {
+-			checkPos = blockRes.getBlockPos().relative(blockRes.getDirection());
+-		}
+-
+-		blocks = blocksDone = airFilled = 0;
+-		lookingState = null;
+-		lookingPos = checkPos;
+-
+-		SubmitNodeStorage submitNodeStorage = mc.gameRenderer.getFeatureRenderDispatcher().getSubmitNodeStorage();
+-
+-		Pair<BlockPos, Collection<IMultiblock.SimulateResult>> sim = multiblock.simulate(world, getStartPos(), getFacingRotation(), true);
+-		for (IMultiblock.SimulateResult r : sim.getSecond()) {
+-			float alpha = 0.3F;
+-			if (Objects.equals(r.getWorldPosition(), checkPos)) {
+-				lookingState = r.getStateMatcher().getDisplayedState(ClientTicker.ticksInGame);
+-				alpha = 0.6F + (float) (Math.sin(ClientTicker.total * 0.3F) + 1F) * 0.1F;
+-			}
+-
+-			if (r.getStateMatcher() != StateMatcher.ANY) {
+-				boolean air = r.getStateMatcher() == StateMatcher.AIR;
+-				if (!air) {
+-					blocks++;
+-				}
+-
+-				if (!r.test(world, facingRotation)) {
+-					BlockState renderState = r.getStateMatcher().getDisplayedState(ClientTicker.ticksInGame).rotate(facingRotation);
+-					float scale = 1;
+-					if (renderState.getBlock() == Blocks.AIR) {
+-						renderState = Blocks.RED_CONCRETE.defaultBlockState();
+-						scale = 0.3F;
+-					}
+-					submitNodeStorage.submitCustomGeometry(
+-							ms,
+-							RenderTypes.translucentMovingBlock(),
+-							new GhostBlockGeometry(r.getWorldPosition(), renderState, alpha, scale));
+-
+-					if (air) {
+-						airFilled++;
+-					}
+-				} else if (!air) {
+-					blocksDone++;
+-				}
+-			}
+-		}
+-
+-		if (!isAnchored) {
+-			blocks = blocksDone = 0;
+-		}
+-
+-		ms.popPose();
+-		ms.popPose();
+-	}
+-
+-	public IMultiblock getMultiblock() {
+-		return multiblock;
+-	}
+-
+-	public boolean isAnchored() {
+-		return isAnchored;
+-	}
+-
+-	public Rotation getFacingRotation() {
+-		return multiblock.isSymmetrical() ? Rotation.NONE : facingRotation;
++		return false;
+ 	}
+ 
+-	public BlockPos getStartPos() {
+-		return offsetApplier.apply(pos);
++	public PersistentData.Bookmark bookmark() {
++		return null;
+ 	}
+ 
+-	/**
+-	 * Returns the Rotation of a multiblock structure based on the given entity's facing direction.
+-	 */
+-	private Rotation getRotation(Entity entity) {
+-		return RotationUtil.rotationFromFacing(entity.getDirection());
++	public @Nullable IMultiblock getMultiblock() {
++		return null;
+ 	}
+ 
+-	private MultiBufferSource.BufferSource initBuffers(MultiBufferSource.BufferSource original) {
+-		ByteBufferBuilder fallback = ((AccessorMultiBufferSource) original).getFallbackBuffer();
+-		SequencedMap<RenderType, ByteBufferBuilder> layerBuffers = ((AccessorMultiBufferSource) original).getFixedBuffers();
+-		SequencedMap<RenderType, ByteBufferBuilder> remapped = new Object2ObjectLinkedOpenHashMap<>();
+-		for (Map.Entry<RenderType, ByteBufferBuilder> e : layerBuffers.entrySet()) {
+-			remapped.put(/*GhostRenderLayer.remap(*/e.getKey()/*)*/, e.getValue());
+-		}
+-		return new GhostBuffers(fallback, remapped);
+-	}
+-
+-	private static class GhostBuffers extends MultiBufferSource.BufferSource {
+-		protected GhostBuffers(ByteBufferBuilder fallback, SequencedMap<RenderType, ByteBufferBuilder> layerBuffers) {
+-			super(fallback, layerBuffers);
+-		}
+-
+-		@Override
+-		public VertexConsumer getBuffer(RenderType type) {
+-			return super.getBuffer(/*GhostRenderLayer.remap(*/type/*)*/);
+-		}
+-	}
++	public void setMultiblock(@Nullable IMultiblock multiblock, @Nullable Component name, @Nullable PersistentData.Bookmark bookmark, boolean flip) {}
+ 
+-	/*private static class GhostRenderLayer extends RenderType {
+-		private static final Map<RenderType, RenderType> remappedTypes = new IdentityHashMap<>();
+-		private final RenderType original;
+-	
+-		private GhostRenderLayer(RenderType original) {
+-			super(String.format("%s_%s_ghost", original.toString(), PatchouliAPI.MOD_ID), original.bufferSize(), original.affectsCrumbling(), original.sortOnUpload(), () -> {
+-				original.setupRenderState();
+-	
+-				//RenderSystem.disableDepthTest();
+-				//RenderSystem.enableBlend();
+-				//RenderSystem.setShaderColor(1, 1, 1, 0.4F);
+-			}, () -> {
+-				//RenderSystem.setShaderColor(1, 1, 1, 1);
+-				//RenderSystem.disableBlend();
+-				//RenderSystem.enableDepthTest();
+-	
+-				original.clearRenderState();
+-			});
+-			this.original = original;
+-		}
+-	
+-		@Override
+-		public void draw(MeshData meshData) {
+-			original.draw(meshData);
+-		}
+-	
+-		@Override
+-		public VertexFormat format() {
+-			return original.format();
+-		}
+-	
+-		@Override
+-		public VertexFormat.Mode mode() {
+-			return original.mode();
+-		}
+-	
+-		@Override
+-		public RenderPipeline pipeline() {
+-			return original.pipeline();
+-		}
+-	
+-		public static RenderType remap(RenderType in) {
+-			if (in instanceof GhostRenderLayer) {
+-				return in;
+-			} else {
+-				return remappedTypes.computeIfAbsent(in, GhostRenderLayer::new);
+-			}
+-		}
+-	}*/
++	public void anchorTo(BlockPos target, Rotation rotation) {}
+ }
+diff --git a/Xplat/src/main/java/vazkii/patchouli/client/handler/TooltipHandler.java b/Xplat/src/main/java/vazkii/patchouli/client/handler/TooltipHandler.java
+index c212b5d..9430f93 100644
+--- a/Xplat/src/main/java/vazkii/patchouli/client/handler/TooltipHandler.java
++++ b/Xplat/src/main/java/vazkii/patchouli/client/handler/TooltipHandler.java
+@@ -1,6 +1,6 @@
+ package vazkii.patchouli.client.handler;
+ 
+-import com.mojang.blaze3d.pipeline.RenderPipeline;
++import com.mojang.renderpearl.api.pipeline.RenderPipeline;
+ import com.mojang.blaze3d.vertex.VertexConsumer;
+ import com.mojang.datafixers.util.Pair;
+ 
+@@ -36,7 +36,7 @@ public final class TooltipHandler {
+ 		int tooltipX = mouseX;
+ 		int tooltipY = mouseY - 4;
+ 
+-		if (mc.player != null && !(mc.screen instanceof GuiBook)) {
++		if (mc.player != null && !(mc.gui.screen() instanceof GuiBook)) {
+ 			int lexSlot = -1;
+ 			ItemStack lexiconStack = ItemStack.EMPTY;
+ 			Pair<BookEntry, Integer> lexiconEntry = null;
+diff --git a/Xplat/src/main/java/vazkii/patchouli/client/hud/BookOverlayHud.java b/Xplat/src/main/java/vazkii/patchouli/client/hud/BookOverlayHud.java
+index 1ecbb9d..b26f5d5 100644
+--- a/Xplat/src/main/java/vazkii/patchouli/client/hud/BookOverlayHud.java
++++ b/Xplat/src/main/java/vazkii/patchouli/client/hud/BookOverlayHud.java
+@@ -27,7 +27,7 @@ public final class BookOverlayHud {
+ 		Minecraft mc = Minecraft.getInstance();
+ 		Player player = mc.player;
+ 		ItemStack bookStack = player.getMainHandItem();
+-		if (mc.screen == null) {
++		if (mc.gui.screen() == null) {
+ 			Book book = ItemStackUtil.getBookFromStack(bookStack);
+ 
+ 			if (book != null) {
+diff --git a/Xplat/src/main/java/vazkii/patchouli/client/hud/MultiblockProgressHud.java b/Xplat/src/main/java/vazkii/patchouli/client/hud/MultiblockProgressHud.java
+deleted file mode 100644
+index 1cca3dc..0000000
+--- a/Xplat/src/main/java/vazkii/patchouli/client/hud/MultiblockProgressHud.java
++++ /dev/null
+@@ -1,107 +0,0 @@
+-package vazkii.patchouli.client.hud;
+-
+-import net.minecraft.client.DeltaTracker;
+-import net.minecraft.client.Minecraft;
+-import net.minecraft.client.gui.GuiGraphicsExtractor;
+-import net.minecraft.client.resources.language.I18n;
+-import net.minecraft.network.chat.Component;
+-import net.minecraft.resources.Identifier;
+-import net.minecraft.util.Mth;
+-import net.minecraft.world.item.ItemStack;
+-import net.minecraft.world.level.block.state.BlockState;
+-
+-import vazkii.patchouli.api.PatchouliAPI;
+-import vazkii.patchouli.client.handler.MultiblockVisualizationHandler;
+-
+-import java.awt.*;
+-
+-public final class MultiblockProgressHud {
+-	public static final Identifier ID = Identifier.fromNamespaceAndPath(PatchouliAPI.MOD_ID, "multiblock_progress");
+-
+-	private MultiblockProgressHud() {}
+-
+-	public static void extractRenderState(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {
+-		MultiblockVisualizationHandler handler = MultiblockVisualizationHandler.INSTANCE;
+-		if (!handler.hasMultiblock()) {
+-			return;
+-		}
+-
+-		int waitTime = 40;
+-		int fadeOutSpeed = 4;
+-		int fullAnimTime = waitTime + 10;
+-		float animTime = handler.getTimeComplete() + (handler.getTimeComplete() == 0 ? 0 : deltaTracker.getGameTimeDeltaPartialTick(false));
+-
+-		if (animTime > fullAnimTime) {
+-			handler.setHasMultiblock(false);
+-			return;
+-		}
+-
+-		graphics.pose().pushMatrix();
+-		graphics.pose().translate(0, -Math.max(0, animTime - waitTime) * fadeOutSpeed);
+-
+-		Minecraft mc = Minecraft.getInstance();
+-		int x = mc.getWindow().getGuiScaledWidth() / 2;
+-		int y = 12;
+-
+-		graphics.centeredText(mc.font, handler.name(), x, y, 0xFFFFFF);
+-
+-		int width = 180;
+-		int height = 9;
+-		int left = x - width / 2;
+-		int top = y + 10;
+-
+-		if (handler.getTimeComplete() > 0) {
+-			graphics.pose().pushMatrix();
+-			graphics.pose().translate(0, Math.min(height + 5, animTime));
+-			graphics.centeredText(mc.font, Component.translatable("patchouli.gui.lexicon.structure_complete"), x, top + height - 10, 0x00FF00);
+-			graphics.pose().popMatrix();
+-		}
+-
+-		graphics.fill(left - 1, top - 1, left + width + 1, top + height + 1, 0xFF000000);
+-		graphics.fillGradient(left, top, left + width, top + height, 0xFF666666, 0xFF555555);
+-
+-		float fract = handler.getProgress();
+-		int progressWidth = (int) ((float) width * fract);
+-		int color = Mth.hsvToRgb(fract / 3.0F, 1.0F, 1.0F) | 0xFF000000;
+-		int color2 = new Color(color).darker().getRGB();
+-		graphics.fillGradient(left, top, left + progressWidth, top + height, color, color2);
+-
+-		if (!handler.isAnchored()) {
+-			graphics.centeredText(mc.font, Component.translatable("patchouli.gui.lexicon.not_anchored"), x, top + height + 8, 0xFFFFFF);
+-		} else {
+-			BlockState lookingState = handler.getLookingState();
+-			if (lookingState != null) {
+-				// try-catch around here because the state isn't necessarily present in the world in this instance,
+-				// which isn't really expected behavior for getPickBlock
+-				try {
+-					ItemStack stack = lookingState.getCloneItemStack(mc.level, handler.getLookingPos(), false);
+-
+-					if (!stack.isEmpty()) {
+-						graphics.text(mc.font, stack.getHoverName(), left + 20, top + height + 8, 0xFFFFFF, true);
+-						graphics.item(stack, left, top + height + 2);
+-					}
+-				} catch (Exception ignored) {}
+-			}
+-
+-			if (handler.getTimeComplete() == 0) {
+-				color = 0xFFFFFF;
+-				int posx = left + width;
+-				int posy = top + height + 2;
+-				int mult = 1;
+-				String progress = handler.getProgressString();
+-
+-				if (handler.isComplete()) {
+-					progress = I18n.get("patchouli.gui.lexicon.needs_air");
+-					color = 0xDA4E3F;
+-					mult *= 2;
+-					posx -= width / 2;
+-					posy += 2;
+-				}
+-
+-				graphics.text(mc.font, progress, posx - mc.font.width(progress) / mult, posy, color, false);
+-			}
+-		}
+-
+-		graphics.pose().popMatrix();
+-	}
+-}
+diff --git a/Xplat/src/main/java/vazkii/patchouli/client/multiblock/MultiblockPiPRenderState.java b/Xplat/src/main/java/vazkii/patchouli/client/multiblock/MultiblockPiPRenderState.java
+deleted file mode 100644
+index 8a6f791..0000000
+--- a/Xplat/src/main/java/vazkii/patchouli/client/multiblock/MultiblockPiPRenderState.java
++++ /dev/null
+@@ -1,49 +0,0 @@
+-package vazkii.patchouli.client.multiblock;
+-
+-import net.minecraft.client.gui.navigation.ScreenRectangle;
+-import net.minecraft.client.renderer.block.BlockModelRenderState;
+-import net.minecraft.client.renderer.state.gui.pip.PictureInPictureRenderState;
+-import net.minecraft.core.BlockPos;
+-
+-import org.joml.*;
+-
+-import org.jetbrains.annotations.Nullable;
+-
+-import java.util.List;
+-
+-public record MultiblockPiPRenderState(
+-		int x0,
+-		int y0,
+-		int x1,
+-		int y1,
+-		float scale,
+-		@Nullable ScreenRectangle scissorArea,
+-		@Nullable ScreenRectangle bounds,
+-		Matrix4f viewMatrix,
+-		List<BlockRenderState> multiblock) implements PictureInPictureRenderState {
+-
+-	public MultiblockPiPRenderState(
+-			int x0,
+-			int y0,
+-			int x1,
+-			int y1,
+-			float scale,
+-			@Nullable ScreenRectangle scissorArea,
+-			Matrix4f viewMatrix,
+-			List<BlockRenderState> multiblock) {
+-		this(
+-				x0,
+-				y0,
+-				x1,
+-				y1,
+-				scale,
+-				scissorArea,
+-				PictureInPictureRenderState.getBounds(x0, y0, x1, y1, scissorArea),
+-				viewMatrix,
+-				multiblock
+-		);
+-	}
+-
+-	public record BlockRenderState(BlockPos pos, BlockModelRenderState blockModelRenderState) {
+-	}
+-}
+diff --git a/Xplat/src/main/java/vazkii/patchouli/client/multiblock/MultiblockPiPRenderer.java b/Xplat/src/main/java/vazkii/patchouli/client/multiblock/MultiblockPiPRenderer.java
+deleted file mode 100644
+index 159e4ac..0000000
+--- a/Xplat/src/main/java/vazkii/patchouli/client/multiblock/MultiblockPiPRenderer.java
++++ /dev/null
+@@ -1,51 +0,0 @@
+-package vazkii.patchouli.client.multiblock;
+-
+-import com.mojang.blaze3d.platform.Lighting;
+-import com.mojang.blaze3d.vertex.PoseStack;
+-
+-import net.minecraft.client.Minecraft;
+-import net.minecraft.client.gui.render.pip.PictureInPictureRenderer;
+-import net.minecraft.client.renderer.GameRenderer;
+-import net.minecraft.client.renderer.MultiBufferSource;
+-import net.minecraft.client.renderer.SubmitNodeStorage;
+-import net.minecraft.client.renderer.feature.FeatureRenderDispatcher;
+-import net.minecraft.client.renderer.texture.OverlayTexture;
+-import net.minecraft.util.LightCoordsUtil;
+-
+-// Code adapted from EnderIO
+-public final class MultiblockPiPRenderer extends PictureInPictureRenderer<MultiblockPiPRenderState> {
+-
+-	public MultiblockPiPRenderer(MultiBufferSource.BufferSource bufferSource) {
+-		super(bufferSource);
+-	}
+-
+-	@Override
+-	public Class<MultiblockPiPRenderState> getRenderStateClass() {
+-		return MultiblockPiPRenderState.class;
+-	}
+-
+-	@Override
+-	protected void renderToTexture(MultiblockPiPRenderState renderState, PoseStack poseStack) {
+-		poseStack.pushPose();
+-		poseStack.mulPose(renderState.viewMatrix());
+-		Minecraft minecraft = Minecraft.getInstance();
+-		GameRenderer gameRenderer = minecraft.gameRenderer;
+-		FeatureRenderDispatcher featureRenderDispatcher = gameRenderer.getFeatureRenderDispatcher();
+-		SubmitNodeStorage submitNodeStorage = featureRenderDispatcher.getSubmitNodeStorage();
+-		gameRenderer.getLighting().setupFor(Lighting.Entry.ITEMS_3D);
+-		for (var block : renderState.multiblock()) {
+-			poseStack.pushPose();
+-			poseStack.translate(block.pos().getCenter());
+-			block.blockModelRenderState().submit(poseStack, submitNodeStorage, LightCoordsUtil.FULL_BRIGHT, OverlayTexture.NO_OVERLAY, 0);
+-			poseStack.popPose();
+-		}
+-		featureRenderDispatcher.renderAllFeatures();
+-		this.bufferSource.endBatch();
+-		poseStack.popPose();
+-	}
+-
+-	@Override
+-	protected String getTextureLabel() {
+-		return "patchouli_multiblock";
+-	}
+-}
+diff --git a/Xplat/src/main/java/vazkii/patchouli/common/advancement/BookOpenTrigger.java b/Xplat/src/main/java/vazkii/patchouli/common/advancement/BookOpenTrigger.java
+deleted file mode 100644
+index 603f177..0000000
+--- a/Xplat/src/main/java/vazkii/patchouli/common/advancement/BookOpenTrigger.java
++++ /dev/null
+@@ -1,54 +0,0 @@
+-package vazkii.patchouli.common.advancement;
+-
+-import com.mojang.serialization.Codec;
+-import com.mojang.serialization.codecs.RecordCodecBuilder;
+-
+-import net.minecraft.advancements.criterion.ContextAwarePredicate;
+-import net.minecraft.advancements.criterion.EntityPredicate;
+-import net.minecraft.advancements.criterion.MinMaxBounds;
+-import net.minecraft.advancements.criterion.SimpleCriterionTrigger;
+-import net.minecraft.resources.Identifier;
+-import net.minecraft.server.level.ServerPlayer;
+-
+-import vazkii.patchouli.api.PatchouliAPI;
+-
+-import org.jetbrains.annotations.NotNull;
+-import org.jetbrains.annotations.Nullable;
+-
+-import java.util.Optional;
+-
+-/**
+- * An advancement trigger for opening Patchouli books.
+- */
+-public class BookOpenTrigger extends SimpleCriterionTrigger<BookOpenTrigger.TriggerInstance> {
+-	public static final Identifier ID = Identifier.fromNamespaceAndPath(PatchouliAPI.MOD_ID, "open_book");
+-	public static final BookOpenTrigger INSTANCE = new BookOpenTrigger();
+-
+-	@NotNull
+-	@Override
+-	public Codec<TriggerInstance> codec() {
+-		return BookOpenTrigger.TriggerInstance.CODEC;
+-	}
+-
+-	public void trigger(@NotNull ServerPlayer player, @NotNull Identifier book) {
+-		trigger(player, instance -> instance.matches(book, null, 0));
+-	}
+-
+-	public void trigger(@NotNull ServerPlayer player, @NotNull Identifier book, @Nullable Identifier entry, int page) {
+-		trigger(player, instance -> instance.matches(book, entry, page));
+-	}
+-
+-	public record TriggerInstance(Optional<ContextAwarePredicate> player, Identifier book, Optional<Identifier> entry, MinMaxBounds.Ints page) implements SimpleInstance {
+-
+-		public static Codec<BookOpenTrigger.TriggerInstance> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+-				EntityPredicate.ADVANCEMENT_CODEC.optionalFieldOf("player").forGetter(TriggerInstance::player),
+-				Identifier.CODEC.fieldOf("book").forGetter(TriggerInstance::book),
+-				Identifier.CODEC.optionalFieldOf("entry").forGetter(TriggerInstance::entry),
+-				MinMaxBounds.Ints.CODEC.optionalFieldOf("page", MinMaxBounds.Ints.ANY).forGetter(TriggerInstance::page)
+-		).apply(instance, TriggerInstance::new));
+-
+-		public boolean matches(@NotNull Identifier book, @Nullable Identifier entry, int page) {
+-			return this.book.equals(book) && (this.entry.isEmpty() || this.entry.get().equals(entry)) && this.page.matches(page);
+-		}
+-	}
+-}
+diff --git a/Xplat/src/main/java/vazkii/patchouli/common/advancement/PatchouliCriteriaTriggers.java b/Xplat/src/main/java/vazkii/patchouli/common/advancement/PatchouliCriteriaTriggers.java
+deleted file mode 100644
+index be441de..0000000
+--- a/Xplat/src/main/java/vazkii/patchouli/common/advancement/PatchouliCriteriaTriggers.java
++++ /dev/null
+@@ -1,14 +0,0 @@
+-package vazkii.patchouli.common.advancement;
+-
+-import net.minecraft.advancements.CriterionTrigger;
+-import net.minecraft.resources.Identifier;
+-
+-import java.util.function.BiConsumer;
+-
+-public class PatchouliCriteriaTriggers {
+-	public static final BookOpenTrigger BOOK_OPEN = new BookOpenTrigger();
+-
+-	public static void submitTriggerRegistrations(BiConsumer<Identifier, CriterionTrigger<?>> consumer) {
+-		consumer.accept(BookOpenTrigger.ID, BOOK_OPEN);
+-	}
+-}
+diff --git a/Xplat/src/main/java/vazkii/patchouli/common/base/PatchouliAPIImpl.java b/Xplat/src/main/java/vazkii/patchouli/common/base/PatchouliAPIImpl.java
+index 0901870..be3c07d 100644
+--- a/Xplat/src/main/java/vazkii/patchouli/common/base/PatchouliAPIImpl.java
++++ b/Xplat/src/main/java/vazkii/patchouli/common/base/PatchouliAPIImpl.java
+@@ -33,7 +33,6 @@ import vazkii.patchouli.client.book.gui.GuiBook;
+ import vazkii.patchouli.client.book.template.BookTemplate;
+ import vazkii.patchouli.client.book.text.BookTextParser;
+ import vazkii.patchouli.client.handler.MultiblockVisualizationHandler;
+-import vazkii.patchouli.common.advancement.BookOpenTrigger;
+ import vazkii.patchouli.common.book.Book;
+ import vazkii.patchouli.common.book.BookRegistry;
+ import vazkii.patchouli.common.item.PatchouliDataComponents;
+@@ -88,13 +87,11 @@ public class PatchouliAPIImpl implements IPatchouliAPI {
+ 
+ 	@Override
+ 	public void openBookGUI(ServerPlayer player, Identifier book) {
+-		BookOpenTrigger.INSTANCE.trigger(player, book);
+ 		IXplatAbstractions.INSTANCE.sendOpenBookGui(player, book, null, 0);
+ 	}
+ 
+ 	@Override
+ 	public void openBookEntry(ServerPlayer player, Identifier book, Identifier entry, int page) {
+-		BookOpenTrigger.INSTANCE.trigger(player, book, entry, page);
+ 		IXplatAbstractions.INSTANCE.sendOpenBookGui(player, book, entry, page);
+ 	}
+ 
+@@ -113,7 +110,7 @@ public class PatchouliAPIImpl implements IPatchouliAPI {
+ 	@Override
+ 	public Identifier getOpenBookGui() {
+ 		assertPhysicalClient();
+-		Screen gui = Minecraft.getInstance().screen;
++		Screen gui = Minecraft.getInstance().gui.screen();
+ 		if (gui instanceof GuiBook) {
+ 			return ((GuiBook) gui).book.id;
+ 		}
+diff --git a/Xplat/src/main/java/vazkii/patchouli/common/book/Book.java b/Xplat/src/main/java/vazkii/patchouli/common/book/Book.java
+index 27b8c3a..15f3d2c 100644
+--- a/Xplat/src/main/java/vazkii/patchouli/common/book/Book.java
++++ b/Xplat/src/main/java/vazkii/patchouli/common/book/Book.java
+@@ -177,7 +177,7 @@ public class Book {
+ 			// in registries; wrap in try-catch in case of faulty item definition
+ 			bookItem = Suppliers.memoize(() -> {
+ 				try {
+-					return ItemStackUtil.deserializeStack(customBookItem, VanillaRegistries.createLookup());
++					return ItemStackUtil.deserializeStack(customBookItem, net.minecraft.core.RegistryAccess.fromRegistryOfRegistries(net.minecraft.core.registries.BuiltInRegistries.REGISTRY));
+ 				} catch (Exception e) {
+ 					PatchouliAPI.LOGGER.warn("Failed to parse item \"{}\" for book {} defined by mod {}, skipping",
+ 							customBookItem, id, owner.getId(), e);
+@@ -246,7 +246,7 @@ public class Book {
+ 		if (useBlockyFont) {
+ 			return Style.EMPTY;
+ 		} else {
+-			return Style.EMPTY.withFont(new FontDescription.Resource(Minecraft.UNIFORM_FONT));
++			return Style.EMPTY.withFont(new FontDescription.Resource(Identifier.withDefaultNamespace("uniform")));
+ 		}
+ 	}
+ 
+diff --git a/Xplat/src/main/java/vazkii/patchouli/common/handler/LecternEventHandler.java b/Xplat/src/main/java/vazkii/patchouli/common/handler/LecternEventHandler.java
+index 3318bbd..bd2508f 100644
+--- a/Xplat/src/main/java/vazkii/patchouli/common/handler/LecternEventHandler.java
++++ b/Xplat/src/main/java/vazkii/patchouli/common/handler/LecternEventHandler.java
+@@ -53,7 +53,7 @@ public class LecternEventHandler {
+ 		tileEntity.setBook(ItemStack.EMPTY);
+ 		LecternBlock.resetBookState(player, tileEntity.getLevel(), tileEntity.getBlockPos(), tileEntity.getBlockState(), false);
+ 		if (!player.getInventory().add(itemstack)) {
+-			player.drop(itemstack, false);
++			player.drop(itemstack, false, net.minecraft.util.Prediction.SERVER_ONLY);
+ 		}
+ 	}
+ }
+diff --git a/Xplat/src/main/java/vazkii/patchouli/mixin/client/AccessorMultiBufferSource.java b/Xplat/src/main/java/vazkii/patchouli/mixin/client/AccessorMultiBufferSource.java
+deleted file mode 100644
+index 8d042eb..0000000
+--- a/Xplat/src/main/java/vazkii/patchouli/mixin/client/AccessorMultiBufferSource.java
++++ /dev/null
+@@ -1,20 +0,0 @@
+-package vazkii.patchouli.mixin.client;
+-
+-import com.mojang.blaze3d.vertex.ByteBufferBuilder;
+-
+-import net.minecraft.client.renderer.MultiBufferSource;
+-import net.minecraft.client.renderer.rendertype.RenderType;
+-
+-import org.spongepowered.asm.mixin.Mixin;
+-import org.spongepowered.asm.mixin.gen.Accessor;
+-
+-import java.util.SequencedMap;
+-
+-@Mixin(MultiBufferSource.BufferSource.class)
+-public interface AccessorMultiBufferSource {
+-	@Accessor("sharedBuffer")
+-	ByteBufferBuilder getFallbackBuffer();
+-
+-	@Accessor("fixedBuffers")
+-	SequencedMap<RenderType, ByteBufferBuilder> getFixedBuffers();
+-}
+diff --git a/Xplat/src/main/resources/patchouli_xplat.mixins.json b/Xplat/src/main/resources/patchouli_xplat.mixins.json
+index 137c743..ebd8cd3 100644
+--- a/Xplat/src/main/resources/patchouli_xplat.mixins.json
++++ b/Xplat/src/main/resources/patchouli_xplat.mixins.json
+@@ -8,7 +8,6 @@
+   "client": [
+     "client.AccessorClientAdvancements",
+     "client.AccessorKeyMapping",
+-    "client.AccessorMultiBufferSource",
+     "client.AccessorScreen",
+     "client.MixinClientAdvancements",
+     "client.MixinInventoryScreen",

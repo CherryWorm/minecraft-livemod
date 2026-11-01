@@ -67,7 +67,7 @@ def compile_content(source, mods, content):
     new_ledger = bundles.assign_slots(features, json.loads(json.dumps(old_ledger)), pool)
     if content.exists():
         shutil.rmtree(content)
-    bundles.render(features, new_ledger, content, runtime.data_format(), runtime.vanilla_biome, discovery_scope(source))
+    bundles.render(features, new_ledger, content, runtime.data_format(), runtime.vanilla_biome, discovery_scope(source), progression_nodes(source))
     return features, pool, old_ledger, new_ledger
 
 
@@ -86,6 +86,12 @@ def discovery_scope(source):
     """Whether learning is shared or per player. The agent chooses this for each world in its discovery plan."""
     path = source / "bible" / "discovery.json"
     return json.loads(path.read_text(encoding="utf-8")).get("scope", "shared") if path.exists() else "shared"
+
+
+def progression_nodes(source):
+    """The steps of this world's progression, which is how the Codex is arranged."""
+    path = source / "bible" / "progression.json"
+    return json.loads(path.read_text(encoding="utf-8")).get("nodes", {}) if path.exists() else {}
 
 
 def build(mods):

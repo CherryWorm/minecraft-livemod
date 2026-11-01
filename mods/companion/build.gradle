@@ -4,6 +4,11 @@ dependencies {
 	if (System.getenv('CLIENT_TEST_JEI')) {
 		runtimeOnly "maven.modrinth:jei:${project.jei_version}"
 	}
+	// Patchouli has no build for 26.3, so this is our port of it, from third_party/patchouli. It goes in the friend pack beside this mod.
+	compileOnly files(project.patchouli_jar)
+	if (System.getenv('CLIENT_TEST_PATCHOULI')) {
+		runtimeOnly files(project.patchouli_jar)
+	}
 }
 
 fabricApi {

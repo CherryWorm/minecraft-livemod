@@ -27,6 +27,8 @@ file=$(cut -f2 <<<"$line"); url=$(cut -f3 <<<"$line"); sha=$(cut -f4 <<<"$line")
 curl -fsSL --retry 3 -o "$instance/minecraft/mods/$file" "$url"
 echo "$sha  $instance/minecraft/mods/$file" | sha512sum -c - >/dev/null
 bash infra/fetch-mods.sh infra/mods.lock client "$instance/minecraft/mods" >/dev/null
+# Our port of Patchouli, which nowhere offers for this Minecraft yet. See third_party/patchouli.
+cp mods/companion/libs/patchouli-fabric-*.jar "$instance/minecraft/mods/"
 
 cat >"$instance/instance.cfg" <<EOF
 InstanceType=OneSix

@@ -75,11 +75,12 @@ Inside the distro:
 
 | Command | What it proves |
 |---|---|
-| `python3 -m unittest broker.tests.test_balance broker.tests.test_bytecode broker.tests.test_hooks broker.tests.test_sign broker.tests.test_prune broker.tests.test_progression broker.tests.test_player_guide broker.tests.test_daemon_order` | The gates' rules, the world's progression, `tune` and pruning, with no servers |
+| `python3 -m unittest broker.tests.test_balance broker.tests.test_bytecode broker.tests.test_hooks broker.tests.test_sign broker.tests.test_prune broker.tests.test_progression broker.tests.test_player_guide broker.tests.test_guide broker.tests.test_daemon_order` | The gates' rules, the world's progression, `tune` and pruning, with no servers |
 | `python3 -m broker.tests.m2_test` | Bad releases are stopped at the right gate, and a crash rolls back |
 | `python3 -m broker.tests.m3_test` | Records survive a restart, modules hot-swap, and a crash holds players |
 | `python3 -m broker.tests.m7_test` | Signed modules run on a real client, and unsigned or unsafe ones are refused |
 | `python3 -m broker.tests.m8_test` | A real client learns recipes, uses a machine, reads the codex and sees mobs |
+| `python3 -m broker.tests.m22_test` | The Codex in Patchouli on a real client: only what a player knows, opened by command, key and link, with new pages arriving live |
 | `python3 -m broker.tests.m10_test` | Templated content goes live with its real numbers, the progression refuses what doesn't fit, what players have is protected, and `tune` and the server icon work |
 | `python3 -m broker.tests.m11_test` | Sculpted creatures and a model block on a real client, then 150 more models at once |
 | `python3 -m broker.tests.m12_test` | Mobs with minds, on a real client with the real fast model: they answer, remember, gossip and keep to their limits. Uses a little of your plan |

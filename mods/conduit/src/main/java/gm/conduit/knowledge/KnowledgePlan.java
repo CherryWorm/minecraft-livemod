@@ -33,7 +33,8 @@ public record KnowledgePlan(
 
 	public record Route(String type, String id, int needed) {}
 
-	public record Entry(String id, String title, String text, List<Identifier> recipes, List<Route> routes) {}
+	/** The guide field is what a player's book calls this entry, which is also what turns its page on. */
+	public record Entry(String id, String title, String text, List<Identifier> recipes, List<Route> routes, String guide) {}
 
 	public record MachineInput(String item, int count) {}
 
@@ -103,7 +104,9 @@ public record KnowledgePlan(
 				routes.add(new Route(object.get("type").getAsString(), object.get("id").getAsString(),
 						object.has("needed") ? object.get("needed").getAsInt() : 1));
 			});
-			entries.put(item.getKey(), new Entry(item.getKey(), entry.get("title").getAsString(), entry.get("text").getAsString(), recipes, routes));
+			// A release from before the book has none, and reading it mustn't fail, because that would unlock every recipe.
+			String guide = entry.has("guide") ? entry.get("guide").getAsString() : "";
+			entries.put(item.getKey(), new Entry(item.getKey(), entry.get("title").getAsString(), entry.get("text").getAsString(), recipes, routes, guide));
 		}
 
 		Map<Identifier, List<String>> gated = new HashMap<>();

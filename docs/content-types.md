@@ -4,7 +4,9 @@ More things `feature.json` can declare. `docs/feature-format.md` covers the basi
 
 ## Knowledge: how recipes are learned
 
-A knowledge entry is something a player can come to know. It shows up in their codex (`/codex`) with your text, and unlocks recipes.
+A knowledge entry is something a player can come to know. It unlocks recipes, and it's a page in their Codex, the searchable book that's the world's documentation. Players open it with `/codex`, a key, or the link in chat when they learn something, and only ever see what they know.
+
+Give everything a player needs explained an entry, because a feature without one has nowhere in the book. Name it what a player would search for, and say plainly what the thing is for and how to use it, in the world's voice. A line break starts a new paragraph, and text flows across pages by itself. Pages are arranged for you: each stage of the progression is a category, each node a category within that, and the recipes an entry unlocks follow its text. Add `"icon"` (`$item:name`, `$block:name` or a vanilla item) if the first thing in its routes isn't the one to show.
 
 ```json
 "knowledge": {

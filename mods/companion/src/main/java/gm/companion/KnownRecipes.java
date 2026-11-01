@@ -25,6 +25,16 @@ public final class KnownRecipes {
 		return known;
 	}
 
+	/** The one with this id, or null if they don't know it. */
+	public static Shown find(String id) {
+		for (Shown recipe : known) {
+			if (recipe.id().equals(id)) {
+				return recipe;
+			}
+		}
+		return null;
+	}
+
 	public static void onChange(Runnable newListener) {
 		listener = newListener;
 	}

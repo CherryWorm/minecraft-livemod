@@ -68,4 +68,6 @@ def run(features):
                 notes.append(f"{feature_id}/{name} doesn't say which tool mines it, so it may drop nothing.")
         if has_module and not manifest.get("automation") and any(block.get("family") == "machine" for block in manifest.get("blocks", {}).values()):
             notes.append(f"{feature_id} has a machine. If it does anything by itself, declare it in \"automation\" with a per_minute rate.")
+        if (manifest.get("items") or manifest.get("blocks") or manifest.get("mobs")) and not manifest.get("knowledge"):
+            notes.append(f"{feature_id} has no knowledge entry, so it has no page in the Codex and players have nowhere to read about it.")
     return notes

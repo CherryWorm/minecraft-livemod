@@ -1,0 +1,61 @@
+// Upstream builds for two loaders with a shared project compiled against NeoForm, which has nothing for 26.3 and which
+// this doesn't need. This builds just the Fabric mod, from the same sources.
+plugins {
+	id 'net.fabricmc.fabric-loom' version "${loom_version}"
+	id 'java'
+}
+
+version = project.mod_version
+base.archivesName = 'patchouli-fabric'
+
+repositories {
+	maven {
+		url = 'https://maven.modmuss50.me/'
+		content { includeGroup 'me.zeroeightsix' }
+	}
+	maven {
+		url = 'https://api.modrinth.com/maven'
+		content { includeGroup 'maven.modrinth' }
+	}
+}
+
+sourceSets.main {
+	java.srcDirs = ['Xplat/src/main/java', 'Fabric/src/main/java']
+	resources.srcDirs = ['Xplat/src/main/resources', 'Fabric/src/main/resources']
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	implementation "me.zeroeightsix:fiber:${project.fiber_version}"
+	include "me.zeroeightsix:fiber:${project.fiber_version}"
+	compileOnly "maven.modrinth:jei:1Uzmw8Mr"
+}
+
+processResources {
+	duplicatesStrategy = DuplicatesStrategy.INCLUDE
+	def values = [
+		"version": project.version,
+		"mod_name": "Patchouli",
+		"mod_id": "patchouli",
+		"mod_description": "Accessible, Data-Driven, Dependency-Free Documentation for Minecraft Modders and Pack Makers",
+		"mc_min_version": project.minecraft_version,
+		"mc_max_version": "26.4",
+		"fabric_loader_version": project.loader_version,
+		"fabric_api_version": "0.165.0",
+	]
+	inputs.properties values
+	filesMatching("fabric.mod.json") {
+		expand values
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
+}

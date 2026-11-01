@@ -11,10 +11,13 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
@@ -186,7 +189,10 @@ public final class Knowledge {
 		List<ServerPlayer> learners = this.plan.shared() ? this.server.getPlayerList().getPlayers() : List.of(player);
 		for (ServerPlayer learner : learners) {
 			learner.awardRecipes(recipesOf(entry));
-			learner.sendSystemMessage(Component.literal("§6✦ §rYou've learned §e" + entry.title() + "§r. Type §7/codex§r to read it."));
+			learner.sendSystemMessage(Component.literal("§6✦ §rYou've learned §e" + entry.title() + "§r. ")
+					.append(Component.literal("[Read it]").withStyle(style -> style.withColor(ChatFormatting.AQUA)
+							.withClickEvent(new ClickEvent.RunCommand("/codex " + entry.guide()))
+							.withHoverEvent(new HoverEvent.ShowText(Component.literal("Opens the Codex. You can also type /codex."))))));
 		}
 		player.level().playSound(null, player.blockPosition(), SoundEvents.ENCHANTMENT_TABLE_USE, SoundSource.PLAYERS, 1.0F, 1.0F);
 		emitDiscovery(player, "learned " + entry.title());

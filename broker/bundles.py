@@ -10,6 +10,8 @@ import pathlib
 import re
 import shutil
 
+from broker import guide
+
 TOKEN = re.compile(r"\$(block|item|mob|sound):([a-z0-9_]+(?:/[a-z0-9_]+)?)")
 
 TOOL_TAGS = {"pickaxe": "pickaxe", "axe": "axe", "shovel": "shovel", "hoe": "hoe"}
@@ -471,7 +473,29 @@ def _link_knowledge(entries, gated, recipe_routes):
         entries[key]["recipes"].append(recipe_id)
 
 
-def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared"):
+def _write_book(features, ledger, entries, machines, names, nodes, pack):
+    """The Codex, from the knowledge entries as they are once everything's linked up, in the names players know things by."""
+    by_machine = {}
+    for recipes in machines.values():
+        for recipe in recipes:
+            for key in recipe["needs"]:
+                by_machine.setdefault(key, []).append(recipe["id"])
+    listed = []
+    for feature_id, feature in features.items():
+        manifest = feature["manifest"]
+        things = [f"gm:{ledger[table][f'{feature_id}/{name}']['slot']}" for table in ("items", "blocks") for name in manifest.get(table, {})]
+        for name, entry in manifest.get("knowledge", {}).items():
+            key = f"{feature_id}/{name}"
+            text = _resolve_tokens(entry["text"], feature_id, ledger)
+            entries[key]["guide"] = guide.flag(key)
+            listed.append({"key": key, "title": entry["title"], "text": re.sub(r"gm:[ise]\d{4}", lambda found: names.get(found[0], found[0]), text),
+                           "routes": entries[key]["routes"], "recipes": entries[key]["recipes"] + by_machine.get(key, []), "node": manifest.get("node"),
+                           "things": things, "icon": _resolve_tokens(entry.get("icon"), feature_id, ledger)})
+    for path, contents in guide.book(listed, nodes).items():
+        _write_json(pack / path, contents)
+
+
+def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared", nodes=None):
     """Writes pack/, datapack/ and config/ under out. Returns nothing: out is the release's content."""
     pack = out / "pack"
     datapack = out / "datapack"
@@ -638,6 +662,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
             mobs[f"gm:{slot}"]["model"] = _copy_model(feature, feature_id, target, model_name, config)
 
     _link_knowledge(entries, gated, recipe_routes)
+    _write_book(features, ledger, entries, machines, names, nodes or {}, pack)
     _write_json(pack / "assets/gm/lang/en_us.json", lang)
     if sounds_json:
         _write_json(pack / "assets/gm/sounds.json", sounds_json)
