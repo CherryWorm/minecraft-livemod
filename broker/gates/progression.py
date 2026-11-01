@@ -166,6 +166,23 @@ def _check_minds(features, doc):
     return problems
 
 
+def _check_knowledge_follows_graph(features, doc):
+    """A route can need something from anywhere, like a late way of learning something early. But if every route to an
+    entry needs something from later on, then what it unlocks is really later on too, and the graph would be a lie."""
+    problems = []
+    for feature_id, feature in features.items():
+        node = feature["manifest"].get("node")
+        if node not in doc["nodes"]:
+            continue
+        allowed = graph.before(doc, node) | {node}
+        for name, entry in feature["manifest"].get("knowledge", {}).items():
+            needs = [[balance._key(feature_id, need) for need in route.get("requires", [])] for route in entry.get("routes", [])]
+            if needs and all(any(features.get(need.split("/")[0], {"manifest": {}})["manifest"].get("node") not in allowed for need in route) for route in needs):
+                problems.append(f"Knowledge {feature_id}/{name} is in node {node}, but every route to it requires something from a node that doesn't come before that. "
+                                "Give it a route that can be taken from here, or require something earlier.")
+    return problems
+
+
 def _mythic_without_a_place(features, recipes):
     """Unlimited power is only fair at the end of a progression, so it can't exist in a world without one."""
     tiers = [thing.get("tier") for thing in balance._things(features).values()] + [recipe["tier"] for recipe in recipes]
@@ -240,6 +257,7 @@ def run(features, bible, ledger, old_prints, knowledge_file, new_prints):
             raise GateFailed(GATE, "bible/progression.json has problems:\n" + "\n".join(found))
         problems += (_check_features(features, doc) + _check_recipes_follow_graph(features, doc, recipes)
                      + _check_gating(features, doc, recipes) + _check_tiers(features, doc, recipes)
-                     + _check_mobs(features, doc) + _check_automation(features, doc) + _check_minds(features, doc))
+                     + _check_mobs(features, doc) + _check_automation(features, doc) + _check_minds(features, doc)
+                     + _check_knowledge_follows_graph(features, doc))
     if problems:
         raise GateFailed(GATE, "\n".join(problems))

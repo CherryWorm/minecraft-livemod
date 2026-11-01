@@ -34,7 +34,7 @@
     "shard_lore": {
       "title": "The Broken Saying",
       "text": "Pieced together from three shards.",
-      "routes": [{"type": "fragments", "id": "$item:rune_shard", "needed": 3}]
+      "routes": [{"type": "fragments", "id": "$item:rune_shard", "needed": 3, "requires": ["gem_cutting"]}]
     }
   },
   "recipes": {

@@ -185,7 +185,10 @@ class Worker:
                                    max_turns=job["max_turns"], resume=job.get("session"), budget=job.get("budget"), lane=self.lane,
                                    mcp_servers={"broker": workshop._tools_for(feature_id, tree, job["node"], ask=ask), "world": self._world_server(job_id)})
             async with self.git_lock:
-                commit = await asyncio.to_thread(workshop.ready_commit, f"{feature_id}: from this machine", tree, feature_id, job["node"])
+                try:
+                    commit = await asyncio.to_thread(workshop.ready_commit, f"{feature_id}: from this machine", tree, feature_id, job["node"])
+                except workshop.Refused:  # It's committed as far as it can be, and the server's own checks will say what's wrong with it.
+                    commit = _git("rev-parse", "HEAD", cwd=tree)
                 if self._is_new(commit):
                     await asyncio.to_thread(self._upload, job_id, commit)
             body = {"commit": commit, "session_id": result.session_id, "is_error": result.is_error, "stop_reason": result.stop_reason, "text": result.text[:2000],

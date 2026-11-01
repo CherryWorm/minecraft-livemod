@@ -31,7 +31,8 @@ public record KnowledgePlan(
 
 	public static final KnowledgePlan EMPTY = new KnowledgePlan(true, Map.of(), Map.of(), List.of(), Map.of(), Map.of());
 
-	public record Route(String type, String id, int needed) {}
+	/** The requires field is entries a player has to know before this route does anything for them. */
+	public record Route(String type, String id, int needed, List<String> requires) {}
 
 	/** The guide field is what a player's book calls this entry, which is also what turns its page on. */
 	public record Entry(String id, String title, String text, List<Identifier> recipes, List<Route> routes, String guide) {}
@@ -101,8 +102,13 @@ public record KnowledgePlan(
 			List<Route> routes = new ArrayList<>();
 			entry.getAsJsonArray("routes").forEach(route -> {
 				JsonObject object = route.getAsJsonObject();
+				// A release from before routes could need anything has none.
+				List<String> requires = new ArrayList<>();
+				if (object.has("requires")) {
+					object.getAsJsonArray("requires").forEach(need -> requires.add(need.getAsString()));
+				}
 				routes.add(new Route(object.get("type").getAsString(), object.get("id").getAsString(),
-						object.has("needed") ? object.get("needed").getAsInt() : 1));
+						object.has("needed") ? object.get("needed").getAsInt() : 1, requires));
 			});
 			// A release from before the book has none, and reading it mustn't fail, because that would unlock every recipe.
 			String guide = entry.has("guide") ? entry.get("guide").getAsString() : "";

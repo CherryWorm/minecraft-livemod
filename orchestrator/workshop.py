@@ -15,10 +15,11 @@ import uuid
 
 from claude_agent_sdk import AgentDefinition, create_sdk_mcp_server, tool
 
-from orchestrator import feedback, lanes, llm, preview, research, templates, tuning, world_index
+from orchestrator import feedback, lanes, llm, others, preview, research, templates, tuning, world_index
 
 REPO = pathlib.Path("/workspace/repo")
 PROGRESSION = "bible/progression.json"
+FEATURES = "mods/genesis/features"
 TREES = pathlib.Path("/workspace/trees")
 REQUESTS = pathlib.Path("/workspace/requests")
 RESPONSES = pathlib.Path("/workspace/responses")
@@ -38,15 +39,20 @@ MOST_IN_A_RELEASE = 8  # Finding a bad one takes longer the more there are. Anyt
 STAGE_LIMITS = {"early": (100, 14.0, 3), "mid": (160, 24.0, 4), "end": (240, 40.0, 5)}
 SMALL_LIMITS = (40, 3.0, 2)
 FIX_LIMITS = (60, 6.0, 3)
-FEATURE_ID = r"[a-z][a-z0-9_]{1,40}"
+FEATURE_ID = others.FEATURE_ID
 STALE = "is in the ledger but no feature declares it"
 STALE_RETRIES = 4
+CONFLICT_MARKS = r"^(<<<<<<<|>>>>>>>) "
+MOST_CONFLICTS = 3  # Two builders changing the same lines is nobody's mistake, so it doesn't use up a try, but it can't go on forever.
+MOST_DIFF_SHOWN = 8000  # What a reviewer reads of a change to another feature. The rest is in its folder.
 SMALL_NOTE = ("This is a small change a player just asked for, and they're waiting for it. Do it yourself, quickly, with no subagents and no research, "
-              "and change as little as you can. If it changes something players already have, say why in `changes_reached`.\n\n")
+              "and change as little as you can. If it changes something players already have, say why in `changes_reached`. If part of it belongs in another "
+              "feature, change it there and say why in `changes_features`.\n\n")
 
 FIX_NOTE = ("This is a bug a player reported in something that's already out, and it's being fixed ahead of everything else. Someone who looked into it wrote the "
             "brief below, so check it against the code, fix the cause and change nothing else: what it otherwise does, its art, names, recipes and balance all stay as "
-            "they are. Do it yourself, with no subagents and no research, and say what changed in `changes_reached`.\n\n")
+            "they are. Do it yourself, with no subagents and no research, and say what changed in `changes_reached`. If the cause or part of the fix is in another "
+            "feature, change it there and say why in `changes_features`.\n\n")
 
 VERDICT_SCHEMA = {
     "type": "object",
@@ -156,22 +162,106 @@ def _stamp_node(tree, feature_id, node):
             path.write_text(json.dumps(manifest, indent=1) + "\n", encoding="utf-8")
 
 
+class Refused(Exception):
+    """Work that can't go further as it is, saying what to do about it. Nothing has broken, so it goes back to the builder like any gate's answer."""
+
+    def __init__(self, gate, reason):
+        super().__init__(reason)
+        self.gate = gate
+        self.reason = reason
+
+    def answer(self):
+        return {"result": "blocked", "gate": self.gate, "reason": self.reason}
+
+
+def _differs(tree, commit):
+    """Which features' folders aren't as they were at a commit, counting new files git hasn't been told about."""
+    listed = (_git("diff", "--name-only", "--no-renames", "-z", commit, "--", FEATURES, cwd=tree) + "\0"
+              + _git("ls-files", "--others", "--exclude-standard", "-z", "--", FEATURES, cwd=tree))
+    return {path.split("/")[3] for path in listed.split("\0") if path.count("/") > 3}
+
+
+def _on_main(feature, tree):
+    return subprocess.run(["git", "cat-file", "-e", f"main:{FEATURES}/{feature}/feature.json"], cwd=tree, check=False, capture_output=True).returncode == 0
+
+
+def _scope(tree, feature_id):
+    """Which feature folders are this builder's to commit, and which it's changed without saying so. A feature that isn't out can't be
+    listed, because that would be starting one nobody asked for. If its feature.json can't be read there's no telling, so the second is None."""
+    manifest = tree / FEATURES / feature_id / "feature.json"
+    declared = others.declared(manifest.read_text(encoding="utf-8")) if manifest.exists() else set()
+    if declared is None:
+        return {feature_id}, None
+    declared = {name for name in declared if _on_main(name, tree)} | {feature_id}
+    strays = _differs(tree, _git("merge-base", "main", "HEAD", cwd=tree)) - declared
+    # A folder that's been put back how it was is in here as well, because committing that is what undoes an earlier commit.
+    return (declared | _differs(tree, "HEAD")) - strays, strays
+
+
+def _marked(tree, paths):
+    """Which of these have a conflict's marker lines in them. It's only ever asked about what a builder's working on, so something odd elsewhere can't hold everyone up."""
+    if not paths:
+        return []
+    found = subprocess.run(["git", "grep", "-lIE", "-z", CONFLICT_MARKS, "--", *paths], cwd=tree, check=False, capture_output=True, text=True)
+    return sorted(path for path in found.stdout.split("\0") if path)
+
+
+def _conflict(tree, feature_id, error):
+    """Something that's gone out changes the same lines as this work. So that nobody's work is lost and this one doesn't have to start again, the merge
+    is committed with both versions in the files, for its builder to settle. The markers can't go any further, because ready_commit stops at them."""
+    conflicted = [path for path in _git("diff", "--name-only", "--diff-filter=U", "-z", cwd=tree).split("\0") if path]
+    if not feature_id or not conflicted:
+        subprocess.run(["git", "merge", "--abort"], cwd=tree, check=False, capture_output=True)
+        return Refused("merge", f"This can't be brought up to date with what's gone out: {error.stderr or error}")
+    yours = _git("rev-parse", "HEAD", cwd=tree)
+    marked = _marked(tree, conflicted)
+    replaced = [path for path in conflicted if path not in marked]
+    for path in replaced:
+        if subprocess.run(["git", "cat-file", "-e", f"main:{path}"], cwd=tree, check=False, capture_output=True).returncode == 0:
+            _git("checkout", "main", "--", path, cwd=tree)
+        else:
+            _git("rm", "-qf", "--", path, cwd=tree)
+    if marked:
+        _git("add", "--", *marked, cwd=tree)
+    _git("commit", "-q", "--no-edit", cwd=tree)
+    reason = "Something that's gone out since you started changes the same things as your work, so they can't both stand as they are. Everything else has been brought up to date."
+    if marked:
+        reason += (f"\n\nThese have both versions in them now, between lines starting <<<<<<< and >>>>>>>, with yours first and what's out second: {', '.join(marked)}. "
+                   "Keep what both need, take out those lines and the ======= between them, and check again.")
+    if replaced:
+        reason += (f"\n\nThese can't show both, because they're art or one side removed them, so they're as they are in what's out: {', '.join(replaced)}. "
+                   f"If you still need yours, it's in `git show {yours}:<path>`.")
+    return Refused("merge", reason)
+
+
 def ready_commit(message, tree, feature_id=None, node=None):
-    """Commits the work on top of whatever has shipped since it began. Without those, releasing it would look like
-    removing them, so the broker would refuse. Features live in their own folders, so this doesn't normally conflict."""
+    """Commits the work on top of whatever has shipped since it began. Without those, releasing it would look like removing
+    them, so the broker would refuse. Most features stay in their own folders, so this doesn't normally conflict, and when
+    it does, that's a refusal the builder can act on. Raises Refused for anything that has to go back to the builder."""
     if feature_id:
         _stamp_node(tree, feature_id, node)
-        # A feature is its own folder and nothing else. Whatever a builder left elsewhere can only collide with other features.
-        _git("add", "-A", "--", f"mods/genesis/features/{feature_id}", cwd=tree)
+        folders, strays = _scope(tree, feature_id)
+        # A feature is its own folder and the ones it says it changes. Whatever a builder left elsewhere can only collide with other features.
+        paths = [path for path in (f"{FEATURES}/{folder}" for folder in sorted(folders)) if (tree / path).exists() or _git("ls-files", "--", path, cwd=tree)]
+        if paths:
+            _git("add", "-A", "--", *paths, cwd=tree)
         _commit_staged(message, tree)
-        _git("checkout", "--", ".", cwd=tree)
+        if strays:
+            names = sorted(strays)
+            raise Refused("scope", f"You've changed {', '.join(names)} without saying so. If that's on purpose, list each in feature.json, like \"changes_features\": "
+                                   f"{{\"{names[0]}\": \"why\"}}. Only a feature that's out can be listed, so anything new goes in your own folder. "
+                                   "If it isn't on purpose, put it back as it was. Nothing has been thrown away.")
+        if strays is not None:
+            _git("checkout", "--", ".", cwd=tree)
+        unsettled = _marked(tree, paths)
+        if unsettled:
+            raise Refused("merge", f"These still have a conflict's marker lines in them, so settle them first: {', '.join(unsettled)}.")
     else:
         commit_all(message, cwd=tree)
     try:
         _git("merge", "-q", "--no-edit", "main", cwd=tree)
-    except subprocess.CalledProcessError:
-        subprocess.run(["git", "merge", "--abort"], cwd=tree, check=False)
-        raise
+    except subprocess.CalledProcessError as error:
+        raise _conflict(tree, feature_id, error) from error
     # The gates hold a feature to the world's progression, so it has to be the real one and not an edited copy.
     if (REPO / PROGRESSION).exists():
         _git("checkout", "main", "--", PROGRESSION, cwd=tree)
@@ -179,11 +269,33 @@ def ready_commit(message, tree, feature_id=None, node=None):
     return _git("rev-parse", "HEAD", cwd=tree)
 
 
+def changes_to_others(tree, feature_id):
+    """What this work really does to other features, beside what its builder says about that, for whoever's judging it."""
+    listed = _git("diff", "--name-only", "--no-renames", "-z", "main...HEAD", "--", FEATURES, cwd=tree).split("\0")
+    changed = sorted({path.split("/")[3] for path in listed if path.count("/") > 3} - {feature_id})
+    own = f"{FEATURES}/{feature_id}/feature.json"
+    manifest = (others.read_manifest((tree / own).read_text(encoding="utf-8")) if (tree / own).exists() else None) or {}
+    shipped = subprocess.run(["git", "show", f"main:{own}"], cwd=tree, check=False, capture_output=True, text=True, errors="replace")
+    before = (others.read_manifest(shipped.stdout) if shipped.returncode == 0 else None) or {}
+    said = manifest.get("changes_features") or {}
+    added = {target: places for target, places in (manifest.get("adds_to") or {}).items() if (before.get("adds_to") or {}).get(target) != places}
+    parts = [f"It changes {target}, because: {said.get(target, '(no reason given)')}" for target in changed]
+    parts += [f"It adds to {target} from its own folder: {json.dumps(places)}" for target, places in added.items()]
+    if changed:
+        folders = [f"{FEATURES}/{target}" for target in changed]
+        diff = subprocess.run(["git", "diff", "--no-color", "main...HEAD", "--", *folders], cwd=tree, check=False, capture_output=True, text=True, errors="replace").stdout
+        parts.append(diff[:MOST_DIFF_SHOWN] + ("\n(That's all that's shown here. The rest is in the folder.)" if len(diff) > MOST_DIFF_SHOWN else ""))
+    return "\n\n".join(parts)
+
+
 async def checked_against_main(kind, message, tree, feature_id, node, ask=None, **fields):
     """Something else can ship while this waits its turn, and then this looks like it's removing that. Nobody's made a
     mistake, so it catches up and asks again, rather than sending a builder off to fix something that isn't wrong."""
     for _ in range(STALE_RETRIES):
-        commit = ready_commit(message, tree, feature_id, node)
+        try:
+            commit = ready_commit(message, tree, feature_id, node)
+        except Refused as refused:
+            return refused.answer()
         answer = await (ask or request)(kind, commit=commit, **fields)
         if STALE not in str(answer.get("reason")):
             break
@@ -385,11 +497,23 @@ class Workshop:
         for ready in batch:
             try:
                 ready_commit(f"{ready.feature_id}: ready to release", ready.tree, ready.feature_id, ready.node)
+            except Refused as refused:
+                ready.answer.set_result(refused.answer())
+                continue
+            except subprocess.CalledProcessError as error:
+                ready.answer.set_result({"result": "blocked", "gate": "merge", "reason": f"This couldn't be got ready to go out: {error.stderr or error}"})
+                continue
+            try:
                 _git("merge", "-q", "--no-edit", ready.branch, cwd=RELEASE_TREE)
                 included.append(ready)
             except subprocess.CalledProcessError as error:
                 subprocess.run(["git", "merge", "--abort"], cwd=RELEASE_TREE, check=False, capture_output=True)
-                ready.answer.set_result({"result": "blocked", "gate": "merge", "reason": f"It changes something another feature changes too, so they can't both go out: {error.stderr or error}"})
+                # It clashes with something ahead of it in this release, which may not go out. So it waits for the next one, and it's
+                # measured against what really did, which either lets it through or shows its builder exactly what to settle.
+                if included:
+                    self.ready.insert(0, ready)
+                else:
+                    ready.answer.set_result({"result": "blocked", "gate": "merge", "reason": f"This couldn't be merged with what's out: {error.stderr or error}"})
         return included
 
     # Everything else ----------------------------------------------------------------------------------------
@@ -456,7 +580,10 @@ class Workshop:
                 return str(error)
             target.write_text(json.dumps(manifest, indent=1) + "\n", encoding="utf-8")
             async with self.release_lock:
-                commit = ready_commit(f"{feature_id}: {name} {field} to {value}", tree)
+                try:
+                    commit = ready_commit(f"{feature_id}: {name} {field} to {value}", tree)
+                except Refused as refused:
+                    return f"Refused at {refused.gate}: {refused.reason}"
                 answer = await request("release", commit=commit, release_id=f"{branch}-{int(now)}", why="a balance change")
                 if answer.get("result") not in ("released", "nothing_to_release"):
                     return f"Refused at {answer.get('gate')}: {answer.get('reason')}"
@@ -494,6 +621,9 @@ class Workshop:
         shots = "\n".join(f"- {path}" for path in screenshots) or "(none: this feature adds nothing visible)"
         prompt = (f"Spec:\n{llm.untrusted('spec', spec)}\n\nThe feature is in {tree}/mods/genesis/features/{feature_id}. "
                   f"The world's theme is in {tree}/bible/theme.md.\n\nScreenshots from a real game client:\n{shots}")
+        reach = changes_to_others(tree, feature_id)
+        if reach:
+            prompt += f"\n\nIt reaches into other features too, which are in {tree}/mods/genesis/features, so judge that as well:\n{llm.untrusted('changes_to_other_features', reach)}"
         result = await llm.ask(self.governor, "reviewer", prompt, schema=VERDICT_SCHEMA, tools=["Read", "Glob", "Grep"],
                                allowed_tools=["Read", "Glob", "Grep"], cwd=str(tree), max_turns=12)
         if result.is_error or not isinstance(result.structured, dict):
@@ -505,7 +635,10 @@ class Workshop:
         role = self._role(small, fix)
         if lane == lanes.REMOTE:
             # Being committed is what lets the machine see any earlier attempt's work.
-            ready_commit(f"{feature_id}: before going to another machine", tree, feature_id, node)
+            try:
+                ready_commit(f"{feature_id}: before going to another machine", tree, feature_id, node)
+            except Refused:
+                pass  # It's committed as far as it can be, and sorting out the rest is what the machine's being asked to do.
             return await self.hub.attempt(feature_id, tree, {"prompt": prompt, "system": llm.prompt_text("builder"), "session": session, "small": small,
                                                              "node": node, "stage": stage, "max_turns": max_turns, "budget": usage})
         chosen = self._lane_for(role, lane)
@@ -582,7 +715,9 @@ class Workshop:
         web = self.web_research.server(FEATURE_RESEARCH)
         max_turns, usage, attempts = FIX_LIMITS if fix else SMALL_LIMITS if small else STAGE_LIMITS[stage]
         tools = SMALL_TOOLS if small else BUILDER_TOOLS
-        for attempt in range(1, attempts + 1):
+        attempt = conflicts = 0
+        while attempt - conflicts < attempts:
+            attempt += 1
             reason = self.governor.why_not_build()
             if reason:
                 print(f"{feature_id}: pausing: {reason}", flush=True)
@@ -616,6 +751,7 @@ class Workshop:
             gates = await checked_against_main("gates", f"{feature_id}: attempt {attempt}", tree, feature_id, node, release_id=f"{fix or feature_id}-{attempt}", hurry=small, first=bool(fix))
             timings[f"gates_{attempt}"] = round(time.monotonic() - began, 1)
             if gates.get("result") not in ("passed_gates", "nothing_to_release"):
+                conflicts = min(MOST_CONFLICTS, conflicts + (gates.get("gate") == "merge"))
                 feedback = f"The automated gates stopped this at {gates.get('gate')}:\n{gates.get('reason')}\n\nFix it."
                 last_problem = f"Gate {gates.get('gate')}: {str(gates.get('reason'))[:300]}"
                 print(f"{feature_id}: blocked at {gates.get('gate')}", flush=True)
@@ -629,7 +765,7 @@ class Workshop:
                 # passed, so on the last try anything short of harmful ships: something real today beats perfect later.
                 print(f"{feature_id}: review rejected it: {verdict.get('problems')}", flush=True)
                 last_problem = "Review: " + "; ".join(verdict.get("problems", []))[:300]
-                if verdict.get("serious", True) or attempt < attempts:
+                if verdict.get("serious", True) or attempt - conflicts < attempts:
                     feedback = "A reviewer found problems:\n- " + "\n- ".join(verdict.get("problems", [])) + "\n\nFix them."
                     continue
                 print(f"{feature_id}: shipping anyway: the problems aren't serious and the gates passed", flush=True)
@@ -638,6 +774,7 @@ class Workshop:
             released = await self._release(feature_id, tree, node, about, fix)
             timings["release"] = round(time.monotonic() - began, 1)
             if released.get("result") not in WENT_OUT:
+                conflicts = min(MOST_CONFLICTS, conflicts + (released.get("gate") == "merge"))
                 feedback = f"Release failed at {released.get('gate')}: {released.get('reason')}\n\nFix it."
                 last_problem = f"Release: {str(released.get('reason'))[:300]}"
                 print(f"{feature_id}: release failed: {released.get('reason')}", flush=True)

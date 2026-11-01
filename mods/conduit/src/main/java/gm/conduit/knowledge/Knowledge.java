@@ -107,7 +107,7 @@ public final class Knowledge {
 		ServerEntityCombatEvents.AFTER_KILLED_OTHER_ENTITY.register((level, killer, killed, source) -> {
 			if (killer instanceof ServerPlayer player) {
 				String type = BuiltInRegistries.ENTITY_TYPE.getKey(killed.getType()).toString();
-				INSTANCE.plan.withRoute("kill", type).forEach(entry -> INSTANCE.learn(player, entry));
+				INSTANCE.plan.withRoute("kill", type).stream().filter(entry -> INSTANCE.routeOpen(player, entry, "kill", type)).forEach(entry -> INSTANCE.learn(player, entry));
 				String name = INSTANCE.plan.names().get(type);
 				if (name != null && INSTANCE.ledger.markFound(player.getStringUUID(), type)) {
 					INSTANCE.emitDiscovery(player, name);
@@ -168,6 +168,15 @@ public final class Knowledge {
 		return this.ledger != null && this.ledger.knows(scopeKey(player), entry);
 	}
 
+	private boolean routeOpen(Player player, KnowledgePlan.Route route) {
+		return route.requires().stream().allMatch(need -> knows(player, need));
+	}
+
+	/** Whether a route of this kind to this entry can teach this player yet, which it can't until they know everything it requires. */
+	private boolean routeOpen(Player player, KnowledgePlan.Entry entry, String type, String id) {
+		return entry.routes().stream().anyMatch(route -> route.type().equals(type) && route.id().equals(id) && routeOpen(player, route));
+	}
+
 	/** The rule that gates crafting. A recipe nobody has declared isn't ours to restrict. */
 	public boolean canUse(Player player, Identifier recipe) {
 		List<String> needs = this.plan.gated().get(recipe);
@@ -220,7 +229,7 @@ public final class Knowledge {
 	private InteractionResult examine(ServerPlayer player, String target) {
 		boolean taught = false;
 		for (KnowledgePlan.Entry entry : this.plan.withRoute("examine", target)) {
-			if (!knows(player, entry.id())) {
+			if (!knows(player, entry.id()) && routeOpen(player, entry, "examine", target)) {
 				learn(player, entry);
 				taught = true;
 			}
@@ -228,19 +237,28 @@ public final class Knowledge {
 		return taught ? InteractionResult.SUCCESS : InteractionResult.PASS;
 	}
 
-	/** Called when a slot item is used. Returns true if it was something to read, which uses it up. */
+	/** Called when a slot item is used. Returns true if it was something to read, which uses it up. One they can't make sense of yet stays theirs. */
 	public boolean useItem(ServerPlayer player, ItemStack stack) {
 		String item = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
 		boolean used = false;
+		boolean tooSoon = false;
 		for (KnowledgePlan.Entry entry : this.plan.withRoute("read", item)) {
 			if (!knows(player, entry.id())) {
-				learn(player, entry);
-				used = true;
+				if (routeOpen(player, entry, "read", item)) {
+					learn(player, entry);
+					used = true;
+				} else {
+					tooSoon = true;
+				}
 			}
 		}
 		for (KnowledgePlan.Entry entry : this.plan.entries().values()) {
 			for (KnowledgePlan.Route route : entry.routes()) {
 				if (route.type().equals("fragments") && route.id().equals(item) && !knows(player, entry.id())) {
+					if (!routeOpen(player, route)) {
+						tooSoon = true;
+						continue;
+					}
 					int have = this.ledger.addFragment(scopeKey(player), entry.id());
 					player.sendSystemMessage(Component.literal("§6✦ §rA piece of something. §7(" + have + " of " + route.needed() + ")"));
 					if (have >= route.needed()) {
@@ -252,6 +270,8 @@ public final class Knowledge {
 		}
 		if (used) {
 			stack.consume(1, player);
+		} else if (tooSoon) {
+			player.sendSystemMessage(Component.literal("§7You can't make sense of this yet."));
 		}
 		return used;
 	}
@@ -267,17 +287,19 @@ public final class Knowledge {
 				continue;
 			}
 			Item item = stack.getItem();
+			String id = BuiltInRegistries.ITEM.getKey(item).toString();
 			List<KnowledgePlan.Entry> entries = this.learnedByHolding.get(item);
 			if (entries != null) {
 				for (KnowledgePlan.Entry entry : entries) {
-					learn(player, entry);
+					if (routeOpen(player, entry, "obtain", id)) {
+						learn(player, entry);
+					}
 				}
 			}
 			List<RecipeHolder<?>> open = this.openRecipesByIngredient.get(item);
 			if (open != null && open.stream().anyMatch(holder -> !player.getRecipeBook().contains(holder.id()))) {
 				player.awardRecipes(open);
 			}
-			String id = BuiltInRegistries.ITEM.getKey(item).toString();
 			String name = this.plan.names().get(id);
 			if (name != null && this.ledger.markFound(key, id)) {
 				emitDiscovery(player, name);

@@ -11,6 +11,7 @@ import re
 import shutil
 
 from broker import guide
+from orchestrator import others
 
 TOKEN = re.compile(r"\$(block|item|mob|sound):([a-z0-9_]+(?:/[a-z0-9_]+)?)")
 
@@ -73,6 +74,10 @@ def load_features(features_dir):
         if data.get("id") != folder.name:
             raise BundleError(f"{folder.name}: id must match the folder name, found {data.get('id')!r}")
         features[folder.name] = {"manifest": data, "dir": folder}
+    # Here, so that what one feature adds to another is part of that feature for every gate and for the release.
+    problems = others.apply_additions({feature_id: feature["manifest"] for feature_id, feature in features.items()})
+    if problems:
+        raise BundleError("\n".join(problems))
     return features
 
 
@@ -492,6 +497,17 @@ def _machine_home(features, feature_id, machine):
     return f"{feature_id}/{machine}"
 
 
+def _knowledge_routes(entry, feature_id, name, ledger):
+    """What a route needs first goes by full name in what the game reads, because that's how it knows who knows what."""
+    routes = _resolve_tokens(entry.get("routes", []), feature_id, ledger)
+    for route in routes:
+        if "requires" in route:
+            if not isinstance(route["requires"], list) or not all(isinstance(need, str) for need in route["requires"]):
+                raise BundleError(f"Knowledge {feature_id}/{name} has a route with requires {route['requires']!r}. It's a list of entries a player has to know first, like [\"gem_cutting\"].")
+            route["requires"] = [need if "/" in need else f"{feature_id}/{need}" for need in route["requires"]]
+    return routes
+
+
 def _link_knowledge(entries, gated, recipe_routes):
     """A recipe names the knowledge that unlocks it. Done last, because that may be in a later feature."""
     for recipe_id, source, route in recipe_routes:
@@ -650,7 +666,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
         for name, entry in manifest.get("knowledge", {}).items():
             entries[f"{feature_id}/{name}"] = {
                 "title": entry["title"], "text": entry["text"], "recipes": [],
-                "routes": _resolve_tokens(entry.get("routes", []), feature_id, ledger),
+                "routes": _knowledge_routes(entry, feature_id, name, ledger),
             }
         for name, mob in manifest.get("mobs", {}).items():
             slot, definition = _render_mob(feature, feature_id, name, mob, ledger, lang, datapack, config)

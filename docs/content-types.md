@@ -35,6 +35,16 @@ An entry can have one route or several, and any one of them teaches it.
 | `read` | Using the item, which uses it up. Good for tablets and blueprints found in loot |
 | `fragments` | Using the item, which uses it up and counts one piece. Learned at `needed` pieces |
 
+Any route can need other knowledge first, so one thing leads to another. It does nothing for a player until they know everything in its `requires`. Someone using a tablet too soon keeps it, and is told they can't make sense of it yet, and an `obtain` route counts as soon as they've learned what it needs, if they're still carrying the item. Name another feature's entry as `other_feature/name`:
+
+```json
+{"type": "read", "id": "$item:rune_tablet", "requires": ["gem_cutting", "alloy_kiln/alloying"]}
+```
+
+Every entry still needs a route players can take in its own node, and the instant check refuses a circle of entries that each need the other.
+
+To add a route to another feature's entry, or a paragraph to its page, use `adds_to`, which is in 'Changing another feature' in `docs/feature-format.md`. The same works for its ruin's loot, or any other list of its.
+
 A recipe that names an entry in `route` can't be crafted until it's learned:
 
 ```json

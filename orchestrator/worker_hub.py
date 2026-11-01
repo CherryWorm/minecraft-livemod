@@ -1,6 +1,6 @@
 """Lets builders run on other machines. They connect out to this over HTTPS, so one can be behind a home router, and they
 only ever do the part that's a model writing code. Everything that decides what ships stays here: a machine's work
-goes through the same gates, review and release as anyone's, and only its feature's own folder is taken from it.
+goes through the same gates, review and release as anyone's, and only its feature's own folder and the ones it declares are taken from it.
 
 A machine has a token, and the agent only keeps its hash, so nothing a builder here could read would let it pose as one.
 """
@@ -23,7 +23,7 @@ from starlette.background import BackgroundTask
 from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route
 
-from orchestrator import lanes, llm, model_bridge, world_index
+from orchestrator import lanes, llm, model_bridge, others, world_index
 
 PORT = 8790
 MACHINES = pathlib.Path(os.environ.get("CONTROL_DIR", "/control")) / "workers.json"
@@ -285,15 +285,18 @@ class WorkerHub:
         return JSONResponse({"ok": True})
 
     def _take_feature(self, job, commit):
-        """Only the feature's own folder is taken, as it is at that commit, so nothing else a machine did can come along."""
+        """Only the feature's own folder and the ones it declares are taken, as they are at that commit, so nothing else a machine did can come along."""
         if not self._known(job, commit):
             return "That commit hasn't been uploaded for this job."
-        folder = f"mods/genesis/features/{job.feature_id}"
-        listed = subprocess.run(["git", "cat-file", "-e", f"{commit}:{folder}"], cwd=job.tree, capture_output=True)
-        if listed.returncode != 0:
-            return None  # It made nothing yet, and the gates will say so.
-        shutil.rmtree(job.tree / folder, ignore_errors=True)
-        subprocess.run(["git", "checkout", commit, "--", folder], cwd=job.tree, check=True, capture_output=True)
+        manifest = subprocess.run(["git", "show", f"{commit}:mods/genesis/features/{job.feature_id}/feature.json"], cwd=job.tree, capture_output=True, text=True, errors="replace")
+        declared = (others.declared(manifest.stdout) or set()) if manifest.returncode == 0 else set()
+        for feature in (job.feature_id, *sorted(declared - {job.feature_id})):
+            folder = f"mods/genesis/features/{feature}"
+            listed = subprocess.run(["git", "cat-file", "-e", f"{commit}:{folder}"], cwd=job.tree, capture_output=True)
+            if listed.returncode != 0:
+                continue  # It made nothing yet, and the gates will say so.
+            shutil.rmtree(job.tree / folder, ignore_errors=True)
+            subprocess.run(["git", "checkout", commit, "--", folder], cwd=job.tree, check=True, capture_output=True)
         return None
 
     def app(self):

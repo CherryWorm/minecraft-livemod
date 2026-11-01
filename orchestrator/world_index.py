@@ -4,7 +4,7 @@ them, and the director and tuner can see what exists and what its numbers are.
 import json
 import re
 
-from orchestrator import progression as graph
+from orchestrator import others, progression as graph
 
 STAGE_ORDER = {stage: index for index, stage in enumerate(graph.STAGES)}
 REFERENCE = re.compile(r"\$(?:block|item|mob):(?:(\w+)/)?(\w+)")
@@ -94,9 +94,12 @@ def _describe_feature(feature_id, manifest, reached):
     for name, recipe in manifest.get("recipes", {}).items():
         lines.append(f"- recipe {name}: {_describe_recipe(recipe)}")
     for name, entry in manifest.get("knowledge", {}).items():
-        lines.append(f"- knowledge {feature_id}/{name}: \"{entry.get('title')}\", from {[route.get('type') for route in entry.get('routes', [])]}")
+        routes = [route.get("type") + (f" after {', '.join(route['requires'])}" if route.get("requires") else "") for route in entry.get("routes", [])]
+        lines.append(f"- knowledge {feature_id}/{name}: \"{entry.get('title')}\", from {routes}")
     for entry in manifest.get("automation", []):
         lines.append(f"- automates {entry.get('what')} at {entry.get('per_minute')} a minute")
+    for target, places in (manifest.get("adds_to") or {}).items():
+        lines.append(f"- adds to {target}: {', '.join(sorted(set(places) - {others.WHY}))}")
     return lines
 
 
@@ -169,7 +172,8 @@ def _guide_feature(manifest, say, not_out):
     for recipe in manifest.get("recipes", {}).values():
         lines.append(f"- recipe for {_guide_recipe(recipe, say)}")
     for name, entry in manifest.get("knowledge", {}).items():
-        routes = " or ".join(f"{route.get('type')} {say(route.get('id', ''))}".strip() for route in entry.get("routes", []))
+        routes = " or ".join(f"{route.get('type')} {say(route.get('id', ''))}".strip() + "".join(f", once {need.rsplit('/', 1)[-1].replace('_', ' ')} has been learned" for need in route.get("requires", []))
+                             for route in entry.get("routes", []))
         lines.append(f"- to learn \"{entry.get('title', name)}\": {routes}. It reads: {say(entry.get('text', ''))}")
     return lines
 
@@ -178,6 +182,7 @@ def _readable(features_dir):
     """What's out, a way to say things in the names players see, and the parts of the graph that nothing's out for yet.
     Only what's been released is ever merged into main, so nothing still being built can reach anyone through here."""
     manifests = {path.parent.name: json.loads(path.read_text(encoding="utf-8")) for path in sorted(features_dir.glob("*/feature.json"))}
+    others.apply_additions(manifests)
     names = {(feature_id, name): thing["display"] for feature_id, manifest in manifests.items()
              for table in ("blocks", "items", "mobs") for name, thing in manifest.get(table, {}).items() if thing.get("display")}
 
@@ -241,6 +246,7 @@ def build(features_dir, reached=()):
     manifests = {}
     for path in sorted(features_dir.glob("*/feature.json")):
         manifests[path.parent.name] = json.loads(path.read_text(encoding="utf-8"))
+    others.apply_additions(manifests)
     reached = set(reached)
     lines = []
     placed = set()
@@ -256,9 +262,9 @@ def build(features_dir, reached=()):
             for feature_id in inside:
                 lines += _describe_feature(feature_id, manifests[feature_id], reached)
             lines.append("")
-    others = [feature_id for feature_id in manifests if feature_id not in placed]
-    if others:
+    unplaced = [feature_id for feature_id in manifests if feature_id not in placed]
+    if unplaced:
         lines.append("## Not in the progression")
-        for feature_id in others:
+        for feature_id in unplaced:
             lines += _describe_feature(feature_id, manifests[feature_id], reached)
     return "\n".join(lines) or "Nothing has been built yet."

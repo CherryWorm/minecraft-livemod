@@ -11,7 +11,8 @@ from PIL import Image
 
 from broker import bundles
 from broker.bundles import TOKEN
-from broker.gates import GateFailed, balance
+from broker.gates import GateFailed, balance, progression
+from orchestrator import others
 
 GATE = "static"
 RESERVE = 0.2
@@ -208,6 +209,38 @@ def check_loot_format(features):
                       "See 'Loot tables' in docs/content-types.md.")
 
 
+def _check_can_be_learned(entries):
+    """Routes can need other entries first, so a circle of those is a set of things nobody could ever start on."""
+    learnable = set()
+    while True:
+        more = {key for key, entry in entries.items() if key not in learnable
+                and any(all(balance._key(key.split("/")[0], need) in learnable for need in route.get("requires", [])) for route in entry["routes"])}
+        if not more:
+            break
+        learnable |= more
+    stuck = sorted(set(entries) - learnable)
+    if stuck:
+        _fail(f"Nobody could ever learn {', '.join(stuck)}, because every route to each one requires something that can't be learned first.")
+
+
+def check_changes_to_others(features):
+    """A reviewer and the next builder both need to know why one feature reached into another."""
+    for feature_id, feature in features.items():
+        manifest = feature["manifest"]
+        declared = manifest.get("changes_features", {})
+        if not isinstance(declared, dict):
+            _fail(f"{feature_id} has changes_features {declared!r}. It's other features and why, like {{\"alloy_kiln\": \"Its recipe was in the wrong place\"}}.")
+        additions = manifest.get("adds_to", {})
+        reasons = {**declared, **{target: places.get(others.WHY) for target, places in additions.items()}}
+        for target, reason in reasons.items():
+            if target == feature_id:
+                _fail(f"{feature_id} lists itself as a feature it changes. It only needs to list others.")
+            if target not in features:
+                _fail(f"{feature_id} says it changes {target!r}, which isn't a feature that's out. One still being built is for its own builder.")
+            if len(str(reason or "").strip()) < progression.MIN_REASON:
+                _fail(f"{feature_id} changes {target} without a clear reason. Say why, in a sentence: a reviewer and the next builder both read it.")
+
+
 def check_knowledge(features):
     """A recipe that has to be learned needs a way of learning it that players can actually reach."""
     entries = {f"{feature_id}/{name}": entry for feature_id, feature in features.items()
@@ -226,6 +259,10 @@ def check_knowledge(features):
                 _fail(f"Knowledge {key} has a {route['type']} route that doesn't say what triggers it.")
             if route["type"] == "fragments" and not route.get("needed"):
                 _fail(f"Knowledge {key} collects fragments but doesn't say how many are needed.")
+            for need in route.get("requires", []):
+                if balance._key(key.split("/")[0], need) not in entries:
+                    _fail(f"Knowledge {key} has a route that requires {need!r}, which no feature declares. Name another feature's as feature/name.")
+    _check_can_be_learned(entries)
     for feature_id, feature in features.items():
         for name, recipe in feature["manifest"].get("recipes", {}).items():
             if recipe.get("mode") != "known":
@@ -646,6 +683,7 @@ def run(features, old_ledger, new_ledger, pool, content):
     check_json_files(pack, "Pack")
     check_recipes(json.loads((content / "recipes.json").read_text(encoding="utf-8")))
     check_guessable_only_on_machines(features)
+    check_changes_to_others(features)
     check_knowledge(features)
     check_loot_format(features)
     check_no_tags_in_patches(features)

@@ -86,6 +86,47 @@ The most the mid game allows, per minute: `mining` 6, `mob_killing` 1, `crafting
 "changes_reached": {"tin_pick": "Three players said it breaks too quickly to be worth making"}
 ```
 
+## Changing another feature
+
+This mod is one codebase. If your work needs another feature to change, because its recipe is in the wrong place, say, or a machine should take what you've added, then change it yourself. Don't work around it, or wait for it, or leave a note for someone. There are two ways.
+
+**Adding to its data, from your own folder.** This is the one to reach for if all you need is another line in one of its lists, because nothing you add here can collide with anyone. It's put together when a release is made, so it never touches the other feature's files.
+
+```json
+"adds_to": {
+  "alloy_kiln": {
+    "why": "A tablet found in the new ruins should be another way to learn this",
+    "knowledge.alloying.routes": [{"type": "read", "id": "$item:worn_tablet"}],
+    "knowledge.alloying.text": "A paragraph more for its page in the Codex.",
+    "ruins.old_kiln.loot.pools.0.entries": [{"type": "minecraft:item", "name": "$item:worn_tablet"}]
+  }
+}
+```
+
+Each key is a place in that feature's `feature.json`, with dots between the names and numbers for places in a list. It has to be inside `knowledge`, `blocks`, `items`, `mobs`, `ruins` or `recipes`, or be `changes_reached`, and it can only add: what you give goes on the end of a list, new names go in an object, and a paragraph goes on the end of a page's `text` or a mind's `character`. If the last name isn't there yet, it's created. `$item:name` means your own, wherever it ends up, and anything else that names something, like `requires`, is read as if that feature had written it, so give yours as `your_feature/name`. All the gates see the other feature with your additions in it. If you change a thing players already have this way, the `changes_reached` reason goes in here too.
+
+**Changing its files.** For anything else, edit that feature's folder directly, in your own tree, and say so in your own `feature.json`:
+
+```json
+"changes_features": {"alloy_kiln": "Its bronze recipe was on the wrong machine, so players never found it"}
+```
+
+Only what's listed here goes out with your work, and a check tells you straight away if you've changed a feature you haven't listed. It has to be a feature that's out, because one still being built belongs to its own builder, and anything new goes in your own folder. A reviewer reads your reason beside exactly what changed, so make it specific, and keep it up to date if you change that feature again later. If you change something players already have, the `changes_reached` reason goes in the `feature.json` of the feature that declares it. Everything you've changed is checked with everything else, by all the same gates.
+
+Other builders may be changing the same feature right now, and neither of you can see the other's work until it's out. So edit the lines you mean to, and never rewrite or reformat a whole file, because that collides with everybody. Work that changes different lines just comes together by itself.
+
+**If something that's gone out changes the same lines as you,** a check will stop and say which files, and it doesn't cost you a try. Those files now have both versions in them, marked the way git marks them, with yours first and what's out second:
+
+```
+<<<<<<< HEAD
+yours
+=======
+what's out
+>>>>>>> main
+```
+
+Keep what both need and take out the marker lines. Nothing can go any further until you have. `git log main -- <file>` says who changed it, and `git show main:<file>` shows what's out. Art can't show both, so a picture you both changed is left as what's out, and the answer tells you how to get yours back.
+
 ## Block families
 
 A family fixes what can't change on a live block. `stone`, `ore`, `deep_ore`, `metal` and `machine` need the right tool to drop anything, so give them a `tool` and usually a `tool_level` (`stone`, `iron` or `diamond`).
@@ -399,7 +440,7 @@ context.publish("sampled", message);
 context.subscribe("core_drill/sampled", message -> { /* ... */ });
 ```
 
-It goes to whoever is listening right then, and nobody listening is fine, so it's the way to let others react to your feature without your feature knowing about them. It's also the way to pass something on for another feature to record, as long as that one listens for it. Say what you publish in your feature's `summary`, so other builders can find it. A module can't switch another off, or change what another does.
+It goes to whoever is listening right then, and nobody listening is fine, so it's the way to let others react to your feature without your feature knowing about them. It's also the way to pass something on for another feature to record, as long as that one listens for it. Say what you publish in your feature's `summary`, so other builders can find it. A running module can't switch another off, or change what another does. For that, change the other feature itself: see 'Changing another feature' above.
 
 ### Things that happen in the world
 

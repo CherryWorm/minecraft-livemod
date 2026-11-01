@@ -188,6 +188,16 @@ def play(client):
     locked = last_result(client)
     results.append(report("a recipe that hasn't been learned produces nothing", "air" in locked, locked))
 
+    # A route that requires other knowledge does nothing until they have it, and what they tried with is still theirs.
+    shard = slot("rune_shard")
+    runtime.rcon("prod", "clear", PLAYER)
+    runtime.rcon("prod", "give", PLAYER, shard, "1")
+    time.sleep(1)
+    client.ask("use")
+    client.wait(r"\[M8\] chat: .*can't make sense of this yet", 30)
+    kept = runtime.rcon("prod", "clear", PLAYER, shard, "0")
+    results.append(report("a route that requires something else first does nothing yet, and keeps the item", "Found 1" in kept, kept))
+
     # Reading the tablet teaches it. The dust is in the first hotbar slot, so swap the tablet in to use it.
     runtime.rcon("prod", "clear", PLAYER)
     runtime.rcon("prod", "give", PLAYER, tablet, "1")
@@ -197,6 +207,14 @@ def play(client):
     results.append(report("reading the tablet teaches the recipe", True))
     leftover = runtime.rcon("prod", "clear", PLAYER, tablet, "0")
     results.append(report("the tablet was used up", "No items" in leftover or " 0 " in leftover, leftover))
+
+    # And now that they know what it requires, the same route works.
+    runtime.rcon("prod", "clear", PLAYER)
+    runtime.rcon("prod", "give", PLAYER, shard, "1")
+    time.sleep(1)
+    client.ask("use")
+    client.wait(r"\[M8\] chat: .*A piece of something", 30)
+    results.append(report("the route opens once they know what it requires", True))
 
     runtime.rcon("prod", "clear", PLAYER)
     runtime.rcon("prod", "give", PLAYER, dust, "8")
