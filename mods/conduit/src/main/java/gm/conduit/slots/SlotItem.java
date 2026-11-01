@@ -49,6 +49,11 @@ public final class SlotItem extends SimplePolymerItem {
 		ItemBehavior behavior = ServerModuleHost.instance().itemBehavior(this.slotId);
 		if (behavior != null && !level.isClientSide()) {
 			InteractionResult result = ServerModuleHost.instance().guarded(this.slotId, InteractionResult.PASS, () -> behavior.use(level, player, hand));
+			// Unless it's told otherwise, the game goes on holding the stack it called this with, and clears the hand if that's now
+			// empty. So a module using up the last of something and putting what it became in the hand would lose it.
+			if (result instanceof InteractionResult.Success success && success.heldItemTransformedTo() == null) {
+				return success.heldItemTransformedTo(player.getItemInHand(hand));
+			}
 			if (result != InteractionResult.PASS) {
 				return result;
 			}
