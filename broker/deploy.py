@@ -58,8 +58,12 @@ def backup():
         runtime.rcon("prod", "save-off")
         runtime.rcon("prod", "save-all", "flush")
     try:
-        runtime.run(["tar", "--zstd", "-cf", str(target), "--exclude=session.lock", "-C",
-                     str(runtime.RUNTIME / "prod"), "world"], timeout=600)
+        # Saving being off holds the chunks still, but mods replace their own small files beside them whenever they like. Tar says so by
+        # exiting 1, and the copy is still good, so only a higher code means it failed.
+        result = runtime.run(["tar", "--zstd", "-cf", str(target), "--exclude=session.lock", "-C",
+                              str(runtime.RUNTIME / "prod"), "world"], check=False, timeout=600)
+        if result.returncode > 1:
+            raise RuntimeError(f"tar couldn't copy the world:\n{(result.stdout or '')[-2000:]}")
     finally:
         if running:
             runtime.rcon("prod", "save-on")
