@@ -39,6 +39,21 @@ final class ModulePayloads {
 		}
 	}
 
+	/** A value a server module sent to a client module on this computer. conduit's ClientValues must stay in step with this. */
+	record ServerValue(String moduleId, String key, String value) implements CustomPacketPayload {
+		static final Type<ServerValue> TYPE = new Type<>(Identifier.fromNamespaceAndPath("gm", "client_value"));
+		static final StreamCodec<ByteBuf, ServerValue> CODEC = StreamCodec.composite(
+				ByteBufCodecs.STRING_UTF8, ServerValue::moduleId,
+				ByteBufCodecs.STRING_UTF8, ServerValue::key,
+				ByteBufCodecs.STRING_UTF8, ServerValue::value,
+				ServerValue::new);
+
+		@Override
+		public Type<ServerValue> type() {
+			return TYPE;
+		}
+	}
+
 	/** Never sent. A client that listens for this is new enough for inventory hooks, and the server can see that it does. */
 	record InventoryHooksSupported() implements CustomPacketPayload {
 		static final Type<InventoryHooksSupported> TYPE = new Type<>(Identifier.fromNamespaceAndPath("gm", "inventory_hooks"));

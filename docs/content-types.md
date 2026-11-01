@@ -716,6 +716,47 @@ The rules are the same as for screen effects: it has to start with `#version 330
 
 The templates `new_world_effect` and `new_blueprint` write working versions of the first and third of these to start from.
 
+## What a client module can know
+
+A client module can hear from the server, see where the player is and the land around them, and paint pictures of its own. That's enough for a real map, a compass, or a gauge showing how a machine across the world is doing. The template `new_minimap` writes a working map, with a server module telling it something, to start from.
+
+```java
+// On the server. Say how things are, as often as you like: if a key changes twice in a tick only the last gets there, and saying what it already is sends nothing.
+context.sendClientValue(player, "charge", Integer.toString(charge));
+
+// On their computer. It hears the last one straight away if one has come already, so it doesn't matter which starts first.
+context.onServerValue("charge", value -> this.charge = Integer.parseInt(value));
+```
+
+A value is text of up to 8192 characters, and a key is up to 128. One that's too long throws an exception where it's sent. A player can be sent up to 512 different keys, so a key can't be something new every time. To tell another feature's client module, name it: `context.sendClientValue(player, "other_feature", key, value)`. What's been said goes when the player leaves. Someone with no companion, or one too old for this, hears nothing, so what they can do mustn't depend on it. A value is for how things are and not what happened, because one that's replaced in the same tick never arrives.
+
+`context.world()` is only for looking, and it only knows what this player's game has been told:
+
+- `inWorld`, which is false until they've joined. `playerX`, `playerY`, `playerZ`, `yaw` and `pitch`, for where they are and which way they face. 0 is south, 90 is west, 180 is north and -90 is east.
+- `dimension`, `biome(x, y, z)`, `dayTime` and `isRaining`.
+- `isLoaded(x, z)`, `surfaceY(x, z)`, `blockName(x, y, z)` and `lightLevel(x, y, z)`. A block of this world's shows up as whichever of vanilla's stands in for it.
+- `mapColor(x, z)` and `readMap(fromX, fromZ, width, height, step, colors)`, for what a map of the game's own would show there, slopes and deep water included. Anything not loaded is see-through.
+
+Land that hasn't reached the player can't be read, so a map only reaches as far as their render distance.
+
+A map has too many pixels to draw one at a time, so paint it on a picture and draw that:
+
+```java
+ModuleImage map = context.newImage(64, 64);
+int[] colors = new int[64 * 64];
+
+// Now and then in a tick, because reading a map is real work. Never every frame.
+world.readMap(x - 32, z - 32, 64, 64, 1, colors);
+map.setPixels(colors);
+map.upload();
+
+// In the HUD, every frame.
+map.draw(graphics, 4, 4, 64, 64);
+map.drawTurned(graphics, 4, 4, 64, 64, 180 - world.yaw());
+```
+
+A picture can be up to 512 across, and a module can have up to 4. Colours are 0xAARRGGBB, `setPixel(x, y, color)` paints a single pixel, and nothing shows until `upload`. Pictures go by themselves when the module unloads. A module that takes too long every frame is switched off, and a map is the easiest way to do that, so keep it small and don't read it often.
+
 ## Panels
 
 A machine, an item or a mob can have a screen of its own, with drawn art, item slots placed anywhere, bars that move while it's open, buttons, tabs, scrolling lists, a mob and somewhere to type. Mob conversation and trading are built from these too. It looks like the game's own screens unless you draw it otherwise, and it should stay that way, just nicer. It's all described in `"panels"` in `feature.json`, and a server module opens it and runs it. Nothing runs on anyone's computer. Someone with no companion gets the same thing as a plain chest. See 'Panels' in `docs/feature-format.md`. For a few buttons with no art, a menu made of chest slots is less work.

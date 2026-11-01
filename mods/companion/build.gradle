@@ -9,6 +9,10 @@ dependencies {
 	if (System.getenv('CLIENT_TEST_PATCHOULI')) {
 		runtimeOnly files(project.patchouli_jar)
 	}
+	// Everything else in the friend pack, for a client test that asks to try something alongside what's on friends' computers.
+	if (System.getenv('CLIENT_TEST_FRIENDS_MODS')) {
+		runtimeOnly fileTree(dir: "$rootDir/friends-mods", include: '*.jar')
+	}
 }
 
 fabricApi {

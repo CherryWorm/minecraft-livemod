@@ -25,9 +25,9 @@ public final class WorldDrawClient implements ClientModule {
 	@Override
 	public void enable(ModuleContext context) {
 		context.onKeyPressed(key -> {
-			if (key.key() == KeyInput.of('J')) {
+			if (key.key() == KeyInput.of('Y')) {
 				this.on = !this.on;
-			} else if (key.key() == KeyInput.of('K')) {
+			} else if (key.key() == KeyInput.of('U')) {
 				context.shakeCamera(5, 6);
 			}
 		});

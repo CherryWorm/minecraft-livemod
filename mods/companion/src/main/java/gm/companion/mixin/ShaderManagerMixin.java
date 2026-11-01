@@ -40,7 +40,7 @@ abstract class ShaderManagerMixin {
 	}
 
 	/** Every compiled shader has just gone, and the pack may now have new ones. */
-	@Inject(method = "apply", at = @At("TAIL"))
+	@Inject(method = "apply", at = @At("TAIL"), require = 0)
 	private void companion$reloaded(CallbackInfo info) {
 		Companion.host().world().resourcesReloaded();
 	}

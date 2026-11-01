@@ -996,8 +996,10 @@ def _module_files(draft, name, display, template=MODULE):
         raise TemplateError(f"A module's package is gm.feature.<id>, and {draft.id} can't be a Java package name. Give the feature another id.")
     class_name = _class_name(draft.id)
     source = template.replace("@ID@", draft.id).replace("@CLASS@", class_name).replace("@MACHINE@", name)
-    draft.manifest.setdefault("texts", {}).update({"made": f"{display} makes something.", "locked": f"{display} waits, as if you were missing something.", "near": f"{display} stirs."} if template is MODULE
-                                                  else {"idle": "Idle", "working": "Working"})
+    if template is MODULE:
+        draft.manifest.setdefault("texts", {}).update({"made": f"{display} makes something.", "locked": f"{display} waits, as if you were missing something.", "near": f"{display} stirs."})
+    elif template is PANEL_MODULE:
+        draft.manifest.setdefault("texts", {}).update({"idle": "Idle", "working": "Working"})
     draft.file(f"server/src/main/java/gm/feature/{draft.id}/{class_name}.java", source.encode())
     draft.file("server/src/main/resources/module.properties", f"entry=gm.feature.{draft.id}.{class_name}\n".encode())
     return class_name
@@ -1199,6 +1201,83 @@ public final class @CLASS@ implements ServerModule {
 """
 
 
+MINIMAP_SIZES = (16, 256)
+MINIMAP_STEPS = (1, 16)
+MINIMAP_MARKERS = ("0xFFFFFFFF", "0xFFFF4040", "0xFF40FF40", "0xFFFFFF40")
+
+MINIMAP_CLIENT = """package gm.feature.@ID@;
+
+import gm.companion.api.ClientModule;
+import gm.companion.api.ModuleContext;
+import gm.companion.api.ModuleImage;
+import gm.companion.api.WorldView;
+import net.minecraft.client.Minecraft;
+
+/** A starting point: a map of the land around the player in a corner of the screen, turned so that the way they're facing is up, with what the server module says under it. */
+public final class @CLASS@ implements ClientModule {
+	private static final int SIZE = @SIZE@;
+	private static final int STEP = @STEP@;
+	// Reading a map is real work, so it's done now and then, never every frame.
+	private static final int EVERY_TICKS = 10;
+	private static final int MARGIN = 4;
+	private static final int MARKER = @MARKER@;
+	private static final int WHITE = 0xFFFFFFFF;
+
+	private final int[] colors = new int[SIZE * SIZE];
+	private String near = "0";
+	private int ticks;
+
+	@Override
+	public void enable(ModuleContext context) {
+		WorldView world = context.world();
+		ModuleImage map = context.newImage(SIZE, SIZE);
+		context.onServerValue("@MACHINE@", value -> this.near = value);
+		context.onClientTick(client -> {
+			if (this.ticks++ % EVERY_TICKS == 0 && world.inWorld()) {
+				int half = SIZE * STEP / 2;
+				world.readMap((int) Math.floor(world.playerX()) - half, (int) Math.floor(world.playerZ()) - half, SIZE, SIZE, STEP, this.colors);
+				map.setPixels(this.colors);
+				map.upload();
+			}
+		});
+		context.onHud((graphics, delta) -> {
+			map.drawTurned(graphics, MARGIN, MARGIN, SIZE, SIZE, 180 - world.yaw());
+			int middle = MARGIN + SIZE / 2;
+			graphics.fill(middle - 1, middle - 1, middle + 1, middle + 1, MARKER);
+			graphics.text(Minecraft.getInstance().font, context.text("@MACHINE@_near", this.near), MARGIN, MARGIN + SIZE + 2, WHITE, true);
+		});
+	}
+}
+"""
+
+MINIMAP_SERVER = """package gm.feature.@ID@;
+
+import gm.conduit.api.ServerModule;
+import gm.conduit.api.ServerModuleContext;
+import net.minecraft.server.level.ServerPlayer;
+
+/** A starting point: tells each player's map how many others are close, every second. Only what's changed reaches them, so there's no keeping track of what they were told. */
+public final class @CLASS@ implements ServerModule {
+	private static final int EVERY_TICKS = 20;
+	private static final double NEAR = 64;
+
+	private int ticks;
+
+	@Override
+	public void enable(ServerModuleContext context) {
+		context.onServerTick(server -> {
+			if (this.ticks++ % EVERY_TICKS != 0) {
+				return;
+			}
+			for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+				long near = player.level().players().stream().filter(other -> other != player && other.distanceTo(player) < NEAR).count();
+				context.sendClientValue(player, "@MACHINE@", Long.toString(near));
+			}
+		});
+	}
+}
+"""
+
 def new_world_effect(folder, *, name, color="#66ccff", seed=1, node=None, phase=None):
     """A shader drawn at a spot in the world with no client module: rings moving out from the middle in this colour, at assets/shaders/<name>.fsh, listed in world_shaders, and a
     server module under server/ that shows it wherever a player breaks a block. Change the shader and what sets it off. See 'Drawing in the world' in docs/content-types.md for beams, surfaces, how long it lasts and who sees it."""
@@ -1250,5 +1329,35 @@ def new_blueprint(folder, *, name, display, color, layout, seed=1, node=None, ph
     return draft.commit(f"{display}: plans that show a ghost of a layout.", f"Added {display}. {module} It needs a source before it can pass, so add a recipe, and replace its texture with something of your own.")
 
 
+def _client_module_files(draft, source):
+    if draft.id in JAVA_WORDS or draft.id[0].isdigit():
+        raise TemplateError(f"A module's package is gm.feature.<id>, and {draft.id} can't be a Java package name. Give the feature another id.")
+    class_name = _class_name(draft.id).removesuffix("Module") + "Client"
+    draft.file(f"client/src/main/java/gm/feature/{draft.id}/{class_name}.java", source.replace("@ID@", draft.id).replace("@CLASS@", class_name).encode())
+    draft.file("client/src/main/resources/module.properties", f"entry=gm.feature.{draft.id}.{class_name}\n".encode())
+    return class_name
+
+
+def new_minimap(folder, *, name, size=64, step=2, seed=1, node=None, phase=None):
+    """A map of the real land around the player in a corner of their screen, turning as they turn, from a client module, with a server module telling it how many others are close. size is
+    how many pixels across, from 16 to 256, and step how many blocks each pixel covers. name is the value's key, and the text it's shown with is <name>_near. It starts from what every map needs, so
+    make it this world's: what it marks, what the server tells it and what it looks like. See 'What a client module can know' in docs/content-types.md."""
+    draft = _Draft(folder, node, phase)
+    _check_name(name)
+    if not isinstance(size, int) or isinstance(size, bool) or not MINIMAP_SIZES[0] <= size <= MINIMAP_SIZES[1]:
+        raise TemplateError(f"size is how many pixels across a map is, from {MINIMAP_SIZES[0]} to {MINIMAP_SIZES[1]}, not {size!r}.")
+    if not isinstance(step, int) or isinstance(step, bool) or not MINIMAP_STEPS[0] <= step <= MINIMAP_STEPS[1]:
+        raise TemplateError(f"step is how many blocks each pixel covers, from {MINIMAP_STEPS[0]} to {MINIMAP_STEPS[1]}, not {step!r}.")
+    marker = MINIMAP_MARKERS[seed % len(MINIMAP_MARKERS)]
+    client = _client_module_files(draft, MINIMAP_CLIENT.replace("@SIZE@", str(size)).replace("@STEP@", str(step)).replace("@MARKER@", marker).replace("@MACHINE@", name))
+    draft.manifest.setdefault("texts", {})[f"{name}_near"] = "Nearby: %s"
+    draft.added.append(name)
+    if (draft.folder / "server" / "src").exists():
+        module = f"The module that's already in server/ needs its own context.sendClientValue(player, \"{name}\", value)."
+    else:
+        module = f"{_module_files(draft, name, name, MINIMAP_SERVER)} is its module in server/, saying how many others are close."
+    return draft.commit(f"{name}: a map in the corner of the screen.", f"Added a map. {client} draws it, in client/. {module} Left to decide: what it marks, what the server tells it and what it looks like.")
+
+
 TEMPLATES = {"new_ore": new_ore, "new_tool_set": new_tool_set, "new_armor_set": new_armor_set, "new_plant": new_plant,
-             "new_mob": new_mob, "new_machine": new_machine, "new_world_effect": new_world_effect, "new_blueprint": new_blueprint}
+             "new_mob": new_mob, "new_machine": new_machine, "new_world_effect": new_world_effect, "new_blueprint": new_blueprint, "new_minimap": new_minimap}

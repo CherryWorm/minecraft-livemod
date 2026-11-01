@@ -387,6 +387,7 @@ public final class KnowledgeTest implements FabricClientGameTest {
 			case "oldcompanion" -> rejoinWithout(context, "inventory_hooks");
 			case "nopanels" -> rejoinWithout(context, "panel");
 			case "noworld" -> rejoinWithout(context, "world_show");
+			case "novalues" -> rejoinWithout(context, "client_value");
 			case "facing" -> {
 				String facing = context.computeOnClient(client -> client.player.getYRot() + " " + client.player.getXRot());
 				LOGGER.info("[M8] looking {}", facing);

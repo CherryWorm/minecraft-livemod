@@ -126,6 +126,7 @@ TEXT_USED = re.compile(r"\.text\(\s*\"([a-z0-9_/]+)\"|\.textFor\([^\";]*?,\s*\"(
 MOST_RUIN_ACROSS = 128
 MOST_RUIN_BLOCKS = 40000
 BLOCK_WITH_STATE = re.compile(r"[^\[\]\s]+(\[[a-z0-9_]+=[a-z0-9_]+(,[a-z0-9_]+=[a-z0-9_]+)*\])?")
+CLIENT_VALUE_SENT = re.compile(r"\.sendClientValue\(")
 # The vanilla blocks whose block entity takes a loot table. An ender chest looks like one, but it's the player's own.
 LOOT_CONTAINERS = re.compile(r"minecraft:(chest|trapped_chest|barrel|dispenser|dropper|hopper|crafter|([a-z]+_)?shulker_box|([a-z]+_)*copper_chest)")
 # Words that would give content away if they appeared in a path players can see.
@@ -792,6 +793,40 @@ def _check_shader(label, feature, name, guide):
         _fail(f"{label} uses a while or do loop, which could never finish and hang a player's graphics card. Use a for loop with a fixed count.")
 
 
+def _argument_count(text, start):
+    """How many arguments a call has, from just inside its bracket, by the commas that aren't inside anything else."""
+    depth, count, quote, index = 0, 1, None, start
+    while index < len(text):
+        character = text[index]
+        if quote:
+            index += character == "\\"
+            quote = None if character == quote else quote
+        elif character in "\"'":
+            quote = character
+        elif character in "([{":
+            depth += 1
+        elif character in ")]}":
+            if depth == 0:
+                return count
+            depth -= 1
+        elif character == "," and depth == 0:
+            count += 1
+        index += 1
+    return count
+
+
+def check_client_values(features):
+    """Telling a client module something when the feature hasn't got one would go nowhere, with nothing to say why."""
+    for feature_id, feature in features.items():
+        if (feature["dir"] / "client" / "src").exists():
+            continue
+        for path in sorted(feature["dir"].glob("server/src/main/java/**/*.java")):
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if any(_argument_count(text, found.end()) == 3 for found in CLIENT_VALUE_SENT.finditer(text)):
+                _fail(f"{path.name} sends a client value to {feature_id}'s client module, and it hasn't got one. Add one in client/, or name the feature whose it is, "
+                      "with context.sendClientValue(player, \"other_feature\", key, value).")
+
+
 def check_screen_effects(features):
     """A shader runs for every pixel of every frame on friends' computers, and one that never finishes can hang a graphics card."""
     for feature_id, feature in features.items():
@@ -1232,6 +1267,7 @@ def run(features, old_ledger, new_ledger, pool, content):
     check_block_kinds(features)
     check_items(features)
     check_texts(features)
+    check_client_values(features)
     check_screen_effects(features)
     check_panels(features)
     check_machines(features)

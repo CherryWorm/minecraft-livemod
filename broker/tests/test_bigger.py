@@ -326,6 +326,31 @@ class ScreenEffects(unittest.TestCase):
         self.assertEqual(bundles._effect_id("hooks", "hook_warp"), "p" + hashlib.sha256(b"hooks/hook_warp").hexdigest()[:16])
 
 
+class ClientValues(unittest.TestCase):
+    def feature(self, source, client=False):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        root = pathlib.Path(folder.name)
+        (root / "server/src/main/java/gm/feature/f").mkdir(parents=True)
+        (root / "server/src/main/java/gm/feature/f/Module.java").write_text(source, encoding="utf-8")
+        if client:
+            (root / "client/src").mkdir(parents=True)
+        return {"f": {"manifest": {}, "dir": root}}
+
+    def test_a_value_for_a_client_module_the_feature_hasnt_got_is_refused(self):
+        refused(static.check_client_values, "Module.java", "client/", features=self.feature('context.sendClientValue(player, "charge", value);'))
+
+    def test_it_counts_the_arguments_and_not_the_commas(self):
+        refused(static.check_client_values, "Module.java", features=self.feature('context.sendClientValue(player, "a,b", String.format("%d,%d", x, y));'))
+
+    def test_one_for_another_feature_is_fine(self):
+        static.check_client_values(self.feature('context.sendClientValue(player, "other", "charge", String.valueOf(a + b));'))
+        static.check_client_values(self.feature('context.sendClientValue(player, module, key, value);'))
+
+    def test_one_with_a_client_module_is_fine(self):
+        static.check_client_values(self.feature('context.sendClientValue(player, "charge", value);', client=True))
+
+
 class WorldArt(unittest.TestCase):
     GOOD = "#version 330\nvoid main() { }\n"
 

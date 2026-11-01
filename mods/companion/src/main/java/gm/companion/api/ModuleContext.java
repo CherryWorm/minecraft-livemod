@@ -48,6 +48,18 @@ public interface ModuleContext {
 	void screenEffect(String name);
 
 	/**
+	 * Hears a value this feature's server module sends this player with context.sendClientValue, starting with the last one it sent, if
+	 * there's been one since they joined. It's for how things are, not what happened, because a value that's replaced straight away may never arrive.
+	 */
+	void onServerValue(String key, Consumer<String> listener);
+
+	/** What this player's game knows about where they are and the land around them, only to look at. */
+	WorldView world();
+
+	/** A new picture for this module to paint and draw, up to 512 across, and up to 4 of them. */
+	ModuleImage newImage(int width, int height);
+
+	/**
 	 * Draws in the world, once for every frame. Keep it quick, because a module that slows the game down is switched off, and don't
 	 * draw what's far away or behind a wall if you can tell. It all goes by itself when this module unloads.
 	 */

@@ -40,6 +40,8 @@ public final class Companion implements ClientModInitializer {
 		PanelClient.register();
 		EffectClient.register();
 		WorldPayloads.register(HOST);
+		PayloadTypeRegistry.clientboundPlay().register(ModulePayloads.ServerValue.TYPE, ModulePayloads.ServerValue.CODEC);
+		ClientPlayNetworking.registerGlobalReceiver(ModulePayloads.ServerValue.TYPE, (payload, context) -> HOST.hearServerValue(payload));
 		if (FabricLoader.getInstance().isModLoaded("patchouli")) {
 			Guide.register();
 		}
@@ -49,7 +51,8 @@ public final class Companion implements ClientModInitializer {
 		ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> InventoryScreens.attach(HOST, screen));
 		ClientTickEvents.END_CLIENT_TICK.register(HOST::tick);
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
-			HOST.disconnected();
+			// This comes on the network's thread, and unloading frees textures, which only the render thread can do.
+			client.execute(HOST::disconnected);
 			KnownRecipes.forget();
 			PanelClient.forget();
 			EffectClient.forget();

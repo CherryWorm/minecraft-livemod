@@ -4,18 +4,21 @@ and a sheet each with their own shader, one looking at the world behind it, and 
 client module at all: an effect for everyone near, one that only starts for someone arriving later, a ghost layout taken away again, a streak moving
 across the sky, and a shaken camera that doesn't change where a player is facing. Then the same for someone whose companion can't draw these, who
 gets nothing and loses nothing. Start with a blank world from reset-dev-world.sh, and reset it afterwards. With --again it plays through once more
-on what the last run released, which is enough if no Java has changed.
+on what the last run released, which is enough if no Java has changed. With --friends-mods the test client also has every client mod friends have, so that what
+happens here has been tried alongside whatever else is patching the game on their computers.
 
-Usage: python3 -m broker.tests.world_draw_test [--again]
+Usage: python3 -m broker.tests.world_draw_test [--again] [--friends-mods]
 """
 import json
 import math
+import os
 import pathlib
 import re
 import shutil
 import subprocess
 import sys
 import time
+import zipfile
 
 from PIL import Image, ImageDraw
 
@@ -29,9 +32,9 @@ SPOT = (30, 121, 40)
 EYE_HEIGHT = 1.62
 # The game's 70, and a tenth more for someone flying, which a spectator always is.
 FOV = 77
-# Keys are numbered by where they are on the keyboard, starting from A at 4. These two are ones the game itself leaves free: O and P open its friends and social screens.
-KEY_J = 13
-KEY_K = 14
+# Keys are numbered by where they are on the keyboard, starting from A at 4. These two are free in the game and in the mods friends have: O and P open its friends and social screens, and J opens JourneyMap.
+KEY_Y = 28
+KEY_U = 24
 CHANGED = 12
 STREAK_PIXELS = 10
 
@@ -55,6 +58,8 @@ def release():
         [sys.executable, "-m", "broker.promote", "--source", str(SOURCE), "--release-id", f"worlddraw-{int(time.time())}"],
         cwd=runtime.REPO, stdin=subprocess.DEVNULL, capture_output=True, text=True, check=False, timeout=1800,
     )
+    if not (runtime.BROKER / "last.json").exists():
+        print(result.stderr[-3000:], flush=True)
     promoted = json.loads((runtime.BROKER / "last.json").read_text(encoding="utf-8"))
     print(json.dumps({key: promoted.get(key) for key in ("result", "gate", "tier", "stages")}), flush=True)
     if result.returncode != 0:
@@ -98,16 +103,16 @@ def differs(first, second):
 
 
 def changed_share(first, second):
-    # The test's own requests show in chat, along the bottom.
-    above_chat = (0, 0, first.width, first.height * 7 // 10)
-    small = (first.width // 4, first.height * 7 // 40)
+    # The test's own requests show in chat, along the bottom, and JourneyMap's minimap, which never stops changing, is in the top right corner.
+    above_chat = (0, 0, first.width * 8 // 10, first.height * 7 // 10)
+    small = (first.width // 5, first.height * 7 // 40)
     a, b = list(first.crop(above_chat).resize(small).getdata()), list(second.crop(above_chat).resize(small).getdata())
     return sum(1 for one, other in zip(a, b) if differs(one, other)) / len(a)
 
 
 def brightest_place(shot):
     """How many pixels are near white, and how far across the picture they are on average. Stars are all dimmer than this."""
-    above_chat = shot.crop((0, 0, shot.width, shot.height * 7 // 10))
+    above_chat = shot.crop((0, 0, shot.width * 8 // 10, shot.height * 7 // 10))
     places = [index % above_chat.width for index, pixel in enumerate(above_chat.getdata()) if min(pixel) > 200]
     return len(places), sum(places) // len(places) if places else 0
 
@@ -131,7 +136,7 @@ def prepare_scene():
 
 def play_module(client, shots, results):
     before = shots.take("before")
-    client.ask(f"press {KEY_J}")
+    client.ask(f"press {KEY_Y}")
     time.sleep(1)
     drawn = shots.take("module")
     at = shots.at
@@ -162,7 +167,7 @@ def play_module(client, shots, results):
     moved = sum(1 for x in (27, 28, 29) for y in range(0, 25) if differs(at(drawn, x, 124.6 + y * 0.1, 48), at(before, x, 124.6 + y * 0.1, 48)))
     # The rest of the sheet is plain white wall from here on, so most places can't look any different, and a sheet that hid the stripe would change a lot more.
     results.append(report("a shader can look at the world behind it", 0 < moved < 30, f"{moved} of 75 places changed"))
-    client.ask(f"press {KEY_J}")
+    client.ask(f"press {KEY_Y}")
     time.sleep(1)
     results.append(report("and it all goes when the module stops drawing it", changed_share(shots.take("module_off"), before) < 0.01))
     return before
@@ -234,7 +239,7 @@ def play_server(client, shots, results, before):
     results.append(report("and where they're really facing doesn't change", re.findall(r"\[M8\] looking (.*)", client.text())[-1] == facing))
     time.sleep(7)
     results.append(report("and it stops", changed_share(shots.take("server_shake_done"), before) < 0.01))
-    client.ask(f"press {KEY_K}")
+    client.ask(f"press {KEY_U}")
     results.append(report("a client module can shake it too", changed_share(shots.take("module_shake"), before) > 0.02))
     time.sleep(7)
 
@@ -256,6 +261,25 @@ def play_old_companion(client, shots, results):
     results.append(report("and nothing went wrong on the server", "worlddraw" not in text or "threw" not in text))
 
 
+def add_friends_mods(folder):
+    """Returns what the game should say it's loaded, because a test that didn't really have them would pass just the same."""
+    shutil.rmtree(folder, ignore_errors=True)
+    folder.mkdir(parents=True)
+    subprocess.run(["bash", "infra/fetch-mods.sh", "infra/mods.lock", "client", str(folder)], cwd=runtime.REPO, stdin=subprocess.DEVNULL, capture_output=True, text=True, check=True, timeout=600)
+    # A test client asks for these two its own way, and a mod can't load twice.
+    os.environ["CLIENT_TEST_JEI"] = "1"
+    os.environ["CLIENT_TEST_PATCHOULI"] = "1"
+    os.environ["CLIENT_TEST_FRIENDS_MODS"] = "1"
+    for path in folder.glob("jei-*.jar"):
+        path.unlink()
+    names = ["jei", "patchouli"]
+    for path in sorted(folder.glob("*.jar")):
+        with zipfile.ZipFile(path) as jar:
+            names.append(json.loads(jar.read("fabric.mod.json"))["id"])
+    print("with", names, flush=True)
+    return names
+
+
 def main():
     if "--again" in sys.argv:
         promoted = json.loads((runtime.BROKER / "passed_gates.json").read_text(encoding="utf-8"))
@@ -271,16 +295,20 @@ def main():
     mods = runtime.WORK / "mods"
     shutil.rmtree(mods / "companion" / "build" / "run" / "clientGameTest" / "config" / "companion", ignore_errors=True)
     folder = mods / "companion" / "build" / "run" / "clientGameTest" / "screenshots"
+    wanted_mods = add_friends_mods(mods / "friends-mods") if "--friends-mods" in sys.argv else []
     client = Client(mods, runtime.REPORTS / "worlddraw-client.log", {"COMPANION_TEST_KEY": sign.public_key_text()})
     try:
         client.wait(r"\[M8\] joined as [A-Za-z0-9_]+$", 420)
         time.sleep(5)
         shots = Shots(client, folder)
+        if wanted_mods:
+            missing = [name for name in wanted_mods if not re.search(rf"^\s+- {re.escape(name)} ", client.text(), re.MULTILINE)]
+            results.append(report("it's really alongside every mod friends have", not missing, f"{len(wanted_mods)} wanted, missing {missing}"))
         prepare_scene()
         before = play_module(client, shots, results)
         play_server(client, shots, results, before)
         play_old_companion(client, shots, results)
-        results.append(report("nothing went wrong in the client", "Stopped drawing in the world" not in client.text() and "Game crashed" not in client.text()))
+        results.append(report("nothing went wrong in the client", "Stopped drawing in the world" not in client.text() and "wrong thread" not in client.text() and "Game crashed" not in client.text()))
     finally:
         client.stop()
     out = runtime.REPORTS / "worlddraw"

@@ -406,6 +406,7 @@ What each behaviour can do is in `/reference/conduit-api/`, and all of it is opt
 - `context.isNatural(level, pos)` says whether a block is as the world made it, which is how to leave anyone's building alone. Anything changed since doesn't count, whoever or whatever changed it, so grass spreading isn't natural either.
 - `context.examine(player, state)` or `context.examine(player, entity)` examines something for a player, so a tool can teach what any feature teaches for looking closely at it.
 - `context.showEffect(level, effect)` draws beams, surfaces, shaders or a ghost of a layout at a place in the world, and `context.shakeCamera(player, strength, seconds)` shakes a player's view, with no client module. See 'Drawing in the world' in `docs/content-types.md`.
+- `context.sendClientValue(player, key, value)` tells this feature's client module on one player's computer how something is, which it hears with `context.onServerValue(key, listener)`. See "What a client module can know" in `docs/content-types.md`.
 
 ### Menus and books
 
@@ -671,7 +672,7 @@ Put your own names on anything you add, as above with `quick_boats$`, because ot
 
 ## Client modules
 
-Java that runs on players' game clients: HUDs, effects, drawing in the world, and helpers on inventory screens. See `/reference/companion-api/`. These run on friends' computers, so they may only use the companion API and approved Minecraft classes. No files, network, processes, reflection or class loading: the checks refuse those. Prefer doing things on the server. Use a client module only for what truly needs one. A server module can draw in the world itself, as 'Drawing in the world' in `docs/content-types.md` shows.
+Java that runs on players' game clients: HUDs, maps and gauges, effects, drawing in the world, and helpers on inventory screens. See `/reference/companion-api/`. These run on friends' computers, so they may only use the companion API and approved Minecraft classes. No files, network, processes, reflection or class loading: the checks refuse those. Prefer doing things on the server. Use a client module only for what truly needs one. A server module can draw in the world itself, as 'Drawing in the world' in `docs/content-types.md` shows.
 
 ### Inventory screens and keys
 

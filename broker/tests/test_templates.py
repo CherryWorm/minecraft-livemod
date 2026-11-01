@@ -224,6 +224,7 @@ class TheModule(unittest.TestCase):
             "new_machine": "name display casing accent recipe_ingredients automation seed",
             "new_world_effect": "name color seed",
             "new_blueprint": "name display color layout seed",
+            "new_minimap": "name size step seed",
         }
         self.assertEqual(set(templates.TEMPLATES), set(wanted))
         for name, function in templates.TEMPLATES.items():
@@ -779,6 +780,37 @@ class DrawingInTheWorld(Case):
         self.assertFalse((self.at("works") / "feature.json").exists())
 
 
+class Minimaps(Case):
+    def test_a_map_has_a_client_module_and_a_server_module_to_tell_it_things(self):
+        result = templates.new_minimap(self.at("atlas"), name="around", size=96, step=4)
+        client = (self.at("atlas") / "client/src/main/java/gm/feature/atlas/AtlasClient.java").read_text(encoding="utf-8")
+        server = (self.at("atlas") / "server/src/main/java/gm/feature/atlas/AtlasModule.java").read_text(encoding="utf-8")
+        self.assertIn("SIZE = 96", client)
+        self.assertIn("STEP = 4", client)
+        self.assertIn('context.onServerValue("around"', client)
+        self.assertIn('context.sendClientValue(player, "around"', server)
+        self.assertEqual((self.at("atlas") / "client/src/main/resources/module.properties").read_text(encoding="utf-8"), "entry=gm.feature.atlas.AtlasClient\n")
+        self.assertNotIn("@", client.replace("@Override", "") + server.replace("@Override", ""))
+        self.assertEqual(self.manifest("atlas")["texts"], {"around_near": "Nearby: %s"})
+        self.assertIn("AtlasClient", result["summary"])
+        features = {"atlas": {"manifest": self.manifest("atlas"), "dir": self.at("atlas")}}
+        static.check_texts(features)
+        static.check_client_values(features)
+
+    def test_a_module_thats_already_there_is_left_alone(self):
+        templates.new_world_effect(self.at("atlas"), name="shimmer")
+        before = (self.at("atlas") / "server/src/main/java/gm/feature/atlas/AtlasModule.java").read_bytes()
+        result = templates.new_minimap(self.at("atlas"), name="around")
+        self.assertEqual((self.at("atlas") / "server/src/main/java/gm/feature/atlas/AtlasModule.java").read_bytes(), before)
+        self.assertIn('context.sendClientValue(player, \"around\", value)', result["summary"])
+
+    def test_a_size_it_cant_draw_is_refused(self):
+        for arguments in ({"size": 8}, {"size": 512}, {"size": "big"}, {"size": True}, {"step": 0}, {"step": 32}, {"step": 1.5}):
+            with self.assertRaises(TemplateError):
+                templates.new_minimap(self.at("atlas"), name="around", **arguments)
+        self.assertFalse((self.at("atlas") / "feature.json").exists())
+
+
 class Machines(Case):
     def test_what_it_makes(self):
         result = new_machine(self.at("rune_forge"), name="crucible", display="Rune Crucible", casing="#70707a", accent="#e88e36",
@@ -1002,6 +1034,7 @@ class Refusals(Case):
         "new_machine": lambda folder: new_machine(folder, name="forge", display="Forge", casing="#70707a", accent="#e88e36", recipe_ingredients=["minecraft:furnace"]),
         "new_world_effect": lambda folder: templates.new_world_effect(folder, name="shimmer"),
         "new_blueprint": lambda folder: templates.new_blueprint(folder, name="kiln_plans", display="Kiln Plans", color="#4466cc", layout=[{"x": 0, "y": 1, "z": 0, "block": "minecraft:hopper"}]),
+        "new_minimap": lambda folder: templates.new_minimap(folder, name="around"),
     }
 
     def test_every_template_covers_this_table(self):
@@ -1212,6 +1245,7 @@ class NodeAndPhase(Case):
             "new_machine": {"name": "a", "display": "A", "casing": "#70707a", "accent": "#e88e36"},
             "new_world_effect": {"name": "a"},
             "new_blueprint": {"name": "a", "display": "A", "color": "#4466cc", "layout": [{"x": 0, "y": 1, "z": 0, "block": "minecraft:hopper"}]},
+            "new_minimap": {"name": "a"},
         }
         self.assertEqual(set(calls), set(templates.TEMPLATES))
         for name, arguments in calls.items():

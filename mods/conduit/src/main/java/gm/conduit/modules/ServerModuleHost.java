@@ -384,6 +384,7 @@ public final class ServerModuleHost {
 		guard(module, module.module::disable);
 		this.states.save(moduleId);
 		WorldEffects.clear(moduleId, "");
+		ClientValues.forget(moduleId);
 		this.ownerBySlot.entrySet().removeIf(entry -> {
 			if (entry.getValue() == module) {
 				this.blocks.remove(entry.getKey());
@@ -862,6 +863,16 @@ public final class ServerModuleHost {
 		@Override
 		public int clientBlockId(BlockState state) {
 			return WorldEffects.clientBlockId(state);
+		}
+
+		@Override
+		public void sendClientValue(ServerPlayer player, String key, String value) {
+			ClientValues.send(this.moduleId, player, key, value);
+		}
+
+		@Override
+		public void sendClientValue(ServerPlayer player, String module, String key, String value) {
+			ClientValues.send(module, player, key, value);
 		}
 
 		@Override

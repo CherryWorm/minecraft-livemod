@@ -247,4 +247,14 @@ public interface ServerModuleContext {
 	 * Returns how many cells changed, or -1 if some of it isn't loaded, in which case nothing changed.
 	 */
 	int setBiome(ServerLevel level, BlockPos from, BlockPos to, String biome);
+
+	/**
+	 * Tells this feature's client module on one player's computer something, for it to hear with context.onServerValue, as text of up to
+	 * 8192 characters. Say how things are rather than what happened: if a key changes twice in a tick only the last gets there, and saying what
+	 * it already is sends nothing, so calling this every tick is fine. Someone with no companion, or one too old for this, hears nothing.
+	 */
+	void sendClientValue(ServerPlayer player, String key, String value);
+
+	/** The same, for another feature's client module. */
+	void sendClientValue(ServerPlayer player, String module, String key, String value);
 }

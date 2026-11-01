@@ -25,7 +25,8 @@ abstract class CameraMixin {
 	@Shadow
 	protected abstract void setRotation(float yRot, float xRot);
 
-	@Inject(method = "update", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/Camera;alignWithEntity(F)V", shift = At.Shift.AFTER))
+	// Not being able to shake is no reason for the game not to start, which is what a required injection that fails would do.
+	@Inject(method = "update", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/Camera;alignWithEntity(F)V", shift = At.Shift.AFTER), require = 0)
 	private void companion$shake(DeltaTracker deltaTracker, CallbackInfo info) {
 		Companion.host().world().shakeOffset(this.companion$shake);
 		if (this.companion$shake[0] != 0 || this.companion$shake[1] != 0) {

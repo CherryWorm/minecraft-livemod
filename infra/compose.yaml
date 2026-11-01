@@ -230,6 +230,7 @@ services:
       CLIENT_TEST: ${CLIENT_TEST:-}
       CLIENT_TEST_JEI: ${CLIENT_TEST_JEI:-}
       CLIENT_TEST_PATCHOULI: ${CLIENT_TEST_PATCHOULI:-}
+      CLIENT_TEST_FRIENDS_MODS: ${CLIENT_TEST_FRIENDS_MODS:-}
       S4_CYCLES: ${S4_CYCLES:-100}
       LIVINGMOD_TEST_PASSWORD: ${LIVINGMOD_TEST_PASSWORD:-}
       # Only ever set by tests. A friend's game has neither, and no server can set them.

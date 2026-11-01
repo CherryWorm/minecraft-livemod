@@ -1,0 +1,8 @@
+{
+  "id": "livedata",
+  "phase": 1,
+  "summary": "Test fixture for live data: a server module sending values to a client module, which draws them, the player's place and a real map of the land.",
+  "blocks": {
+    "ld_block": {"family": "stone", "display": "Live Data Block", "texture": "ld_block", "tool": "pickaxe", "retired": true}
+  }
+}

@@ -6,7 +6,9 @@ import gm.companion.api.InventoryHooks;
 import gm.companion.api.InventoryView;
 import gm.companion.api.KeyInput;
 import gm.companion.api.ModuleContext;
+import gm.companion.api.ModuleImage;
 import gm.companion.api.WorldCanvas;
+import gm.companion.api.WorldView;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext;
 import net.minecraft.client.DeltaTracker;
@@ -61,6 +63,9 @@ public final class ModuleHost {
 	private final ModuleVerifier verifier = new ModuleVerifier();
 	private final boolean safeMode = Files.exists(RUNNING_MARKER);
 	private final WorldDrawing world = new WorldDrawing();
+	private final WorldView worldView = new ClientWorldView();
+	// The last of each value the server sent, by module, so that a module starting later still hears how things are. They last as long as the connection.
+	private final Map<String, Map<String, String>> serverValues = new HashMap<>();
 	private boolean turnedOff = Files.exists(TURNED_OFF);
 	private ClientLevel lastLevel;
 	private int completedUnloads;
@@ -253,6 +258,14 @@ public final class ModuleHost {
 		}
 	}
 
+	void hearServerValue(ModulePayloads.ServerValue value) {
+		this.serverValues.computeIfAbsent(value.moduleId(), id -> new HashMap<>()).put(value.key(), value.value());
+		LoadedModule module = this.modules.get(value.moduleId());
+		if (module != null) {
+			module.hearValue(value.key(), value.value());
+		}
+	}
+
 	void shakeFromServer(float strength, float seconds) {
 		if (!this.turnedOff && !this.safeMode) {
 			this.world.shake(strength, seconds);
@@ -278,6 +291,7 @@ public final class ModuleHost {
 	void disconnected() {
 		unloadAll();
 		this.world.forget();
+		this.serverValues.clear();
 		this.lastLevel = null;
 		markRunning(false);
 	}
@@ -311,6 +325,8 @@ public final class ModuleHost {
 
 	private static final class LoadedModule implements ModuleContext {
 		private static final int EFFECT_ID_LENGTH = 16;
+		private static final int MOST_IMAGE_SIZE = 512;
+		private static final int MOST_IMAGES = 4;
 
 		private final String moduleId;
 		private final int generation;
@@ -319,6 +335,8 @@ public final class ModuleHost {
 		private final List<InventoryHooks> inventoryHooks = new ArrayList<>();
 		private final List<Consumer<KeyInput>> keyHooks = new ArrayList<>();
 		private final List<Consumer<WorldCanvas>> worldHooks = new ArrayList<>();
+		private final Map<String, List<Consumer<String>>> valueListeners = new HashMap<>();
+		private final List<PaintedImage> images = new ArrayList<>();
 		private ClientModule module;
 		private Identifier screenEffect;
 		private int failures;
@@ -379,6 +397,39 @@ public final class ModuleHost {
 		@Override
 		public MutableComponent text(String name, Object... args) {
 			return Component.translatable("text.gm.t" + hashed(name.contains("/") ? name : this.moduleId + "/" + name), args);
+		}
+
+		@Override
+		public void onServerValue(String key, Consumer<String> listener) {
+			this.valueListeners.computeIfAbsent(key, name -> new ArrayList<>()).add(listener);
+			String value = Companion.host().serverValues.getOrDefault(this.moduleId, Map.of()).get(key);
+			if (value != null) {
+				guarded(() -> listener.accept(value));
+			}
+		}
+
+		void hearValue(String key, String value) {
+			for (Consumer<String> listener : this.valueListeners.getOrDefault(key, List.of())) {
+				guarded(() -> listener.accept(value));
+			}
+		}
+
+		@Override
+		public WorldView world() {
+			return Companion.host().worldView;
+		}
+
+		@Override
+		public ModuleImage newImage(int width, int height) {
+			if (width < 1 || height < 1 || width > MOST_IMAGE_SIZE || height > MOST_IMAGE_SIZE) {
+				throw new IllegalArgumentException("An image can be at most " + MOST_IMAGE_SIZE + " across, not " + width + " by " + height);
+			}
+			if (this.images.size() >= MOST_IMAGES) {
+				throw new IllegalStateException("A module can have at most " + MOST_IMAGES + " images");
+			}
+			PaintedImage image = new PaintedImage(this.moduleId, this.images.size(), width, height);
+			this.images.add(image);
+			return image;
 		}
 
 		@Override
@@ -477,6 +528,9 @@ public final class ModuleHost {
 			this.inventoryHooks.clear();
 			this.keyHooks.clear();
 			this.worldHooks.clear();
+			this.valueListeners.clear();
+			this.images.forEach(PaintedImage::close);
+			this.images.clear();
 			this.screenEffect = null;
 			this.module = null;
 		}
