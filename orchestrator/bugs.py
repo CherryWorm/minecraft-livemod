@@ -31,10 +31,6 @@ ENGINE = "engine"
 VERDICTS = (CONFIRMED, ENGINE, NOT_A_BUG, CANT_CONFIRM)
 LABEL = "§c[Bug]§r "
 LONGEST_REPORT = 1000
-# Each report costs real usage and goes ahead of everything, so one person can't spend the whole plan by repeating themselves.
-MOST_OPEN_PER_PLAYER = 3
-MOST_A_DAY_PER_PLAYER = 10
-DAY_SECONDS = 24 * 60 * 60
 TRIES = 2
 MOST_TURNS = 30
 MOST_USAGE = 5.0

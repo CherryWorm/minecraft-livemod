@@ -108,23 +108,11 @@ class Reporting(Base):
         self.assertEqual(self.desk.reports, {})
         self.ask.assert_not_called()
 
-    async def test_one_person_cant_spend_the_plan_by_repeating_themselves(self):
-        self.agent.workshop.build = mock.AsyncMock(side_effect=lambda *args, **kwargs: asyncio.sleep(3600))
-        self.ask.return_value = finding()
-        for _ in range(bugs.MOST_OPEN_PER_PLAYER + 2):
-            await self.desk.report(PLAYER, "again")
-        self.assertEqual(len(self.desk.reports), bugs.MOST_OPEN_PER_PLAYER)
-        self.assertIn("haven't read", self.agent.tell.await_args.args[1])
-        await self.desk.report("Someone", "something else")
-        self.assertEqual(len(self.desk.reports), bugs.MOST_OPEN_PER_PLAYER + 1)
-        for task in self.desk.tasks:
-            task.cancel()
-
-    async def test_there_is_a_most_for_a_day_as_well(self):
+    async def test_nobody_is_turned_away_however_many_they_send(self):
         self.ask.return_value = finding(bugs.NOT_A_BUG)
-        for _ in range(bugs.MOST_A_DAY_PER_PLAYER + 1):
+        for _ in range(30):
             await self.report()
-        self.assertEqual(len(self.desk.reports), bugs.MOST_A_DAY_PER_PLAYER)
+        self.assertEqual(len(self.desk.reports), 30)
 
 
 class Investigating(Base):
