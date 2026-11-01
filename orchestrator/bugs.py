@@ -172,7 +172,7 @@ class BugDesk:
         others = [{"number": int(key), "report": other["text"], "status": other["status"], "feature": other.get("feature")}
                   for key, other in self.reports.items() if other is not entry and other["status"] in STILL_OPEN]
         return (f"A player called {entry['player']} has reported this:\n{llm.untrusted('player_report', entry['text'])}\n\n"
-                f"Other bugs being worked on right now:\n{llm.untrusted('open_bugs', json.dumps(others))}\n\nFind out what's really going on.")
+                f"Other bugs being worked on right now:\n{llm.untrusted('open_bugs', json.dumps(others))}\n\nFind out what's really going on." + voice.language_note(self.agent.language_of(entry["player"])))
 
     async def _ask(self, entry):
         for _ in range(TRIES):

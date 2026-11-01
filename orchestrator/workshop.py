@@ -15,7 +15,7 @@ import uuid
 
 from claude_agent_sdk import AgentDefinition, create_sdk_mcp_server, tool
 
-from orchestrator import feedback, lanes, llm, others, preview, research, templates, tuning, world_index
+from orchestrator import feedback, lanes, llm, others, preview, research, templates, translation, tuning, wording, world_index
 
 REPO = pathlib.Path("/workspace/repo")
 PROGRESSION = "bible/progression.json"
@@ -330,10 +330,11 @@ def _text(text):
     return {"content": [{"type": "text", "text": text}]}
 
 
-def _verdict(answer, passed):
+def _verdict(answer, passed, feature_id=None):
     if answer.get("result") not in passed:
         return f"Failed at {answer.get('gate')}: {answer.get('reason')}"
-    notes = answer.get("advice") or []
+    # Older modules have words in their code too, and those aren't this builder's to change.
+    notes = [note for note in answer.get("advice") or [] if wording.TEXT_IN_CODE not in note or note.startswith(f"{feature_id}'s ")]
     notes = [*notes, *(f"{feature_id}'s mixins are left out of every release until they change, because {why}."
                        for feature_id, why in (answer.get("withheld_mixins") or {}).items())]
     return "All checks passed." + ("\n\nWorth another look, though these won't stop it:\n- " + "\n- ".join(notes) if notes else "")
@@ -364,11 +365,11 @@ def _tools_for(feature_id, tree, node, ask=None):
     @tool("lint_feature", "Instantly checks this feature against the release rules, with no compile, and gives advice. Use it as often as you like.", {})
     async def lint_feature(args):
         print(f"{feature_id}: used lint_feature", flush=True)
-        return _text(_verdict(await checked_against_main("lint", f"{feature_id}: work in progress", tree, feature_id, node, ask=ask), ("passed_lint",)))
+        return _text(_verdict(await checked_against_main("lint", f"{feature_id}: work in progress", tree, feature_id, node, ask=ask), ("passed_lint",), feature_id))
 
     @tool("check_feature", "Compiles this feature and runs the static checks. Takes about 10 seconds.", {})
     async def check_feature(args):
-        return _text(_verdict(await checked_against_main("check", f"{feature_id}: work in progress", tree, feature_id, node, ask=ask), ("passed_gates", "nothing_to_release")))
+        return _text(_verdict(await checked_against_main("check", f"{feature_id}: work in progress", tree, feature_id, node, ask=ask), ("passed_gates", "nothing_to_release"), feature_id))
 
     @tool("preview_feature", "Draws this feature's art beside vanilla's in about a second, and says where the picture is, so read it with Read.", {})
     async def preview_feature(args):
@@ -437,6 +438,7 @@ class Workshop:
         self.ready = []  # What's passed everything and is waiting for the next release.
         self.releasing = None
         self.art_made = json.loads(ART_MADE.read_text(encoding="utf-8")) if ART_MADE.exists() else {}  # What Opus made, by feature and file.
+        self.translator = translation.Translator(governor, REPO, commit_all)
 
     # Releases -----------------------------------------------------------------------------------------------
 
@@ -750,6 +752,10 @@ class Workshop:
                 print(f"{feature_id}: pausing until Claude can finish its art", flush=True)
                 return None
             timings[f"art_{attempt}"] = round(time.monotonic() - began - timings[f"build_{attempt}"], 1)
+            # Goes to main, so the commit just below picks it up, and it goes out with this feature.
+            began = time.monotonic()
+            await self.translator.feature(tree / "mods/genesis/features" / feature_id)
+            timings[f"translate_{attempt}"] = round(time.monotonic() - began, 1)
 
             began = time.monotonic()
             gates = await checked_against_main("gates", f"{feature_id}: attempt {attempt}", tree, feature_id, node, release_id=f"{fix or feature_id}-{attempt}", hurry=small, first=bool(fix))

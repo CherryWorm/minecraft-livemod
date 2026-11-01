@@ -6,6 +6,8 @@ A request with no status hasn't been decided yet. After that it's building, late
 import json
 import re
 
+from orchestrator import wording
+
 BUILDING = "building"
 LATER = "later"
 DONE = "done"
@@ -46,15 +48,19 @@ def without_noted(text):
     return _without_sentences(NOTED, text)
 
 
-def describe(feature, graph):
+def describe(feature, graph, language=None):
     """What players get to read about one piece of work. A bug fix or a small convenience is named, because there's
-    nothing to spoil. Anything else is only ever its stage and its category, like "early game mob"."""
+    nothing to spoil. Anything else is only ever its stage and its category, like "early game mob". These go by a fixed
+    list, so they can be said in someone's own language with no model, where anything a person or a model wrote stays as it was."""
+    say = wording.plan_words(language)
     if feature.get("small"):
-        return feature.get("title") or "a small fix"
+        return feature.get("title") or say("a small fix")
     node = (graph or {}).get("nodes", {}).get(feature.get("node"))
     stage = STAGE_WORDS.get(node["stage"]) if node else None
     category = feature.get("category") if feature.get("category") in CATEGORIES else None
-    return " ".join(word for word in (stage, category) if word) or "something new"
+    if stage and category and say(stage) != stage:
+        return f"{say(category)} ({say(stage)})"
+    return " ".join(say(word) for word in (stage, category) if word) or say("something new")
 
 
 def about(feature, graph):

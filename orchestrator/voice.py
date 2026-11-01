@@ -11,7 +11,7 @@ import time
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
-from orchestrator import feedback, llm, world_index
+from orchestrator import feedback, llm, wording, world_index
 from orchestrator.governor import Governor
 
 BIBLE = pathlib.Path("/workspace/repo/bible")
@@ -106,6 +106,19 @@ def honest_reply(result):
     return result.get("reply") if recorded else feedback.without_noted(result.get("reply"))
 
 
+def language_note(code, names_too=True):
+    """Tells a voice what language someone plays in, because the first thing it says to them comes before they've written anything,
+    and it can't tell otherwise. Their game shows this world's things by their own names there, so that's what a voice has to call them."""
+    language = wording.family(code)
+    if language is None:
+        return ""
+    name = wording.LANGUAGES[language]
+    known = wording.known_names(BIBLE.parent, FEATURES, language) if names_too else {}
+    names = "; ".join(f"{english} is {own}" for english, own in known.items())
+    return (f"\n\nThis player's game is set to {name}. Write to them in {name}, unless they've written to you in another language."
+            + (f" In {name} their game calls things by these names, so use them, whatever the guide calls them: {names}" if names else ""))
+
+
 def guard(text, briefs, limit=256):
     """Blocks a message that repeats a distinctive phrase from someone's private interview answers, and removes any sentence claiming someone outside the game was told."""
     text = feedback.without_relays(text)
@@ -138,6 +151,7 @@ class Interview:
         self.transcript = list((saved or {}).get("transcript", []))
         self.finished = False
         self.brief = None
+        self.language = None
 
     def saved(self):
         return {"transcript": self.transcript}
@@ -160,7 +174,8 @@ class Interview:
         return await self._ask("This is the last exchange. Finish now." if turns >= self.LAST_TURN else "Carry on the conversation.")
 
     async def _ask(self, instruction):
-        result = await llm.ask(self.governor, "interviewer", "\n".join([*conversation(self.transcript), instruction]), schema=INTERVIEW_SCHEMA, max_turns=3)
+        result = await llm.ask(self.governor, "interviewer", "\n".join([*conversation(self.transcript), instruction]), system=llm.prompt_text("interviewer") + language_note(self.language, names_too=False),
+                               schema=INTERVIEW_SCHEMA, max_turns=3)
         data = result.structured if isinstance(result.structured, dict) else None
         if result.is_error or data is None:
             return None
@@ -211,23 +226,32 @@ def looking_things_up():
     return {"allowed_tools": [LOOK_UP], "mcp_servers": {"guide": create_sdk_mcp_server("guide", tools=[look_up])}, "max_turns": 6}
 
 
-async def triage(governor, messages):
+def names_for_chat(languages):
+    """A public reply goes in whatever language someone wrote in, so all this can do is say what the names are in the languages they might be using."""
+    found = {}
+    for language in {wording.family(code) for code in languages} - {None}:
+        found.update({wording.LANGUAGES[language]: wording.known_names(BIBLE.parent, FEATURES, language)})
+    return "".join(f"\n\nIf you're writing in {name}, the game calls things by these names there, so use them: " + "; ".join(f"{english} is {own}" for english, own in known.items())
+                   for name, known in found.items() if known)
+
+
+async def triage(governor, messages, languages=()):
     body = "\n".join(llm.untrusted("player_message", f"{item['player']}: {item['text']}") for item in messages)
-    result = await llm.ask(governor, "triage", body, system=llm.prompt_text("triage") + persona() + guide(), schema=TRIAGE_SCHEMA, **looking_things_up())
+    result = await llm.ask(governor, "triage", body, system=llm.prompt_text("triage") + persona() + guide() + names_for_chat(languages), schema=TRIAGE_SCHEMA, **looking_things_up())
     return result.structured if isinstance(result.structured, dict) and not result.is_error else {"intents": [], "reply": None}
 
 
-async def private_reply(governor, chat, in_character, seen=None):
+async def private_reply(governor, chat, in_character, seen=None, language=None):
     """Answers someone's /dm once their interview is over. Returns None if the call failed. The chat holds only that one player's messages."""
-    system = llm.prompt_text("dm") + (persona() if in_character else NO_CHARACTER_YET) + guide()
+    system = llm.prompt_text("dm") + (persona() if in_character else NO_CHARACTER_YET) + guide() + language_note(language)
     prompt = "\n".join(conversation(chat)) + "\n\nWhat this player has so far:\n" + llm.untrusted("progress", json.dumps(seen or {}))
     result = await llm.ask(governor, "dm", prompt, system=system, schema=PRIVATE_SCHEMA, **looking_things_up())
     return result.structured if isinstance(result.structured, dict) and not result.is_error else None
 
 
-async def request_news(governor, items, briefs):
+async def request_news(governor, items, briefs, language=None):
     """One message to one player about what became of what they asked for. Returns None if it can't be said."""
-    result = await llm.ask(governor, "news", llm.untrusted("news", json.dumps(items)), system=llm.prompt_text("news") + persona() + guide(),
+    result = await llm.ask(governor, "news", llm.untrusted("news", json.dumps(items)), system=llm.prompt_text("news") + persona() + guide() + language_note(language),
                            schema=NEWS_SCHEMA, **looking_things_up())
     data = result.structured if isinstance(result.structured, dict) and not result.is_error else {}
     return guard(data.get("reply"), briefs, HELP_LIMIT)
@@ -337,13 +361,15 @@ class Watcher:
             return False
         return now - self.last_spoke.get(player, 0) >= self.PER_PLAYER_COOLDOWN
 
-    async def consider(self, event, briefs):
-        """Returns (text, audience) if the character should speak, otherwise None."""
+    async def consider(self, event, briefs, language=None):
+        """Returns (text, audience) if the character should speak, otherwise None. Everyone reads what's broadcast, so that stays in English, and only a whisper can be in someone's own language."""
         reason = self.trigger_for(event)
         player = event.get("player", "")
         if reason is None or not self.allowed(player):
             return None
-        result = await llm.ask(self.governor, "watcher", llm.untrusted("event", reason), system=llm.prompt_text("watcher") + persona() + guide(),
+        note = language_note(language)
+        system = llm.prompt_text("watcher") + persona() + guide() + (note + " That's for a whisper. If you broadcast, everyone reads it, so write that in English." if note else "")
+        result = await llm.ask(self.governor, "watcher", llm.untrusted("event", reason), system=system,
                                schema=WATCHER_SCHEMA, **looking_things_up())
         data = result.structured if isinstance(result.structured, dict) and not result.is_error else None
         if not data or not data.get("say"):

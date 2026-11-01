@@ -8,7 +8,7 @@ import pathlib
 import re
 import time
 
-from orchestrator import bugs, feedback, icon, lanes, llm, minds, progression, research, voice, worker_hub, workshop, world_index
+from orchestrator import bugs, feedback, icon, lanes, llm, minds, progression, research, voice, wording, worker_hub, workshop, world_index
 from orchestrator.bridge import Bridge
 from orchestrator.governor import CONTROL, Governor
 
@@ -36,6 +36,7 @@ FEEDBACK_PLAN_SECONDS = 10 * 60  # How long new requests can wait for the direct
 REQUEST_FEATURES_PER_PLAN = 2  # However many people ask, most of what gets built comes from the world's own plan.
 PLAN_SHOWN = 12
 BOARD_SECONDS = 20
+TRANSLATE_SECONDS = 10 * 60  # A translation that's missing only matters at the next release, so nothing's gained by looking more often.
 DECISIONS_REMEMBERED = 150
 STOP_AFTER_RELEASES = os.environ.get("AGENT_STOP_AFTER_RELEASES")  # Lets a test spend a known amount.
 
@@ -107,7 +108,7 @@ class Agent:
         self.direction_problems = []
         self.state = {"direction_chosen": False, "briefs": {}, "released": [], "border_open": False,
                       "intents": {}, "intent_count": 0, "interviews": {}, "private_chats": {}, "requests": {}, "sorted_up_to": 0, "director_saw": 0,
-                      "notices": {}, "queue": [], "in_flight": {}}
+                      "notices": {}, "queue": [], "in_flight": {}, "languages": {}}
         if OPENING.exists():
             self.state.update(json.loads(OPENING.read_text(encoding="utf-8")))
         self.interviews = {player: voice.Interview(self.governor, player, saved) for player, saved in self.state["interviews"].items()}
@@ -138,10 +139,14 @@ class Agent:
 
     # Interviews -----------------------------------------------------------------------------------
 
+    def language_of(self, player):
+        """What their game's set to, as of the last thing heard from them. It's kept, because some of what's said to someone waits until they're back."""
+        return self.state.get("languages", {}).get(player)
+
     async def tell(self, player, text, reply_click=False):
         """They may have left while a slow reply was on its way. Anything said in an interview is saved for when they're back."""
         try:
-            await self.bridge.whisper(player, text, reply_click)
+            await self.bridge.whisper(player, wording.said(self.language_of(player), text), reply_click)
         except RuntimeError as error:
             print(f"couldn't tell {player} something: {error}", flush=True)
 
@@ -149,10 +154,11 @@ class Agent:
         await self.tell(player, HOW_TO_ANSWER, reply_click=True)
         opening = (await self.bridge.call("status")).get("opening")
         if opening:
-            await self.tell(player, OPENING_NOTE.format(radius=opening // 2))
+            await self.tell(player, wording.said(self.language_of(player), OPENING_NOTE).format(radius=opening // 2))
 
     async def start_interview(self, player):
         interview = voice.Interview(self.governor, player)
+        interview.language = self.language_of(player)
         self.interviews[player] = interview
         reply = await interview.begin()
         self.save()
@@ -180,7 +186,7 @@ class Agent:
         del chat[:-CHAT_MEMORY]
         in_character = self.state["direction_chosen"]
         try:
-            result = await voice.private_reply(self.governor, chat, in_character, await self.what_they_have(player))
+            result = await voice.private_reply(self.governor, chat, in_character, await self.what_they_have(player), self.language_of(player))
         except Exception as error:  # noqa: BLE001 - they're waiting for an answer, so even a failed call needs one
             print(f"a private reply failed: {error}", flush=True)
             result = None
@@ -198,7 +204,8 @@ class Agent:
 
     async def what_they_have(self, player):
         """So advice can be about their next step. An answer without the game's part still beats no answer."""
-        known = {"what_they_asked_for": self.requests.of_player(player), "bugs_they_reported": self.bugs.of_player(player), "being_built_now": self.described(self.building.values()), "waiting_to_be_built": self.described(self.queue)}
+        language = self.language_of(player)
+        known = {"what_they_asked_for": self.requests.of_player(player), "bugs_they_reported": self.bugs.of_player(player), "being_built_now": self.described(self.building.values(), language), "waiting_to_be_built": self.described(self.queue, language)}
         try:
             progress = await self.bridge.call("progress")
         except (RuntimeError, ConnectionError, TimeoutError):
@@ -207,16 +214,18 @@ class Agent:
 
     # What players hear back -------------------------------------------------------------------------
 
-    def described(self, features):
+    def described(self, features, language=None):
         graph = progression.read(PROGRESSION)
-        return [feedback.describe(feature, graph) for feature in features]
+        return [feedback.describe(feature, graph, language) for feature in features]
 
     async def show_plan(self, player):
         """/plan, for anyone. Plain code writes it, so that nothing can be spoiled by a model getting carried away."""
-        now, waiting = self.described(self.building.values()), self.described(self.queue)
-        shown = ", ".join(waiting[:PLAN_SHOWN]) + (f", and {len(waiting) - PLAN_SHOWN} more" if len(waiting) > PLAN_SHOWN else "")
-        await self.tell(player, f"§7Being built right now: §f{', '.join(now) or 'nothing'}")
-        await self.tell(player, f"§7Up next, in order: §f{shown or 'nothing yet'}" + (" §7(more being planned)" if self.planning else ""))
+        language = self.language_of(player)
+        say = wording.plan_words(language)
+        now, waiting = self.described(self.building.values(), language), self.described(self.queue, language)
+        shown = ", ".join(waiting[:PLAN_SHOWN]) + (", " + say("and %s more") % (len(waiting) - PLAN_SHOWN) if len(waiting) > PLAN_SHOWN else "")
+        await self.tell(player, f"§7Being built right now: §f{', '.join(now) or say('nothing')}")
+        await self.tell(player, f"§7Up next, in order: §f{shown or say('nothing yet')}" + (" §7(more being planned)" if self.planning else ""))
         if self.bugs.open_count():
             await self.tell(player, f"§7Bugs being looked into or fixed, ahead of all of that: §f{self.bugs.open_count()}")
         await self.tell(player, f"§7Out so far: §f{self.state.get('release_count', 0)} §7things. Ask about any of it with §f/dm§7, or keep the numbers on screen with §f/board§7.", reply_click=True)
@@ -224,7 +233,7 @@ class Agent:
     async def deliver(self, player, text):
         """They may have logged off, in which case it waits for them."""
         try:
-            await self.bridge.whisper(player, text, True)
+            await self.bridge.whisper(player, wording.said(self.language_of(player), text), True)
         except (RuntimeError, ConnectionError, TimeoutError):
             self.state["notices"].setdefault(player, []).append(text)
             self.save()
@@ -243,7 +252,7 @@ class Agent:
             by_player.setdefault(entry.get("player", ""), []).append({"wanted": entry["wants"], "outcome": outcome, **({"why": why} if why else {})})
         for player, items in by_player.items():
             try:
-                text = await voice.request_news(self.governor, items, self.briefs())
+                text = await voice.request_news(self.governor, items, self.briefs(), self.language_of(player))
             except Exception as error:  # noqa: BLE001 - the plain version below still tells them
                 print(f"writing the news failed: {error}", flush=True)
                 text = None
@@ -251,6 +260,7 @@ class Agent:
             await self.deliver(player, voice.styled(text) if text else plain[:voice.HELP_LIMIT])
 
     async def interview_turn(self, player, interview, text):
+        interview.language = self.language_of(player)
         reply = await interview.turn(text)
         self.save()
         # They're waiting for an answer, so even a failed call needs one.
@@ -323,6 +333,8 @@ class Agent:
         kind = event.get("event")
         player = event.get("player", "")
         self.governor.player_seen()
+        if event.get("language"):
+            self.state.setdefault("languages", {})[player] = event["language"]
         if self.governor.why_not_speak():
             # The character has gone quiet for now, so don't leave someone talking to nobody in private.
             if kind in ("dm", "plan", "bug"):
@@ -357,7 +369,7 @@ class Agent:
         # Nobody's met the character until the direction exists, so before then there's no one to speak.
         if not self.state["direction_chosen"]:
             return
-        said = await self.watcher.consider(event, self.briefs())
+        said = await self.watcher.consider(event, self.briefs(), self.language_of(player))
         if said:
             text, audience = said
             if audience == "broadcast":
@@ -371,7 +383,7 @@ class Agent:
         else:
             self.watcher.muted.discard(player)
         self.watcher._save()
-        await self.bridge.whisper(player, "You won't hear unprompted remarks now." if muted else "Remarks are back on.")
+        await self.tell(player, "You won't hear unprompted remarks now." if muted else "Remarks are back on.")
 
     async def handle_in_turn(self, event):
         """Players don't wait on each other's slow calls, but each player's own events stay in order."""
@@ -395,7 +407,7 @@ class Agent:
                 continue
             batch, self.chat_buffer = self.chat_buffer, []
             try:
-                result = await voice.triage(self.governor, batch)
+                result = await voice.triage(self.governor, batch, {self.language_of(item["player"]) for item in batch})
                 await self.apply_triage(result)
             except Exception as error:  # noqa: BLE001
                 print(f"triage failed: {error}", flush=True)
@@ -813,6 +825,16 @@ class Agent:
                 problem = str(error)
             await asyncio.sleep(BOARD_SECONDS)
 
+    async def translation_loop(self):
+        """Whatever came out before there were translations, or while no model could be asked. It goes out with the next release."""
+        while True:
+            if not self.governor.why_not_build():
+                try:
+                    await self.workshop.translator.catch_up(FEATURES, progression.read(PROGRESSION))
+                except Exception as error:  # noqa: BLE001 - English is still there, and it'll look again
+                    print(f"catching up on translations failed: {error}", flush=True)
+            await asyncio.sleep(TRANSLATE_SECONDS)
+
     async def run(self):
         workshop.setup_repo()
         await self.bridge.connect()
@@ -824,7 +846,7 @@ class Agent:
         self.bugs.resume()
         print("agent running", flush=True)
         await asyncio.gather(readers, self.event_loop(), self.chat_loop(), self.build_loop(), self.sort_loop(), self.opening_loop(),
-                             self.status_loop(), self.watch_loop(), self.board_loop(), self.self_hosted.serve(), self.hub.serve(),
+                             self.status_loop(), self.watch_loop(), self.board_loop(), self.translation_loop(), self.self_hosted.serve(), self.hub.serve(),
                              self.bugs.watch_for_crashed_mixins())
 
 

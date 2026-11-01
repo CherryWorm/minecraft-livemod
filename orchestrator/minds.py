@@ -10,7 +10,7 @@ import pathlib
 import re
 import time
 
-from orchestrator import llm, voice
+from orchestrator import llm, voice, wording
 
 STATE = pathlib.Path("/workspace/state")
 RUMOURS = STATE / "rumours.jsonl"
@@ -58,6 +58,9 @@ def build_prompt(event, rumours):
     lines = [f"You are {event['display']}. {mind.get('character', '')}"]
     speech = mind.get("voice", "words")
     lines.append({"silent": "You can't speak. You only move.", "cries": "You don't speak in words. You make cries."}.get(speech, "You can speak."))
+    language = wording.family(event.get("language"))
+    if language and speech == "words":
+        lines.append(f"{event['player']} speaks {wording.LANGUAGES[language]}, so say what you say in that, unless they've spoken to you in another language.")
     lines.append("It's daytime." if event.get("daytime") else "It's night.")
     lines.append(HAPPENED[event["kind"]].format(**{"item": "something", "distance": 0, "target_health": 1, "health": 1, **event}))
     if event.get("text"):
