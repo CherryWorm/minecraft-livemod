@@ -33,9 +33,12 @@ public abstract class SlotFluid extends FlowingFluid implements PolymerSyncedObj
 		this.slotId = slotId;
 	}
 
-	/** A source and its flowing form each need the other, and the block needs both. */
-	final void join(SlotFluid other, LiquidBlock block) {
+	/** A source and its flowing form each need the other. A liquid block reads both as it's being made, so this comes first. */
+	final void join(SlotFluid other) {
 		this.other = other;
+	}
+
+	final void setBlock(LiquidBlock block) {
 		this.block = block;
 	}
 
