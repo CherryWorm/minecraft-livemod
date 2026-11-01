@@ -41,6 +41,7 @@ class Rules(unittest.TestCase):
             self.assertIn(mention, caught.exception.message)
 
     def test_everything_a_panel_can_have(self):
+        self.write_art("framed", [(8, 8)])
         self.check(panel(
             slot(page="main"),
             {"type": "label", "id": "state", "x": 8, "y": 20, "text": "Cold"},
@@ -53,7 +54,7 @@ class Rules(unittest.TestCase):
             {"type": "mob", "x": 120, "y": 80, "width": 40, "height": 40, "mob": "minecraft:pig"},
             {"type": "mob", "x": 120, "y": 120, "width": 40, "height": 40, "mob": "$mob:x", "portrait": "bright"},
             {"type": "text_field", "id": "name", "x": 8, "y": 130, "width": 60, "height": 14, "max_length": 12},
-            background="back", inventory=False))
+            background="framed", inventory=False))
 
     def test_a_panel_must_fit_on_a_small_screen(self):
         self.refused(panel(width=900), "900", "at most")
@@ -85,6 +86,48 @@ class Rules(unittest.TestCase):
         many = [slot(x=0, y=0, number=index) for index in range(55)]
         self.refused(panel(*many), "55 places")
         self.check(panel(*many[:54]))
+
+    def test_text_cant_land_on_text(self):
+        self.refused(panel({"type": "label", "x": 12, "y": 6, "text": "Kiln"}), "its title", "overlap")
+        self.refused(panel({"type": "label", "x": 8, "y": 70, "text": "Load a charge"}, inventory={"x": 8, "y": 84}), "Inventory", "overlap")
+        self.refused(panel({"type": "label", "x": 8, "y": 30, "text": "First"}, {"type": "label", "x": 10, "y": 32, "text": "Second"}), "First", "Second")
+        self.refused(panel({"type": "label", "x": 8, "y": 30, "width": 20, "text": "A long line that wraps"}, {"type": "label", "x": 8, "y": 40, "text": "Under"}), "overlap")
+
+    def test_text_is_fine_apart_or_on_other_pages(self):
+        self.check(panel({"type": "label", "x": 8, "y": 20, "text": "Kiln"}, {"type": "label", "x": 8, "y": 30, "text": "Lit"}))
+        self.check(panel({"type": "label", "x": 8, "y": 30, "text": "First", "page": "a"}, {"type": "label", "x": 10, "y": 32, "text": "Second", "page": "b"},
+                         {"type": "tabs", "id": "t", "x": 60, "y": 4, "tabs": [{"id": "a", "text": "A"}, {"id": "b", "text": "B"}]}))
+        self.check(panel({"type": "label", "x": 8, "y": 72, "text": "Over where it would be"}, inventory=False))
+        self.check(panel({"type": "label", "id": "state", "x": 8, "y": 6}))
+
+    def write_art(self, name, frames=()):
+        art = Image.new("RGBA", (176, 166), (198, 198, 198, 255))
+        for x, y in frames:
+            art.paste((139, 139, 139, 255), (x - 1, y - 1, x + 17, y + 17))
+        art.save(self.root / "assets" / "panels" / f"{name}.png")
+
+    def test_art_has_to_show_the_players_slots(self):
+        self.write_art("flat")
+        self.refused(panel(background="flat"), "player's inventory", "float")
+        self.refused(panel(background="flat", inventory={"x": 8, "y": 84}), "player's inventory", "8, 84")
+        self.check(panel(background="flat", inventory=False))
+
+    def test_art_has_to_show_each_slot(self):
+        self.write_art("flat")
+        self.refused(panel(slot(x=56, y=35), background="flat", inventory=False), "item slot at 56, 35")
+        self.write_art("framed", [(56, 35)])
+        self.check(panel(slot(x=56, y=35), background="framed", inventory=False))
+
+    def test_a_big_frame_of_its_own_is_fine(self):
+        art = Image.new("RGBA", (176, 166), (198, 198, 198, 255))
+        art.paste((139, 139, 139, 255), (100, 30, 128, 58))
+        art.save(self.root / "assets" / "panels" / "big.png")
+        self.check(panel(slot(x=106, y=36), background="big", inventory=False))
+
+    def test_panel_back_has_everything_the_check_wants(self):
+        from assetkit import textures
+        textures.panel_back(176, 166, slots=[(56, 35)]).save(self.root / "assets" / "panels" / "started.png")
+        self.check(panel(slot(x=56, y=35), background="started", inventory={"x": 8, "y": 84}))
 
     def test_everything_wrong_is_said_at_once(self):
         self.refused(panel(slot(x=170), {"type": "image", "x": 0, "y": 0, "width": 8, "height": 8, "image": "gone"}), "goes outside", "gone.png")

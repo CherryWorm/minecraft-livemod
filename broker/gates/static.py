@@ -3,6 +3,7 @@
 Each check here exists because the failure it catches would otherwise brick a boot, erase something
 from a world, or spoil a surprise.
 """
+import itertools
 import json
 import re
 
@@ -40,6 +41,17 @@ USE_ANIMATIONS = {"none", "eat", "drink", "block", "bow", "trident", "crossbow",
 MOST_SHADER_CHARACTERS = 16000
 # What fits at the size a small window draws its interface. A vanilla chest is 176 by 222.
 MOST_PANEL_WIDTH = 320
+PLAYER_INVENTORY_FROM_BOTTOM = 82
+TITLE_PLACE = (8, 6)
+INVENTORY_LABEL_ABOVE = 12
+TEXT_LINE = 9
+NARROW_CHARACTER = 5
+SLOT_ITEM = 16
+SLOT_STEP = 18
+HOTBAR_ROW = 3
+HOTBAR_GAP = 4
+# How far round a slot to look for any sign of a frame, which leaves room for a big one of its own.
+FRAME_MARGIN = 8
 MOST_PANEL_HEIGHT = 230
 MOST_CHEST_ROWS = 6
 MOST_TYPED = 256
@@ -342,6 +354,64 @@ def check_items(features):
                 _fail(f"{label} has variants {variants!r}. It's names and the texture for each, like {{\"gilded\": \"ledger_gilded\"}}.")
 
 
+def _inventory_place(panel):
+    """Where the player's own slots go, as the companion works it out, or None if it has none."""
+    inventory = panel.get("inventory")
+    if inventory is False:
+        return None
+    if inventory is None:
+        return (panel["width"] - PLAYER_INVENTORY_WIDTH) // 2 + 1, panel["height"] - PLAYER_INVENTORY_FROM_BOTTOM
+    return inventory["x"], inventory["y"]
+
+
+def _text_overlaps(panel):
+    """The title and "Inventory" are drawn for you, which is easy to forget, and text on text can't be read. It's worked out from the text a
+    panel starts with, using about the narrowest a line of that text could be, so anything this finds really does overlap."""
+    boxes = []
+    if panel.get("title"):
+        boxes.append(("its title", panel.get("title_x", TITLE_PLACE[0]), panel.get("title_y", TITLE_PLACE[1]), len(panel["title"]) * NARROW_CHARACTER, TEXT_LINE, None))
+    place = _inventory_place(panel)
+    if place:
+        boxes.append(("the game's \"Inventory\" label", place[0], place[1] - INVENTORY_LABEL_ABOVE, len("Inventory") * NARROW_CHARACTER, TEXT_LINE, None))
+    for widget in panel.get("widgets", []):
+        if widget.get("type") == "label" and widget.get("text") and all(isinstance(widget.get(axis), int) for axis in "xy"):
+            wide = len(widget["text"]) * NARROW_CHARACTER
+            wrapped = widget.get("width") if isinstance(widget.get("width"), int) and widget.get("width") > 0 else wide
+            lines = max(1, -(-wide // wrapped))
+            boxes.append((f"the label {widget['text']!r}", widget["x"], widget["y"], min(wide, wrapped), lines * TEXT_LINE, widget.get("page")))
+    problems = []
+    for (first, x, y, wide, high, page), (second, other_x, other_y, other_wide, other_high, other_page) in itertools.combinations(boxes, 2):
+        same_page = not page or not other_page or page == other_page
+        if same_page and x < other_x + other_wide and other_x < x + wide and y < other_y + other_high and other_y < y + high:
+            problems.append(f"{first} at {x}, {y} and {second} at {other_x}, {other_y} overlap, so neither can be read. The game draws the title and the \"Inventory\" label for you.")
+    return problems
+
+
+def _missing_frames(feature, panel):
+    """With a background, a panel's art has to show where each slot is. Without that, a player's items float on nothing."""
+    path = feature["dir"] / "assets" / "panels" / f"{panel.get('background')}.png"
+    if not panel.get("background") or not path.exists():
+        return []
+    with Image.open(path) as art:
+        pixels = art.convert("RGBA")
+    across, down = pixels.width / panel["width"], pixels.height / panel["height"]
+
+    def plain(x, y):
+        box = (int((x - FRAME_MARGIN) * across), int((y - FRAME_MARGIN) * down), int((x + SLOT_ITEM + FRAME_MARGIN) * across), int((y + SLOT_ITEM + FRAME_MARGIN) * down))
+        colours = pixels.crop(box).getcolors(maxcolors=1)
+        return colours is not None
+
+    problems = []
+    place = _inventory_place(panel)
+    if place and any(plain(place[0] + column * SLOT_STEP, place[1] + row * SLOT_STEP + (HOTBAR_GAP if row == HOTBAR_ROW else 0)) for row in (0, HOTBAR_ROW) for column in (0, 8)):
+        problems.append(f"its background shows no frames for the player's inventory at {place[0]}, {place[1]}, so their items would float on nothing. "
+                        "Draw them, or start from panel_back in assetkit's textures, or use \"inventory\": false if it doesn't need them.")
+    for widget in panel.get("widgets", []):
+        if widget.get("type") == "slot" and all(isinstance(widget.get(axis), int) for axis in "xy") and plain(widget["x"], widget["y"]):
+            problems.append(f"its background shows no frame for the item slot at {widget['x']}, {widget['y']}, so nobody could tell it was there.")
+    return problems
+
+
 def _panel_problems(feature, panel):
     """Everything that would stop a panel working or fitting, as text, so a builder gets all of it at once."""
     width, height = panel.get("width"), panel.get("height")
@@ -406,6 +476,8 @@ def _panel_problems(feature, panel):
             problems.append(f"{label} has no tabs in it.")
         if kind == "list" and not (isinstance(widget.get("max_rows", 1), int) and 0 < widget.get("max_rows", 1) <= 45):
             problems.append(f"{label} has max_rows {widget.get('max_rows')!r}. It's how many rows it can ever have, up to 45.")
+    if not problems:
+        problems += _text_overlaps(panel) + _missing_frames(feature, panel)
     copied = json.loads(json.dumps(panel))
     places = bundles.panel_chest_slots(copied)
     if places > bundles.CHEST_ROW * MOST_CHEST_ROWS:
