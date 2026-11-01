@@ -89,9 +89,17 @@ final class MachineMenu extends AbstractContainerMenu {
 		}
 		ItemStack stack = slot.getItem();
 		ItemStack before = stack.copy();
-		boolean moved = index < this.size
-				? moveItemStackTo(stack, this.size, this.slots.size(), true)
-				: moveItemStackTo(stack, 0, this.size, false);
+		boolean moved = false;
+		if (index < this.size) {
+			moved = moveItemStackTo(stack, this.size, this.slots.size(), true);
+		} else {
+			// One at a time, because the game adds to anything holding the same item, even an output that nothing can go in.
+			for (int place = 0; place < this.size && !stack.isEmpty(); place++) {
+				if (this.slots.get(place).mayPlace(stack)) {
+					moved |= moveItemStackTo(stack, place, place + 1, false);
+				}
+			}
+		}
 		if (!moved) {
 			return ItemStack.EMPTY;
 		}

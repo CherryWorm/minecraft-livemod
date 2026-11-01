@@ -8,8 +8,8 @@ uniform sampler2D InSampler;
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
 
-// Turns the picture inside out, so it's easy to see from a screenshot. The time is read to prove that it can be.
+// Turns the picture inside out, so it's easy to see from a screenshot, but only if it can really read the game's clock.
 void main() {
-    vec2 shifted = texCoord + vec2(sin(GameTime * 6283.0) * 0.001, 0.0);
-    fragColor = vec4(1.0 - texture(InSampler, shifted).rgb, 1.0);
+    vec3 seen = texture(InSampler, texCoord).rgb;
+    fragColor = vec4(GameTime > 0.0 ? 1.0 - seen : seen, 1.0);
 }

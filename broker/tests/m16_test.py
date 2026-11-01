@@ -560,8 +560,9 @@ def play_broken_effect(client, results):
     pack = runtime.RUNTIME / "prod" / "polymer" / "resource_pack.zip"
     before = pack.stat().st_mtime
     rcon("polymer", "generate-pack", "reload")
+    # It isn't there at all for a moment, while it's being made.
     deadline = time.monotonic() + 30
-    while pack.stat().st_mtime == before and time.monotonic() < deadline:
+    while not (pack.exists() and pack.stat().st_mtime != before) and time.monotonic() < deadline:
         time.sleep(0.25)
     # Back in with the new pack, and the module that uses it, which is unloaded by now.
     client.ask("oldcompanion", 300)
