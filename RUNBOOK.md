@@ -139,7 +139,8 @@ Once anyone runs a client module, everyone needs the companion. Turn that on wit
 | Stop the agent, from the host | `touch runtime/control/agent_disabled` |
 | Stop the agent, in game (owner only) | `/agentstop`, then `/agentstart` |
 | Stop and restart the agent's process | `./scripts/agent-down.sh`, `./scripts/agent-up.sh` |
-| Open up land that's already generated to new biomes | Stop the server, then `python3 -m broker.prune runtime/prod/world` (add `--dry-run` first) |
+| Open up land that's already generated to new biomes | Stop the server, then `python3 -m broker.prune runtime/prod/world` (add `--dry-run` first, and `--dimension minecraft:overworld` to leave the others alone). It goes through every dimension, and only removes land nobody's been near. A big ruin in that land comes back the same when the land is made again |
+| See where big ruins have gone, and why others didn't | `cat runtime/prod/world/conduit_ruins.jsonl`. Don't edit it: a ruin too big for a chunk is finished from what this says if a crash stops it partway |
 
 The kill switch stops releases and silences the character. The game keeps running, and everything already shipped keeps working.
 

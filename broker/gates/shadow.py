@@ -1,14 +1,24 @@
 """Tries a release on a copy of the live world, with real boots and a real client login."""
+import json
 import re
 import shutil
 import sys
 import time
 
 from broker import runtime
-from broker.gates import GateFailed, mixins
+from broker.gates import GateFailed, mixins, world_diff
 
 GATE = "shadow"
 MAX_BOOT_SECONDS = 45
+OVERWORLD = "minecraft:overworld"
+AIR = {"minecraft:air", "minecraft:cave_air", "minecraft:void_air"}
+# It stops at the first that fits. Something that wants high ground only suits about one spot in five.
+RUIN_SPOTS_TRIED = 16
+# Out where nobody's been in any world, because where people have been would say nothing about whether it can go anywhere. This is only the test copy.
+RUIN_TRIED_AT = "12000"
+SAMPLE_SECONDS = 45
+# For each ruin. Each spot may have to generate its land first, on a test server that's limited so it can't starve the live one.
+BIG_RUIN_SECONDS = 120
 
 # Lines that mean something is wrong even though the server kept running. "Skipping invalid
 # attachments" looks like a harmless warning, but it means saved player records are being thrown away.
@@ -137,50 +147,78 @@ def smoke_join():
         _fail(f"A client couldn't join the shadow server:\n{result.stdout[-1200:]}")
 
 
-def world_after_patches():
-    """Loads a small sample of the world, lets the patches finish on it, and copies the result."""
-    regions = _region_dir()
-    if regions is None:
-        _fail("Couldn't find the shadow world's region files")
-    runtime.rcon("shadow", "forceload", "add", "-24", "-24", "24", "24", check=False)
+def world_after_patches(patches):
+    """Loads a small sample of each dimension the patches are for, lets them finish on it, and copies the result. A ruin too big for a chunk
+    probably wouldn't reach that sample by itself, so it's tried out nearby as well."""
+    for dimension in sorted({patch.get("dimension", OVERWORLD) for patch in patches}):
+        runtime.rcon("shadow", "execute", "in", dimension, "run", "forceload", "add", "-24", "-24", "24", "24", check=False)
     mark = runtime.utc_now()
+    big = {patch["id"]: patch.get("dimension", OVERWORLD) for patch in patches if patch.get("big")}
+    for ruin, dimension in big.items():
+        runtime.rcon("shadow", "execute", "in", dimension, "positioned", RUIN_TRIED_AT, "64", RUIN_TRIED_AT, "run", "conduit", "ruin", "try", ruin, str(RUIN_SPOTS_TRIED), check=False)
     time.sleep(6)
-    for _ in range(45):
-        status = re.findall(r"retrogen: queued=(\d+)", runtime.logs_since("shadow", mark))
-        if status and status[-1] == "0":
+    finished = False
+    for second in range(BIG_RUIN_SECONDS * len(big) if big else SAMPLE_SECONDS):
+        status = re.findall(r"retrogen: queued=(\d+) .* plans=(\d+)", runtime.logs_since("shadow", mark))
+        # A chunk at the edge of what's loaded can wait forever for the next one to appear, so the queue only gets so long to empty.
+        if status and status[-1][1] == "0" and (status[-1][0] == "0" or second >= SAMPLE_SECONDS):
+            finished = True
             break
         time.sleep(1)
+    for ruin in big:
+        summary = runtime.rcon("shadow", "conduit", "ruin", "summary", ruin, check=False)
+        if ": placed 0" in summary:
+            tried = f"it wasn't placed at any of up to {RUIN_SPOTS_TRIED} spots" if finished else "it hadn't been placed anywhere by the time the test ran out of time"
+            _fail(f"Ruin {ruin} is too big for one chunk, and {tried}, so it may never turn up. What stopped it:\n{summary}")
     runtime.rcon("shadow", "save-all", "flush")
     time.sleep(2)
-    after = runtime.DIFF / "after"
-    runtime.sync_tree(regions, after)
-    return after
+    return copy_regions("after")
 
 
-def _region_dir():
-    found = sorted((runtime.server_folder("shadow") / "world").rglob("region"))
-    overworld = [path for path in found if "overworld" in str(path) or path.parent.name == "world"]
-    return (overworld or found or [None])[0]
+def copy_regions(name):
+    """The land in every dimension of the shadow world, each in a folder of its own. Anything left over from an earlier copy
+    goes, because a dimension that had vanished would otherwise look as though it was still there."""
+    target = runtime.DIFF / name
+    dimensions = world_diff.dimension_folders(runtime.server_folder("shadow") / "world")
+    for folder in target.glob("*/*"):
+        if f"{folder.parent.name}:{folder.name}" not in dimensions:
+            shutil.rmtree(folder)
+    for dimension, folder in dimensions.items():
+        if (folder / "region").is_dir():
+            runtime.sync_tree(folder / "region", target / dimension.replace(":", "/"))
+    return target
 
 
-def snapshot_regions():
-    regions = _region_dir()
-    if regions is None:
-        return None
-    before = runtime.DIFF / "before"
-    runtime.sync_tree(regions, before)
-    return before
+def diff_rules(patches, dimension):
+    """What each block may replace in one dimension. It goes by the block, so ore can't get away with replacing air just because a plant is
+    allowed to. One of this world's blocks has no business in a dimension no patch of it is for, so it may replace nothing there. Vanilla's
+    blocks aren't held to that, because something like cobblestone can form by itself. A ruin's rooms are air, and that says nothing, because
+    leaves decay and snow melts while this is running."""
+    rules = {}
+    for patch in patches:
+        if patch["block"] in AIR:
+            continue
+        if patch.get("dimension", OVERWORLD) == dimension:
+            rules.setdefault(patch["block"], set()).update(patch["replaces"])
+        elif patch["block"].startswith("gm:"):
+            rules.setdefault(patch["block"], set())
+    return {block: sorted(replaces) for block, replaces in rules.items()}
 
 
-def run_diff(before, after, ore_blocks, allowed, new_block_entities=False):
-    for ore in ore_blocks:
+def run_diff(before, after, patches):
+    """Every dimension there was before, so one that lost land fails, whether or not any patch is for it."""
+    rules_file = runtime.DIFF / "rules.json"
+    for folder in sorted(before.glob("*/*")):
+        dimension = f"{folder.parent.name}:{folder.name}"
+        rules_file.write_text(json.dumps(diff_rules(patches, dimension)), encoding="utf-8")
+        new_block_entities = any(patch.get("adds_block_entities") and patch.get("dimension", OVERWORLD) == dimension for patch in patches)
         result = runtime.run(
-            [sys.executable, "broker/gates/world_diff.py", str(before), str(after), "--ore", ore, "--allow", *allowed,
+            [sys.executable, "broker/gates/world_diff.py", str(folder), str(after / folder.parent.name / folder.name), "--rules", str(rules_file),
              *(["--allow-new-block-entities"] if new_block_entities else [])],
             check=False, timeout=600,
         )
         if result.returncode != 0:
-            _fail(f"The world check found a problem with {ore}:\n{result.stdout[-1500:]}")
+            _fail(f"The world check found a problem in {dimension}:\n{result.stdout[-1500:]}")
 
 
 def check_mixins_applied(jars, logs):
@@ -232,7 +270,7 @@ def run_gate(tier, jars, content, patches, new_mixins=()):
         cold_boot(jars)
         timings["clone"] = round(time.monotonic() - started, 1)
         if patches:
-            before = snapshot_regions()
+            before = copy_regions("before")
         runtime.apply_content("shadow", content)
         try:
             boot = start(mark, test_mods=not any_mixins)
@@ -251,7 +289,7 @@ def run_gate(tier, jars, content, patches, new_mixins=()):
             # Has to happen before the new patches exist, or the "before" copy already contains them.
             runtime.rcon("shadow", "save-all", "flush")
             time.sleep(1)
-            before = snapshot_regions()
+            before = copy_regions("before")
         runtime.apply_content("shadow", content)
         runtime.reload_content("shadow")
         timings["hot_apply"] = round(time.monotonic() - started, 1)
@@ -276,16 +314,10 @@ def run_gate(tier, jars, content, patches, new_mixins=()):
 
     if patches and before is not None:
         started = time.monotonic()
-        after = world_after_patches()
+        after = world_after_patches(patches)
         timings["world_sample"] = round(time.monotonic() - started, 1)
         started = time.monotonic()
-        # Checked per block, so ore can't get away with replacing air just because a plant is allowed to.
-        allowed = {}
-        for patch in patches:
-            allowed.setdefault(patch["block"], set()).update(patch["replaces"])
-        new_block_entities = any(patch.get("adds_block_entities") for patch in patches)
-        for block, replaces in sorted(allowed.items()):
-            run_diff(before, after, [block], sorted(replaces), new_block_entities)
+        run_diff(before, after, patches)
         timings["world_diff"] = round(time.monotonic() - started, 1)
     if new_mixins:
         started = time.monotonic()

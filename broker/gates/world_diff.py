@@ -10,7 +10,10 @@ chunk takes far more memory than it does on disk, so a world people have really 
 
 Usage: world_diff.py BEFORE AFTER --ore gm:s0001 --allow minecraft:stone minecraft:deepslate
                      [--protect X1 Y1 Z1 X2 Y2 Z2]... [--report-limit N]
-BEFORE and AFTER are folders holding .mca files.
+       world_diff.py BEFORE AFTER --rules RULES.json
+BEFORE and AFTER are folders holding .mca files, from one dimension. RULES.json says what each block may replace, as
+{"gm:s0001": ["minecraft:stone"]}, which checks them all in one pass, and an empty list means it shouldn't appear at all.
+"natural" in the list lets it replace anything at all in a chunk nobody had been in or changed anything in, which the raw files can show.
 """
 import argparse
 import collections
@@ -25,6 +28,19 @@ import zlib
 
 # Far more than one region at a time needs. Going over fails this check, instead of the system killing whatever it chooses.
 MEMORY_LIMIT = 2 * 1024 ** 3
+# In place of a block it may replace: it can replace anything in a chunk nobody had been in or changed anything in.
+NATURAL = "natural"
+
+
+def dimension_folders(world):
+    """Every dimension in a world, by its name, whether or not it has any land yet. Each keeps its own region files, so a
+    check of one tells you nothing about the others."""
+    world = pathlib.Path(world)
+    found = {f"{folder.parent.name}:{folder.name}": folder for folder in sorted(world.glob("dimensions/*/*")) if folder.is_dir()}
+    # Worlds from before the game moved these have the overworld's right there.
+    if (world / "region").is_dir():
+        found.setdefault("minecraft:overworld", world)
+    return found
 
 
 def read_nbt(data):
@@ -200,19 +216,40 @@ def touched_blocks(chunk):
     return sum(bin(word & (2**64 - 1)).count("1") for section in sections for word in section.get("bits", []))
 
 
+def peak_memory():
+    """The most this has used, in MB. What getrusage says would include whatever started it."""
+    for line in pathlib.Path("/proc/self/status").read_text(encoding="utf-8").splitlines():
+        if line.startswith("VmHWM:"):
+            return int(line.split()[1]) // 1024
+    return 0
+
+
+def is_touched(chunk, x, y, z):
+    """Whether the mod recorded this block as having changed since the land was made."""
+    index = (y & 15) << 8 | (z & 15) << 4 | x & 15
+    for section in chunk.get("fabric:attachments", {}).get("gm:touched", []):
+        bits = section.get("bits", [])
+        if section.get("y") == y >> 4 and index // 64 < len(bits):
+            return bool((bits[index // 64] >> (index % 64)) & 1)
+    return False
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("before")
     parser.add_argument("after")
-    parser.add_argument("--ore", required=True)
-    parser.add_argument("--allow", nargs="+", required=True)
+    parser.add_argument("--ore")
+    parser.add_argument("--allow", nargs="+")
+    parser.add_argument("--rules", type=pathlib.Path)
     parser.add_argument("--protect", nargs=6, type=int, action="append", default=[])
     parser.add_argument("--report-limit", type=int, default=8)
     parser.add_argument("--allow-new-block-entities", action="store_true", help="existing ones must still be unchanged")
     args = parser.parse_args()
 
     resource.setrlimit(resource.RLIMIT_AS, (MEMORY_LIMIT, MEMORY_LIMIT))
-    allowed = set(args.allow)
+    if args.rules is None and not (args.ore and args.allow):
+        parser.error("say what can replace what, with --rules or with --ore and --allow")
+    allowed = {block: set(replaces) for block, replaces in json.loads(args.rules.read_text(encoding="utf-8")).items()} if args.rules else {args.ore: set(args.allow)}
     protected = [tuple(box) for box in args.protect]
 
     transitions = collections.Counter()
@@ -250,6 +287,7 @@ def main():
             forgotten.append((pos, touched_blocks(old), touched_blocks(new)))
         old_sections, new_sections = sections_by_y(old), sections_by_y(new)
         placed_here = 0
+        nobody_there = old.get("InhabitedTime", 0) == 0 and touched_blocks(old) == 0
         for y_index, old_section in old_sections.items():
             new_section = new_sections.get(y_index)
             if new_section is None:
@@ -267,18 +305,22 @@ def main():
                 z = pos[1] * 16 + ((index >> 4) & 15)
                 y = y_index * 16 + ((index >> 8) & 15)
                 transitions[(old_name, new_name)] += 1
-                if new_name == args.ore:
+                if new_name in allowed:
                     placed_here += 1
-                    if old_name not in allowed:
-                        bad_ore.append((x, y, z, old_name))
+                    # Vanilla's blocks can get there by themselves, like sand falling into water. A patch never records what it does as a
+                    # change, so if this was recorded, it wasn't one. This world's own blocks can't do that, so they don't get this.
+                    by_itself = not new_name.startswith("gm:") and is_touched(new, x, y, z)
+                    if old_name not in allowed[new_name] and not (NATURAL in allowed[new_name] and nobody_there) and not by_itself:
+                        bad_ore.append((x, y, z, old_name, new_name))
                 if in_protected(x, y, z):
                     bad_protected.append((x, y, z, old_name, new_name))
         chunks_with_ore += placed_here > 0
 
     print(f"chunks compared: {compared}, still generating when copied: {unfinished}, "
           f"chunks missing afterwards: {len(missing)}")
-    ore_total = sum(count for (_, new_name), count in transitions.items() if new_name == args.ore)
+    ore_total = sum(count for (_, new_name), count in transitions.items() if new_name in allowed)
     print(f"chunks that received ore: {chunks_with_ore}, {ore_total} blocks placed")
+    print(f"peak memory: {peak_memory()} MB")
     print("block changes:")
     for (old_name, new_name), count in transitions.most_common(20):
         print(f"  {count:>8}  {old_name} -> {new_name}")

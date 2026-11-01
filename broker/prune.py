@@ -4,9 +4,10 @@
 Only for when the server is stopped (tier T4). It reads the region files directly and deletes a chunk by
 clearing its entry in the file's header, which is what the game itself reads, so the next visit generates it
 fresh. A chunk is kept if anyone has spent time in it, anything in it has been changed, or it's near a chunk
-like that, so nothing can regenerate next to someone's base or at the edge of explored land.
+like that, so nothing can regenerate next to someone's base or at the edge of explored land. Each dimension goes
+by what's happened in it, and it never removes a dimension itself, only land nobody's been to.
 
-Usage: prune.py WORLD_FOLDER [--margin CHUNKS] [--dry-run]
+Usage: prune.py WORLD_FOLDER [--margin CHUNKS] [--dimension NAME] [--dry-run]
 """
 import argparse
 import pathlib
@@ -70,24 +71,34 @@ def clear_chunks(folder, chunks):
     return cleared
 
 
-def prune(world, margin=DEFAULT_MARGIN, dry_run=False):
-    every, visited = survey(world / "region")
+def prune_dimension(folder, margin, dry_run):
+    every, visited = survey(folder / "region")
     chunks = to_prune(every, visited, margin)
     result = {"generated": len(every), "visited": len(visited), "pruned": len(chunks)}
     if not dry_run:
         for name in FOLDERS:
-            if (world / name).is_dir():
-                result[f"cleared_{name}"] = clear_chunks(world / name, chunks)
+            if (folder / name).is_dir():
+                result[f"cleared_{name}"] = clear_chunks(folder / name, chunks)
     return result
+
+
+def prune(world, margin=DEFAULT_MARGIN, dry_run=False, dimension=None):
+    """What it did in each dimension, and the totals."""
+    folders = world_diff.dimension_folders(world)
+    if dimension is not None and dimension not in folders:
+        raise SystemExit(f"This world has no dimension called {dimension}. It has {', '.join(sorted(folders)) or 'none at all'}.")
+    results = {name: prune_dimension(folder, margin, dry_run) for name, folder in folders.items() if dimension in (None, name)}
+    return {**{field: sum(result[field] for result in results.values()) for field in ("generated", "visited", "pruned")}, "dimensions": results}
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("world", type=pathlib.Path)
     parser.add_argument("--margin", type=int, default=DEFAULT_MARGIN)
+    parser.add_argument("--dimension", help="only this one, like minecraft:overworld")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    print(prune(args.world, args.margin, args.dry_run))
+    print(prune(args.world, args.margin, args.dry_run, args.dimension))
 
 
 if __name__ == "__main__":

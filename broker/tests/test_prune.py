@@ -101,6 +101,49 @@ class Prune(unittest.TestCase):
         prune.prune(self.world, margin=2)
         self.assertEqual(positions(self.world / "region" / "r.-1.-1.mca"), set())
 
+    def test_it_finds_the_land_where_the_game_really_keeps_it(self):
+        world = self.world / "real"
+        overworld = world / "dimensions" / "minecraft" / "overworld" / "region" / "r.0.0.mca"
+        write_region(overworld, self.chunks)
+        result = prune.prune(world, margin=3)
+        self.assertEqual(result["pruned"], 2)
+        self.assertEqual(positions(overworld), {(0, 0), (2, 0), (20, 20), (21, 21)})
+
+    def test_each_dimension_goes_by_what_happened_in_it(self):
+        world = self.world / "real"
+        overworld = world / "dimensions" / "minecraft" / "overworld" / "region" / "r.0.0.mca"
+        hollow = world / "dimensions" / "gm" / "d0001" / "region" / "r.0.0.mca"
+        write_region(overworld, [{"x": 0, "z": 0, "inhabited": 500}, {"x": 30, "z": 30}])
+        write_region(hollow, [{"x": 30, "z": 30, "touched": True}, {"x": 0, "z": 0}])
+        result = prune.prune(world, margin=3)
+        self.assertEqual(positions(overworld), {(0, 0)})
+        self.assertEqual(positions(hollow), {(30, 30)})
+        self.assertEqual(sorted(result["dimensions"]), ["gm:d0001", "minecraft:overworld"])
+        self.assertEqual(result["pruned"], 2)
+
+    def test_a_dimension_nobody_has_been_to_stays_a_dimension(self):
+        world = self.world / "real"
+        hollow = world / "dimensions" / "gm" / "d0001" / "region" / "r.0.0.mca"
+        write_region(hollow, [{"x": 5, "z": 5}])
+        prune.prune(world, margin=3)
+        self.assertTrue(hollow.exists())
+        self.assertEqual(positions(hollow), set())
+
+    def test_it_can_keep_to_one_dimension(self):
+        world = self.world / "real"
+        overworld = world / "dimensions" / "minecraft" / "overworld" / "region" / "r.0.0.mca"
+        hollow = world / "dimensions" / "gm" / "d0001" / "region" / "r.0.0.mca"
+        write_region(overworld, [{"x": 5, "z": 5}])
+        write_region(hollow, [{"x": 5, "z": 5}])
+        prune.prune(world, margin=3, dimension="gm:d0001")
+        self.assertEqual(positions(overworld), {(5, 5)})
+        self.assertEqual(positions(hollow), set())
+
+    def test_a_dimension_that_isnt_there_is_said_plainly(self):
+        with self.assertRaises(SystemExit) as caught:
+            prune.prune(self.world, dimension="gm:nowhere")
+        self.assertIn("gm:nowhere", str(caught.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
