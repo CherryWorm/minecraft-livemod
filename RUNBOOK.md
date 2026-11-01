@@ -91,6 +91,8 @@ Prism's handling of the pack hasn't been tested on a real install yet, so try it
 
 Once anyone runs a client module, everyone needs the companion. Turn that on with `touch "$RUNTIME_DIR/prod/config/conduit/require_companion"`.
 
+**When the engine can do more.** A request the director passed to you stays with you, so once you've added what it needed, run `touch ../runtime/control/engine_updated` from the repo folder. Everything waiting on you goes back to the director at its next planning, and it starts one straight away. It decides afresh, and anything it still can't do stays with you, without telling you or the player again. For a change players need a new companion for, do this after they've got it, so the first thing built with it works for them.
+
 ## Day to day
 
 | To do this | Run this |
@@ -106,6 +108,7 @@ Once anyone runs a client module, everyone needs the companion. Turn that on wit
 | See what it's looked up | `ls runtime/agent-workspace/research`, and `docker logs livingmod-web-1 \| grep CONNECT` for every site |
 | Turn its research off, or back on | `touch runtime/control/no_research`, or `rm` the same file |
 | Give the go-ahead to choose the theme and start building | `touch runtime/control/decide_now` |
+| Send requests that were waiting on you back to the director, after changing the engine | `touch runtime/control/engine_updated` |
 | End the opening by hand | `./scripts/mc.sh conduit open` |
 | Stop the agent, from the host | `touch runtime/control/agent_disabled` |
 | Stop the agent, in game (owner only) | `/agentstop`, then `/agentstart` |

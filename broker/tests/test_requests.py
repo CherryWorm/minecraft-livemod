@@ -262,6 +262,67 @@ class Directing(Base):
         self.assertIn("the codex text is unreadable", owner[0]["requests"][0])
         self.assertEqual(len(self.told()), 1)
 
+    def engine_updated(self):
+        patcher = mock.patch.object(main, "CONTROL", self.folder)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        (self.folder / main.ENGINE_UPDATED).write_text("", encoding="utf-8")
+
+    async def test_nothing_comes_back_from_the_owner_until_they_say_so(self):
+        self.asked("inventory tweaks")
+        self.plan_answer(decisions=[{"number": 1, "outcome": "needs_owner", "why": "It's in the engine."}])
+        await self.agent.next_features()
+        self.plan_answer()
+        await self.agent.next_features()
+        prompt = [call.args[2] for call in self.ask.await_args_list if call.args[1] == "director"][-1]
+        self.assertIn("(no requests waiting)", prompt)
+        self.assertEqual(self.status(1), feedback.NEEDS_OWNER)
+
+    async def test_once_the_engine_changes_the_director_looks_again(self):
+        self.asked("inventory tweaks", "faster boats")
+        self.plan_answer(decisions=[{"number": 1, "outcome": "needs_owner", "why": "It's in the engine."}, {"number": 2, "outcome": "declined", "why": "Boats stay as they are."}])
+        await self.agent.next_features()
+        self.engine_updated()
+        self.agent.sort_wanted.clear()
+        self.agent.queue.append({"id": "already_queued", "node": "e_one", "spec": "x"})
+        self.assertTrue(self.agent.should_plan(), "it shouldn't wait for the current plan to run out")
+        self.agent.queue.clear()
+        self.plan_answer([{"id": "tweaks", "node": "e_one", "spec": "x", "answers": [1]}])
+        chosen = await self.agent.next_features()
+        self.assertEqual([feature["id"] for feature in chosen], ["tweaks"])
+        prompt = [call.args[2] for call in self.ask.await_args_list if call.args[1] == "director"][-1]
+        self.assertIn('"status": "ask_again"', prompt)
+        self.assertEqual((self.status(1), self.status(2)), (feedback.BUILDING, feedback.DECLINED), "only what was waiting on the owner comes back")
+
+    async def test_touching_it_once_only_counts_once(self):
+        self.asked("inventory tweaks")
+        self.engine_updated()
+        self.plan_answer()
+        await self.agent.next_features()
+        self.assertFalse(self.agent.engine_updated())
+        self.plan_answer(decisions=[{"number": 1, "outcome": "needs_owner", "why": "It's in the engine."}])
+        await self.agent.next_features()
+        self.plan_answer()
+        await self.agent.next_features()
+        self.assertEqual(self.status(1), feedback.NEEDS_OWNER, "it isn't asked about again until it's touched again")
+
+    async def test_the_same_answer_again_isnt_news_to_anyone(self):
+        self.asked("menus of their own")
+        self.plan_answer(decisions=[{"number": 1, "outcome": "needs_owner", "why": "It's in the engine."}])
+        await self.agent.next_features()
+        told = len(self.told())
+        owner = (self.folder / "host_requests.jsonl").read_text(encoding="utf-8")
+        self.engine_updated()
+        await self.agent.next_features()
+        self.assertEqual(self.status(1), feedback.NEEDS_OWNER)
+        self.assertEqual(len(self.told()), told)
+        self.assertEqual((self.folder / "host_requests.jsonl").read_text(encoding="utf-8"), owner)
+
+    async def test_a_player_hears_theirs_is_being_looked_at_again(self):
+        self.asked("inventory tweaks")
+        self.agent.requests.mark(1, feedback.ASK_AGAIN)
+        self.assertEqual(self.agent.requests.of_player("Dana")[0]["status"], "being looked at")
+
     async def test_they_only_hear_later_once(self):
         self.asked("a map")
         self.plan_answer(decisions=[{"number": 1, "outcome": "later", "why": "After the kiln."}])

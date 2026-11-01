@@ -11,6 +11,7 @@ LATER = "later"
 DONE = "done"
 DECLINED = "declined"
 NEEDS_OWNER = "needs_owner"  # Only a person can change the engine, so the director passes these on instead of pretending.
+ASK_AGAIN = "ask_again"  # Was waiting on the owner, who has since changed the engine, so the director looks at it afresh.
 # How anything that belongs to the world is shown to players before it's out. A fixed list, so a name can't slip in.
 CATEGORIES = ["mob", "boss fight", "character", "gear", "tool", "upgrade", "machine", "biome", "structure", "story", "food", "item", "building block", "world event"]
 STAGE_WORDS = {"early": "early game", "mid": "mid game", "end": "late game"}
@@ -76,11 +77,17 @@ class Requests:
         """What's been said so far about what, so that the same thing gets the same answer. Who asked doesn't come into it."""
         return [{"wanted": entry["wants"], "decided": self.status(entry["number"]),
                  **{key: value for key, value in self.statuses[str(entry["number"])].items() if key != "status" and value}}
-                for entry in self.all() if self.status(entry["number"]) is not None]
+                for entry in self.all() if self.status(entry["number"]) not in (None, ASK_AGAIN)]
 
     def undecided(self):
         """Everything the director still has to think about. There's no window on this, so nothing can drop off the end."""
-        return [entry for entry in self.all() if self.status(entry["number"]) in (None, LATER)]
+        return [entry for entry in self.all() if self.status(entry["number"]) in (None, LATER, ASK_AGAIN)]
+
+    def ask_again(self):
+        """Everything that was waiting on the owner gets another look."""
+        for entry in self.all():
+            if self.status(entry["number"]) == NEEDS_OWNER:
+                self.mark(entry["number"], ASK_AGAIN)
 
     def unanswered_after(self, number):
         return [entry for entry in self.all() if entry["number"] > number and self.status(entry["number"]) is None]
@@ -96,6 +103,6 @@ class Requests:
     def of_player(self, player, limit=10):
         """What they can be told about their own requests, and nobody else's."""
         mine = [entry for entry in self.all() if entry.get("player") == player][-limit:]
-        return [{"wants": entry["wants"], "status": self.status(entry["number"]) or "being looked at",
+        return [{"wants": entry["wants"], "status": "being looked at" if self.status(entry["number"]) in (None, ASK_AGAIN) else self.status(entry["number"]),
                  **({"why": self.statuses[str(entry["number"])]["why"]} if self.statuses.get(str(entry["number"]), {}).get("why") else {})}
                 for entry in mine]

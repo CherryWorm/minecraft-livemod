@@ -16,7 +16,8 @@ PROGRESSION = workshop.REPO / workshop.PROGRESSION
 FEATURES = workshop.REPO / "mods/genesis/features"
 STATE = pathlib.Path("/workspace/state")
 OPENING = STATE / "opening.json"
-AGENT_LABEL = "§b[Agent]§r "
+ENGINE_UPDATED = "engine_updated"
+AGENT_LABEL ="§b[Agent]§r "
 HOW_TO_ANSWER = ("§7Please answer me with a private message: type §f/dm§7, a space, then your message, like §f/dm I love exploring§7. "
                  "Only I can see those. You can also click this line to start one.")
 OPENING_NOTE = ("§7Until the first new things arrive, the world is small and safe: you can go {radius} blocks from spawn, as far as the glowing wall, "
@@ -518,6 +519,9 @@ class Agent:
 
     async def next_features(self):
         """Asks the director what's next, and what to do about everything players have asked for."""
+        if self.engine_updated():
+            self.state["engine_updated"] = (CONTROL / ENGINE_UPDATED).stat().st_mtime
+            self.requests.ask_again()
         undecided = {entry["number"]: entry for entry in self.requests.undecided()}
         saw = self.requests.last_number()
         body = "\n".join(llm.untrusted("intent", json.dumps({"number": number, "player": entry.get("player"), "wants": entry["wants"], "status": self.requests.status(number) or "new",
@@ -552,10 +556,13 @@ class Agent:
             number, outcome = decision.get("number"), decision.get("outcome")
             if number not in undecided or outcome not in (feedback.LATER, feedback.DECLINED, feedback.NEEDS_OWNER, "already_there"):
                 continue
-            if outcome == feedback.NEEDS_OWNER:
+            before = self.requests.status(number)
+            # Someone looking at it again and coming to the same answer isn't news to the owner or the player.
+            still_needs_owner = outcome == feedback.NEEDS_OWNER and before == feedback.ASK_AGAIN
+            if outcome == feedback.NEEDS_OWNER and not still_needs_owner:
                 self.tell_owner(f"request {number}", [f"{undecided[number]['wants']}: {decision.get('why', '')}"])
             # It'll keep coming back as later, and they only need to hear that once.
-            if not (outcome == feedback.LATER and self.requests.status(number) == feedback.LATER):
+            if not still_needs_owner and not (outcome == feedback.LATER and before == feedback.LATER):
                 news.append((undecided[number], outcome, decision.get("why", "")))
             self.requests.mark(number, feedback.DONE if outcome == "already_there" else outcome, why=decision.get("why", ""))
         taken = {feature["id"] for feature in [*self.queue, *self.building.values()]}
@@ -603,10 +610,17 @@ class Agent:
         """Fewer waiting than can be built at once, so the director plans ahead rather than leaving builders idle until everything's finished."""
         return self.waiting() < self.governor.builders_allowed()
 
+    def engine_updated(self):
+        """The owner's way of saying the engine can do more than it could. It's the file's time that counts, because the agent can only read that folder, so touching it again works again."""
+        marker = CONTROL / ENGINE_UPDATED
+        return marker.exists() and marker.stat().st_mtime != self.state.get("engine_updated")
+
     def should_plan(self):
         # While requests are being sorted, some of them may be about to become small jobs.
         if self.planning or self.sort_wanted.is_set():
             return False
+        if self.engine_updated():
+            return True
         if self.out_of_work() and time.time() >= self.director_rest_until:
             return True
         return bool(self.requests.unanswered_after(self.state["director_saw"])) and time.time() - self.last_planned >= FEEDBACK_PLAN_SECONDS
