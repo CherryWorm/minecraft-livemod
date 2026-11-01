@@ -414,8 +414,8 @@ def number(text):
 
 def aim(tag, x, y, z):
     """Puts a mob right in front of the player, with their crosshair on it, the way someone really would use something on it."""
-    rcon("tp", f"@n[tag={tag}]", str(x + 0.5), str(y), str(z + 0.5))
-    rcon("tp", PLAYER, str(x + 0.5), str(y), str(z + 2.5), "facing", "entity", f"@n[tag={tag}]", "eyes")
+    rcon("tp", f"@n[tag={tag}]", str(x + 0.5), str(y), str(z + 2.5))
+    rcon("tp", PLAYER, str(x + 0.5), str(y), str(z + 0.5), "0", "35")
     # What the crosshair's on is only worked out when a frame is drawn, and test clients draw few of them.
     time.sleep(2)
 

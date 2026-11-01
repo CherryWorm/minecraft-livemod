@@ -238,7 +238,6 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 			return;
 		}
 		this.flies = flying;
-		setNoGravity(flying);
 		getNavigation().stop();
 		if (flying) {
 			this.moveControl = new FlyingMoveControl<>(this, 20, true);
@@ -254,6 +253,12 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 
 	public boolean isFlying() {
 		return this.flies;
+	}
+
+	/** It's asked rather than set, because loading one or summoning one with any data at all overwrites what's set. */
+	@Override
+	public boolean isNoGravity() {
+		return this.flies || super.isNoGravity();
 	}
 
 	/** Lets it stay as steady going up or down as it does going along, as a bee does. */
