@@ -8,7 +8,11 @@ from orchestrator import progression as graph
 
 STAGE_ORDER = {stage: index for index, stage in enumerate(graph.STAGES)}
 REFERENCE = re.compile(r"\$(?:block|item|mob):(?:(\w+)/)?(\w+)")
-GUIDE_LIMIT = 60000  # It's read for every chat message, so however big the world gets, this can't grow forever.
+INDEX_DESCRIPTION = 200  # Enough to tell what something is, and the rest comes from its entry.
+ENTRY_LIMIT = 12000
+PLANS = re.compile(r"\b(later|future|upcoming|eventually|not yet|next stage|coming)\b", re.I)
+A_PART = re.compile(r",? part \d+( of [^:.]+)?", re.I)
+SENTENCE = re.compile(r"(?<=[.!?])\s+")
 
 
 def _describe_item(item):
@@ -106,8 +110,16 @@ def _guide_recipe(recipe, say):
     return f"{made}: {how}" + (", once it's been learned" if recipe.get("mode") == "known" else "")
 
 
-def _guide_feature(manifest, say, with_text):
-    lines = [f"### {say(manifest.get('summary', ''))}"]
+def _without_plans(summary, not_out):
+    """Summaries are written for builders, and can mention what's still to come. Those sentences are left out altogether,
+    because not showing a model something is stronger than telling it not to repeat it."""
+    node = re.compile(r"\b(" + "|".join(map(re.escape, sorted(not_out))) + r")\b") if not_out else None
+    return " ".join(sentence for sentence in SENTENCE.split(A_PART.sub("", summary))
+                    if not PLANS.search(sentence) and not (node and node.search(sentence)))
+
+
+def _guide_feature(manifest, say, not_out):
+    lines = [f"### {_without_plans(say(manifest.get('summary', '')), not_out)}"]
 
     def block_name(block):
         return say(block if "$" in str(block) or ":" in str(block) else f"$block:{block}")
@@ -145,30 +157,57 @@ def _guide_feature(manifest, say, with_text):
         lines.append(f"- recipe for {_guide_recipe(recipe, say)}")
     for name, entry in manifest.get("knowledge", {}).items():
         routes = " or ".join(f"{route.get('type')} {say(route.get('id', ''))}".strip() for route in entry.get("routes", []))
-        reads = f" It reads: {say(entry.get('text', ''))}" if with_text else ""
-        lines.append(f"- to learn \"{entry.get('title', name)}\": {routes}.{reads}")
+        lines.append(f"- to learn \"{entry.get('title', name)}\": {routes}. It reads: {say(entry.get('text', ''))}")
     return lines
 
 
-def player_guide(features_dir):
-    """What's out and how to get it, by the names players see, for the voices that help them. Only what's been released
-    is ever merged into main, so nothing still being built can reach this through here."""
+def _readable(features_dir):
+    """What's out, a way to say things in the names players see, and the parts of the graph that nothing's out for yet.
+    Only what's been released is ever merged into main, so nothing still being built can reach anyone through here."""
     manifests = {path.parent.name: json.loads(path.read_text(encoding="utf-8")) for path in sorted(features_dir.glob("*/feature.json"))}
     names = {(feature_id, name): thing["display"] for feature_id, manifest in manifests.items()
              for table in ("blocks", "items", "mobs") for name, thing in manifest.get(table, {}).items() if thing.get("display")}
 
-    def written(with_text):
-        lines = []
-        for feature_id, manifest in manifests.items():
-            def say(value, feature_id=feature_id):
-                text = REFERENCE.sub(lambda found: names.get((found.group(1) or feature_id, found.group(2)), found.group(2).replace("_", " ")), str(value))
-                return re.sub(r"#?minecraft:(\w+)", lambda found: found.group(1).replace("_", " "), text)
-            lines += _guide_feature(manifest, say, with_text)
-        return "\n".join(lines)
+    def saying(feature_id):
+        def say(value):
+            text = REFERENCE.sub(lambda found: names.get((found.group(1) or feature_id, found.group(2)), found.group(2).replace("_", " ")), str(value))
+            return re.sub(r"#?minecraft:(\w+)", lambda found: found.group(1).replace("_", " "), text)
+        return say
 
-    # What codex entries say is the first thing to go, because players can read those for themselves.
-    guide = written(True)
-    return (guide if len(guide) <= GUIDE_LIMIT else written(False)[:GUIDE_LIMIT]) or "Nothing yet."
+    bible = features_dir.parent.parent.parent / "bible" / "progression.json"
+    nodes = json.loads(bible.read_text(encoding="utf-8")).get("nodes", {}) if bible.exists() else {}
+    return manifests, saying, set(nodes) - {manifest.get("node") for manifest in manifests.values()}
+
+
+def _shown_names(manifest):
+    shown = [thing["display"] for table in ("blocks", "items", "mobs") for thing in manifest.get(table, {}).values() if thing.get("display")]
+    return shown + [name.replace("_", " ") for table in ("biomes", "ruins") for name in manifest.get(table, {})]
+
+
+def player_index(features_dir):
+    """A line for everything that's out, for the voices that help players. It's never cut short, because what isn't here
+    doesn't exist as far as they're concerned, and it stays small because the detail is in player_entry."""
+    manifests, saying, not_out = _readable(features_dir)
+    lines = []
+    for feature_id, manifest in manifests.items():
+        description = SENTENCE.split(_without_plans(saying(feature_id)(manifest.get("summary", "")), not_out))[0]
+        if len(description) > INDEX_DESCRIPTION:
+            description = description[:INDEX_DESCRIPTION].rsplit(" ", 1)[0] + "..."
+        shown = _shown_names(manifest)
+        lines.append(f"- {feature_id}: {description}" + (f" ({', '.join(shown)})" if shown else ""))
+    return "\n".join(lines) or "Nothing yet."
+
+
+def player_entry(features_dir, wanted):
+    """The whole entry for one thing, by its id or a name players see. What's wanted comes from a model, so it's only ever
+    compared with what's there."""
+    manifests, saying, not_out = _readable(features_dir)
+    key = str(wanted).strip().lower()
+    found = key if key in manifests else next((feature_id for feature_id, manifest in manifests.items()
+                                               if key in (name.lower() for name in _shown_names(manifest))), None)
+    if found is None:
+        return "There's nothing by that name. Use an id from the guide."
+    return "\n".join(_guide_feature(manifests[found], saying(found), not_out))[:ENTRY_LIMIT]
 
 
 def reached_nodes(features_dir, reached):

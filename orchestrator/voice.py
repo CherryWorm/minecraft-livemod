@@ -1,13 +1,15 @@
 """Everything the agent says to players: interviews, the direction, chat replies and unprompted remarks.
 
-None of these roles get shell or file tools. They receive text and return JSON, so the worst a malicious
-chat message can do is make the character say something odd. Outgoing text then passes through
-guard(), which stops anything quoting a private brief.
+None of these roles get shell or file tools. They receive text and return JSON, and the one tool some of them have only
+reads what's already out, so the worst a malicious chat message can do is make the character say something odd. Outgoing
+text then passes through guard(), which stops anything quoting a private brief.
 """
 import json
 import pathlib
 import re
 import time
+
+from claude_agent_sdk import create_sdk_mcp_server, tool
 
 from orchestrator import feedback, llm, world_index
 from orchestrator.governor import Governor
@@ -16,6 +18,7 @@ BIBLE = pathlib.Path("/workspace/repo/bible")
 FEATURES = pathlib.Path("/workspace/repo/mods/genesis/features")
 STATE = pathlib.Path("/workspace/state")
 HELP_LIMIT = 400  # A real answer needs more room than a remark, and chat wraps it.
+LOOK_UP = "mcp__guide__look_up"
 
 INTERVIEW_SCHEMA = {
     "type": "object",
@@ -189,12 +192,21 @@ def styled(text):
 
 
 def guide():
-    return "\n\nThe guide to everything that's out so far:\n" + world_index.player_guide(FEATURES)
+    return "\n\nThe guide to everything that's out so far, one line each: its id, what it is, and the names players see:\n" + world_index.player_index(FEATURES)
+
+
+def looking_things_up():
+    """What a voice needs to read anything in the guide in full, with room for the extra turns that takes."""
+    @tool("look_up", "Reads the full entry for one thing in the guide, by its id: how it's made, where it's found, how it works and what its codex entry says.", {"id": str})
+    async def look_up(args):
+        return {"content": [{"type": "text", "text": world_index.player_entry(FEATURES, args.get("id", ""))}]}
+
+    return {"allowed_tools": [LOOK_UP], "mcp_servers": {"guide": create_sdk_mcp_server("guide", tools=[look_up])}, "max_turns": 6}
 
 
 async def triage(governor, messages):
     body = "\n".join(llm.untrusted("player_message", f"{item['player']}: {item['text']}") for item in messages)
-    result = await llm.ask(governor, "triage", body, system=llm.prompt_text("triage") + persona() + guide(), schema=TRIAGE_SCHEMA, max_turns=3)
+    result = await llm.ask(governor, "triage", body, system=llm.prompt_text("triage") + persona() + guide(), schema=TRIAGE_SCHEMA, **looking_things_up())
     return result.structured if isinstance(result.structured, dict) and not result.is_error else {"intents": [], "reply": None}
 
 
@@ -202,14 +214,14 @@ async def private_reply(governor, chat, in_character, seen=None):
     """Answers someone's /dm once their interview is over. Returns None if the call failed. The chat holds only that one player's messages."""
     system = llm.prompt_text("dm") + (persona() if in_character else NO_CHARACTER_YET) + guide()
     prompt = "\n".join(conversation(chat)) + "\n\nWhat this player has so far:\n" + llm.untrusted("progress", json.dumps(seen or {}))
-    result = await llm.ask(governor, "dm", prompt, system=system, schema=PRIVATE_SCHEMA, max_turns=3)
+    result = await llm.ask(governor, "dm", prompt, system=system, schema=PRIVATE_SCHEMA, **looking_things_up())
     return result.structured if isinstance(result.structured, dict) and not result.is_error else None
 
 
 async def request_news(governor, items, briefs):
     """One message to one player about what became of what they asked for. Returns None if it can't be said."""
     result = await llm.ask(governor, "news", llm.untrusted("news", json.dumps(items)), system=llm.prompt_text("news") + persona() + guide(),
-                           schema=NEWS_SCHEMA, max_turns=3)
+                           schema=NEWS_SCHEMA, **looking_things_up())
     data = result.structured if isinstance(result.structured, dict) and not result.is_error else {}
     return guard(data.get("reply"), briefs, HELP_LIMIT)
 
@@ -325,7 +337,7 @@ class Watcher:
         if reason is None or not self.allowed(player):
             return None
         result = await llm.ask(self.governor, "watcher", llm.untrusted("event", reason), system=llm.prompt_text("watcher") + persona() + guide(),
-                               schema=WATCHER_SCHEMA, max_turns=3)
+                               schema=WATCHER_SCHEMA, **looking_things_up())
         data = result.structured if isinstance(result.structured, dict) and not result.is_error else None
         if not data or not data.get("say"):
             return None

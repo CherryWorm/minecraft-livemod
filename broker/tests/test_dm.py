@@ -68,6 +68,7 @@ class PrivateChat(unittest.IsolatedAsyncioTestCase):
     async def test_it_knows_what_is_out_and_what_they_have(self):
         await self.agent.on_dm("Dana", "what should I do?")
         self.assertIn("Moss that glows.", self.ask.await_args.kwargs["system"])
+        self.assertEqual(self.ask.await_args.kwargs["allowed_tools"], [voice.LOOK_UP])
         self.assertIn("Iron Dust", self.prompt())
         self.assertIn("Deep Lore", self.prompt())
         self.assertNotIn("Eli's Thing", self.prompt())
