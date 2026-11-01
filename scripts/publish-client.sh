@@ -9,7 +9,8 @@ export MSYS_NO_PATHCONV=1 WSL_UTF8=1
 host=${LIVE_HOST:?Set LIVE_HOST to the address of the server.}
 remote="root@$host"
 
-url=$(git remote get-url origin)
+# The distro has no GitHub key, and the repository is public anyway.
+url=$(git remote get-url origin | sed "s#^git@github.com:#https://github.com/#")
 commit=$(git ls-remote origin refs/heads/main | cut -f1)
 echo "publishing $commit" >&2
 module_key=$(ssh -o BatchMode=yes "$remote" cat /srv/livingmod/runtime/broker/signing/module_key.pub)

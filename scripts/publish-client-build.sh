@@ -10,7 +10,7 @@ runtime_dir=/srv/livingmod/runtime
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-git clone -q "$url" "$work/repo" </dev/null >&2
+GIT_TERMINAL_PROMPT=0 git clone -q "$url" "$work/repo" </dev/null >&2
 cd "$work/repo"
 git checkout -q "$commit"
 printf 'RUNTIME_DIR=%s\n' "$runtime_dir" >.env
