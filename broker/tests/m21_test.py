@@ -114,6 +114,7 @@ def lane_test(source, api):
         report(f"{api}: every request carries the model's key", all(entry["authorization"] == f"Bearer {MODEL_KEY}" for entry in entries), {entry["authorization"] for entry in entries})
         everything = json.dumps(entries)
         report(f"{api}: the owner's Claude login never reaches the model", OAUTH not in everything)
+        report(f"{api}: Claude's billing line doesn't reach the model", "x-anthropic-billing-header" not in everything)
         looked = next((entry["outputs"][0] for entry in entries if entry["outputs"]), "")
         report(f"{api}: the builder's shell really ran", "looked" in looked, looked[:300])
         report(f"{api}: the builder's shell can't find the model's key", MODEL_KEY not in looked, looked[:300])

@@ -76,6 +76,9 @@ class ToChat(unittest.TestCase):
         self.assertEqual(assistant["tool_calls"][0]["id"], tool["tool_call_id"])
         self.assertEqual(assistant["content"], "Reading.")
 
+    def test_it_doesnt_ask_for_a_stream_because_some_servers_lose_tool_calls_in_them(self):
+        self.assertIs(self.request["stream"], False)
+
     def test_it_only_sends_what_every_server_takes(self):
         self.assertEqual(set(self.request) - {"tools"}, {"model", "messages", "stream"})
 
@@ -166,11 +169,40 @@ class FromChat(unittest.TestCase):
         reader.done()
         self.assertEqual(self.reply.take()[-2][1]["usage"], {"input_tokens": 100, "output_tokens": 2})
 
+    def test_a_whole_answer_with_a_call_and_real_usage(self):
+        self.reader.whole({"choices": [{"message": {"content": "", "reasoning_content": None, "tool_calls": [{"id": "c1", "index": 0, "type": "function", "function": {"name": "Read", "arguments": "{\"path\":\"a\"}"}}]},
+                                        "finish_reason": "tool_calls"}], "usage": {"prompt_tokens": 7, "completion_tokens": 9}})
+        self.reader.done()
+        message = bridge.collected(self.reply.take())
+        self.assertEqual([block["type"] for block in message["content"]], ["tool_use"])
+        self.assertEqual(message["content"][0]["input"], {"path": "a"})
+        self.assertEqual(message["stop_reason"], "tool_use")
+        self.assertEqual(message["usage"], {"input_tokens": 7, "output_tokens": 9})
+
+    def test_whole_answers_with_unnumbered_calls_dont_get_them_mixed_up(self):
+        calls = [{"id": name, "type": "function", "function": {"name": "Read", "arguments": "{}"}} for name in ("a", "b")]
+        self.reader.whole({"choices": [{"message": {"content": "Both.", "tool_calls": calls}, "finish_reason": "tool_calls"}]})
+        self.reader.done()
+        self.assertEqual([block.get("id") for block in bridge.collected(self.reply.take())["content"]], [None, "a", "b"])
+
+    def test_a_whole_answer_cut_short_says_so(self):
+        self.reader.whole({"choices": [{"message": {"content": "Hel"}, "finish_reason": "length"}]})
+        self.reader.done()
+        self.assertEqual(self.reply.take()[-2][1]["delta"]["stop_reason"], "max_tokens")
+
+    def test_a_refusal_in_a_successful_reply_is_a_failure(self):
+        with self.assertRaisesRegex(ValueError, "Out of credit"):
+            self.reader.whole({"error": {"message": "Out of credit"}})
+
 
 class WhenItFails(unittest.TestCase):
     def setUp(self):
         self.bridge = bridge.ModelBridge("https://gpu.example/v1", "real-key", "m")
         self.reply = bridge.Reply("claude-opus-5-5")
+
+    def fail(self, code, times=bridge.FAILURES_TO_BE_DOWN):
+        for _ in range(times):
+            self.bridge._failed(self.reply, "no", code)
 
     def test_it_starts_out_up(self):
         self.assertFalse(self.bridge.is_down())
@@ -185,24 +217,26 @@ class WhenItFails(unittest.TestCase):
         self.assertEqual(self.reply.status, 400)
 
     def test_a_wrong_key_or_an_outage_means_its_down(self):
-        for code in (401, 403, 404, 429, 502):
-            self.bridge.failed_at = 0
-            self.bridge._failed(self.reply, "no", code)
+        for code in (401, 403, 404, 502):
+            self.bridge.failures = 0
+            self.fail(code)
             self.assertTrue(self.bridge.is_down(), code)
 
-    def test_one_bad_request_doesnt(self):
-        self.bridge._failed(self.reply, "too long", 400)
+    def test_one_failure_doesnt_move_everything_to_claude(self):
+        self.fail(502, bridge.FAILURES_TO_BE_DOWN - 1)
         self.assertFalse(self.bridge.is_down())
 
-    def test_working_again_means_its_back(self):
-        self.bridge._failed(self.reply, "no", 502)
-        self.bridge.worked_at = self.bridge.failed_at + 1
+    def test_being_busy_isnt_being_down(self):
+        self.fail(429, 20)
+        self.assertFalse(self.bridge.is_down())
+
+    def test_bad_requests_arent_either(self):
+        self.fail(400, 20)
         self.assertFalse(self.bridge.is_down())
 
     def test_it_tries_again_after_a_while(self):
-        self.bridge._failed(self.reply, "no", 502)
+        self.fail(502)
         self.bridge.failed_at -= bridge.DOWN_SECONDS + 1
-        self.bridge.worked_at = -1
         self.assertFalse(self.bridge.is_down())
 
     def test_a_server_repeating_the_key_doesnt_get_it_into_the_logs(self):
@@ -232,19 +266,27 @@ class Answering(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_wrong_key_makes_it_give_up_rather_than_try_all_over_again(self):
         self.assertEqual((await self.refused_with(401)).status_code, 400)
-        self.assertTrue(self.bridge.is_down())
 
-    async def test_an_answer_still_streams_and_marks_it_as_working(self):
+    async def test_a_reply_that_isnt_an_answer_is_a_failure_and_not_silence(self):
         stream = mock.MagicMock()
-        stream.__enter__.return_value = [b'data: {"choices":[{"delta":{"content":"Hello"}}]}\n', b'data: {"choices":[{"delta":{"content":" there"}}]}\n', b"data: [DONE]\n"]
+        stream.__enter__.return_value.read.return_value = b'{"error": {"message": "Out of credit"}}'
+        with mock.patch.object(urllib.request, "urlopen", return_value=stream), contextlib.redirect_stdout(io.StringIO()):
+            answer = await self.bridge.messages(self.request())
+        self.assertEqual(answer.status_code, 502)
+        self.assertIn(b"Out of credit", answer.body)
+
+    async def test_claude_code_still_gets_a_stream_and_working_again_clears_failures(self):
+        self.bridge.failures = 99
+        stream = mock.MagicMock()
+        stream.__enter__.return_value.read.return_value = json.dumps({"choices": [{"message": {"content": "Hello there", "tool_calls": [
+            {"id": "c1", "type": "function", "function": {"name": "Read", "arguments": "{}"}}]}, "finish_reason": "tool_calls"}]}).encode()
         with mock.patch.object(urllib.request, "urlopen", return_value=stream):
             answer = await self.bridge.messages(self.request())
             sent = "".join([chunk async for chunk in answer.body_iterator])
         self.assertEqual(answer.status_code, 200)
-        for piece in ("Hello", " there", "message_stop"):
+        for piece in ("event: message_start", "Hello there", '"name": "Read"', '"stop_reason": "tool_use"', "event: message_stop"):
             self.assertIn(piece, sent)
-        self.assertGreater(self.bridge.worked_at, 0)
-        self.assertFalse(self.bridge.is_down())
+        self.assertEqual(self.bridge.failures, 0)
 
 
 class TheKey(unittest.TestCase):

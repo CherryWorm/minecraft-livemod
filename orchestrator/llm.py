@@ -98,7 +98,8 @@ async def _ask(governor, role, prompt, *, system=None, schema=None, resume=None,
         resume=resume,
         agents=agents,
         mcp_servers=mcp_servers or {},
-        max_budget_usd=budget,
+        # Budgets are the plan's. Claude Code prices another model as Claude with no cache, so one would stop it far too soon, and the turn limit still holds.
+        max_budget_usd=None if lane and not lane.counted else budget,
         env={**(env or {}), **(lane.env if lane else {})},
         output_format={"type": "json_schema", "schema": schema} if schema else None,
     )

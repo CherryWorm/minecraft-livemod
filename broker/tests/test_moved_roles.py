@@ -3,10 +3,11 @@ import os
 import pathlib
 import subprocess
 import tempfile
+import time
 import unittest
 from unittest import mock
 
-from orchestrator import lanes, llm, workshop
+from orchestrator import lanes, llm, model_bridge, workshop
 from orchestrator.governor import Governor
 
 ANSWER = llm.Result("hi", {"say": "hi"}, "s", 0.0, False, "end_turn", 0.0)
@@ -41,9 +42,30 @@ class WhichRolesCanMove(unittest.TestCase):
             hosted = lanes.SelfHosted()
         self.assertTrue(hosted.takes("dm"))
         self.assertFalse(hosted.takes("builder"))
-        hosted.bridge.failed_at = hosted.bridge.worked_at + 1 + __import__("time").monotonic()
+        hosted.bridge.failures = model_bridge.FAILURES_TO_BE_DOWN
+        hosted.bridge.failed_at = time.monotonic()
         self.assertFalse(hosted.takes("dm"))
         self.assertIs(hosted.is_up(), False)
+
+
+class Budgets(unittest.IsolatedAsyncioTestCase):
+    async def budget_with(self, lane):
+        seen = {}
+
+        async def query(prompt, options):
+            seen["budget"] = options.max_budget_usd
+            return
+            yield
+
+        with mock.patch.object(llm, "query", query):
+            await llm._ask(mock.Mock(), "builder", "Build it.", system="Be good.", budget=5.0, lane=lane)
+        return seen["budget"]
+
+    async def test_claude_keeps_to_its_budget(self):
+        self.assertEqual(await self.budget_with(None), 5.0)
+
+    async def test_another_model_isnt_cut_off_by_claudes_prices(self):
+        self.assertIsNone(await self.budget_with(LANE))
 
 
 class Asking(unittest.IsolatedAsyncioTestCase):

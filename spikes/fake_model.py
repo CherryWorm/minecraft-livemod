@@ -42,13 +42,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                      "tools": len(body.get("tools") or []), "outputs": tool_outputs(body), "request": json.dumps(body)[:200000]}) + "\n")
         step = step_for(body)
         self.send_response(200)
+        if not self.path.endswith("/responses"):
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(chat_answer(step)).encode())
+            return
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
-        for event in (responses_events if self.path.endswith("/responses") else chat_events)(step):
+        for event in responses_events(step):
             self.wfile.write(f"data: {json.dumps(event)}\n\n".encode())
             self.wfile.flush()
-        if not self.path.endswith("/responses"):
-            self.wfile.write(b"data: [DONE]\n\n")
 
 
 def responses_events(step):
@@ -64,16 +67,12 @@ def responses_events(step):
     yield {"type": "response.completed", "response": {"usage": {"input_tokens": 10, "output_tokens": 5}}}
 
 
-def chat_events(step):
+def chat_answer(step):
+    message = {"role": "assistant", "content": step.get("text", ""), "reasoning_content": "thinking"}
     if "tool" in step:
         arguments = json.dumps(step["input"])
-        call_id = f"call_{abs(hash(arguments)) % 10**8}"
-        yield {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": call_id, "function": {"name": step["tool"], "arguments": arguments[:5]}}]}}]}
-        yield {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": arguments[5:]}}]}, "finish_reason": "tool_calls"}]}
-    else:
-        yield {"choices": [{"delta": {"reasoning_content": "thinking"}}]}
-        yield {"choices": [{"delta": {"content": step["text"]}, "finish_reason": "stop"}]}
-    yield {"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 5}}
+        message["tool_calls"] = [{"id": f"call_{abs(hash(arguments)) % 10**8}", "type": "function", "function": {"name": step["tool"], "arguments": arguments}}]
+    return {"choices": [{"index": 0, "message": message, "finish_reason": "tool_calls" if "tool" in step else "stop"}], "usage": {"prompt_tokens": 10, "completion_tokens": 5}}
 
 
 class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):

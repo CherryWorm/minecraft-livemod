@@ -29,8 +29,9 @@ CHAT = "chat"
 NO_VISION = "[There was an image here, but this model can't see images.]"
 READ_TIMEOUT_SECONDS = 600
 CHARS_PER_TOKEN = 4
-DOWN_SECONDS = 300  # How long after a failure everything waits before trying the model again.
-ABOUT_THE_REQUEST = (400, 413, 422)  # The model's there, and it's only this one request that's wrong.
+DOWN_SECONDS = 300  # How long after going down everything waits before trying the model again.
+FAILURES_TO_BE_DOWN = 3  # A builder waits and tries again after one, so one alone is no reason to move anything to Claude.
+NOT_AN_OUTAGE = (400, 413, 422, 429)  # The model's there. It's only this request that's wrong, or it's busy, which Claude Code waits for.
 
 
 def _text_of(content):
@@ -134,9 +135,9 @@ def to_chat(body, model, vision):
                 parts.append({"type": "image_url", "image_url": {"url": _data_url(block)}} if vision else {"type": "text", "text": NO_VISION})
         if parts:
             messages.append({"role": "user", "content": parts})
-    # No limit on length and no asking for usage. Servers disagree on how to ask, and may refuse what they don't know. What
-    # Claude Code asks for is Claude's limit anyway, which can be more than another model allows.
-    request = {"model": model, "messages": messages, "stream": True}
+    # No stream, because some servers lose tool calls in one, and that looks just like a model with nothing to say. No limit on
+    # length either, because what Claude Code asks for is Claude's limit, which can be more than another model allows.
+    request = {"model": model, "messages": messages, "stream": False}
     tools = _tools(body)
     if tools:
         request["tools"] = [{"type": "function", "function": {"name": tool["name"], "description": tool.get("description", ""), "parameters": tool["input_schema"]}} for tool in tools]
@@ -260,6 +261,15 @@ class ChatReader:
             if choice.get("finish_reason") == "length":
                 self.too_long = True
 
+    def whole(self, answer):
+        """An answer that came all at once, which reads like one that came in a single piece, except that its calls may not be numbered."""
+        if not answer.get("choices"):
+            raise ValueError(f"it gave no answer: {str(answer.get('error') or answer)[:300]}")
+        choices = [{"delta": {"content": choice["message"].get("content"),
+                              "tool_calls": [{**call, "index": position} for position, call in enumerate(choice["message"].get("tool_calls") or [])]},
+                    "finish_reason": choice.get("finish_reason")} for choice in answer["choices"]]
+        self.feed({"usage": answer.get("usage"), "choices": choices})
+
     def done(self):
         for _, call in sorted(self.calls.items()):
             self.reply.tool(call["id"], call["name"], call["arguments"])
@@ -305,10 +315,10 @@ class ModelBridge:
         self.port = port
         self.password = secrets.token_urlsafe(32)
         self.failed_at = 0
-        self.worked_at = 0
+        self.failures = 0  # In a row.
 
     def is_down(self):
-        return self.failed_at > self.worked_at and time.monotonic() - self.failed_at < DOWN_SECONDS
+        return self.failures >= FAILURES_TO_BE_DOWN and time.monotonic() - self.failed_at < DOWN_SECONDS
 
     def client_env(self):
         """What a builder's Claude Code needs to use this. The empty one stops it sending the owner's login here."""
@@ -322,34 +332,39 @@ class ModelBridge:
     def _upstream(self, translated):
         path = "/responses" if self.api == RESPONSES else "/chat/completions"
         return urllib.request.Request(self.url + path, data=json.dumps(translated).encode(), method="POST", headers={
-            "Content-Type": "application/json", "Accept": "text/event-stream", **({"Authorization": f"Bearer {self.key}"} if self.key else {})})
+            "Content-Type": "application/json", "Accept": "text/event-stream" if self.api == RESPONSES else "application/json",
+            **({"Authorization": f"Bearer {self.key}"} if self.key else {})})
 
     def _failed(self, reply, message, code):
         """Claude Code waits and tries again after a 429 or a 5xx, and gives up straight away on anything else, like a wrong key."""
-        if code not in ABOUT_THE_REQUEST:
+        if code not in NOT_AN_OUTAGE:
             self.failed_at = time.monotonic()
+            self.failures += 1
         if self.key:
             message = message.replace(self.key, "[the key]")
         print(message[:500], flush=True)
         reply.error(message, code if code == 429 or code >= 500 else 400)
 
     def _pump(self, upstream, reader, reply, queue, loop):
-        """Reads the model's stream on a thread, because the standard library's client blocks."""
+        """Reads the model's answer on a thread, because the standard library's client blocks."""
         def send(events):
             asyncio.run_coroutine_threadsafe(queue.put(events), loop).result()
         try:
             with urllib.request.urlopen(upstream, timeout=READ_TIMEOUT_SECONDS) as stream:
-                self.worked_at = time.monotonic()
-                for line in stream:
-                    if not line.startswith(b"data:"):
-                        continue
-                    data = line[5:].strip()
-                    if data == b"[DONE]":
-                        break
-                    reader.feed(json.loads(data))
-                    if reply.events:
-                        send(reply.take())
+                if self.api == CHAT:
+                    reader.whole(json.loads(stream.read()))
+                else:
+                    for line in stream:
+                        if not line.startswith(b"data:"):
+                            continue
+                        data = line[5:].strip()
+                        if data == b"[DONE]":
+                            break
+                        reader.feed(json.loads(data))
+                        if reply.events:
+                            send(reply.take())
             reader.done()
+            self.failures = 0
         except urllib.error.HTTPError as error:
             self._failed(reply, f"The model's server said {error.code}: {error.read()[:300].decode('utf-8', 'replace')}", error.code)
         except (OSError, ValueError, http.client.HTTPException) as error:
