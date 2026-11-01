@@ -23,7 +23,7 @@ FIXING = "fixing"
 FIXED = "fixed"
 NOT_A_BUG = "not_a_bug"
 CANT_CONFIRM = "cant_confirm"
-NEEDS_OWNER = "needs_owner"
+ENGINE_LIMIT = "engine_limit"
 JOINED = "same_as_another"
 STILL_OPEN = (INVESTIGATING, FIXING)
 CONFIRMED = "confirmed"
@@ -136,8 +136,8 @@ class BugDesk:
                 await self._fix(number, entry)
         except Exception as error:  # noqa: BLE001 - someone's waiting to hear, whatever went wrong
             print(f"bug {number} failed: {type(error).__name__}: {error}", flush=True)
-            await self._pass_to_owner(number, entry, f"Working on it failed with {type(error).__name__}: {error}")
-            await self._tell_all(entry, LABEL + "§7I couldn't finish with that bug, so I've passed it to the person who runs the server.")
+            await self._collect(number, entry, f"Working on it failed with {type(error).__name__}: {error}")
+            await self._tell_all(entry, LABEL + "§7I couldn't finish with that bug, so it isn't fixed. It's on the list of what's still broken.")
 
     async def _wait_until_allowed(self):
         """A stopped agent or a used-up plan holds this up, and it carries on by itself after. It's the owner's limit, so it counts for this too."""
@@ -202,8 +202,8 @@ class BugDesk:
     async def _investigate(self, number, entry):
         found = await self._ask(entry)
         if found is None:
-            await self._pass_to_owner(number, entry, "Looking into it didn't finish.")
-            await self.agent.deliver(entry["player"], LABEL + "§7I couldn't get to the bottom of that, so I've passed it to the person who runs the server.")
+            await self._collect(number, entry, "Looking into it didn't finish.")
+            await self.agent.deliver(entry["player"], LABEL + "§7I couldn't get to the bottom of that, so it isn't fixed. It's on the list of what's still broken.")
             return
         self._log(number, "investigated", **{key: found.get(key) for key in SCHEMA["properties"] if found.get(key) is not None})
         said = self._speakable(found["findings"]) or "I've finished looking into that."
@@ -222,18 +222,18 @@ class BugDesk:
             self.agent.save()
             await self.agent.deliver(entry["player"], LABEL + said + " §7I'm fixing it now, ahead of everything else, and I'll tell you when it's in.")
         elif found["verdict"] in (CONFIRMED, ENGINE):
-            await self._pass_to_owner(number, entry, found.get("owner_note") or found["findings"])
-            await self.agent.deliver(entry["player"], LABEL + said + " §7That's in the engine under the world, which only the person who runs the server can change, so I've passed it to them with what I found.")
+            await self._collect(number, entry, found.get("owner_note") or found["findings"])
+            await self.agent.deliver(entry["player"], LABEL + said + " §7That's in the engine under the world, which nothing in the world can change, so it's on the list of what the engine is missing.")
         else:
             entry["status"] = found["verdict"]
             self.agent.save()
             await self.agent.deliver(entry["player"], LABEL + said)
 
-    async def _pass_to_owner(self, number, entry, note):
-        entry["status"] = NEEDS_OWNER
+    async def _collect(self, number, entry, note):
+        entry["status"] = ENGINE_LIMIT
         self.agent.tell_owner(f"bug {number}", [f"{entry['text']}: {note}"])
         self.agent.save()
-        self._log(number, "passed to the owner", note=note)
+        self._log(number, "collected for the engine", note=note)
 
     # Fixing it ----------------------------------------------------------------------------------------------
 
@@ -265,8 +265,8 @@ class BugDesk:
             title = self._speakable(entry.get("title"))
             await self._tell_all(entry, LABEL + (f"§7Fixed, and it's live now: §f{title}" if title else "§7That's fixed, and it's live now."))
         else:
-            await self._pass_to_owner(number, entry, f"A fix to {entry['feature']} couldn't be made to pass the gates. What was found: {entry['spec']}")
-            await self._tell_all(entry, LABEL + "§7I couldn't get a fix for that through the checks, so I've passed it to the person who runs the server.")
+            await self._collect(number, entry, f"A fix to {entry['feature']} couldn't be made to pass the gates. What was found: {entry['spec']}")
+            await self._tell_all(entry, LABEL + "§7I couldn't get a fix for that through the checks, so it isn't fixed. It's on the list of what's still broken.")
 
     async def _tell_all(self, entry, text):
         for player in dict.fromkeys([entry["player"], *entry.get("also", [])]):

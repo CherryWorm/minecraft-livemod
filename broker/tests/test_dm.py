@@ -131,6 +131,18 @@ class PrivateChat(unittest.IsolatedAsyncioTestCase):
         self.assertIn("couldn't answer", self.told()[0])
         self.assertNotIn("exploring", json.dumps(self.agent.state["private_chats"]))
 
+    async def test_if_all_it_said_was_that_someone_was_told_they_hear_what_is_true(self):
+        self.ask.return_value = answer("I've passed that to the owner.", intents=[{"wants": "more crystals in caves", "personal_advantage": False}])
+        await self.agent.on_dm("Dana", "more crystals please")
+        self.assertIn("Noted.", self.told()[0])
+        self.assertNotIn("owner", self.told()[0])
+
+    async def test_it_cant_say_it_noted_something_it_didnt_record(self):
+        self.ask.return_value = answer("Noted. The Skiff is at the dock.")
+        await self.agent.on_dm("Dana", "where's the skiff?")
+        self.assertIn("The Skiff is at the dock.", self.told()[0])
+        self.assertNotIn("Noted", self.told()[0])
+
     async def test_a_suggestion_is_passed_on_under_their_own_name(self):
         self.ask.return_value = answer(intents=[{"wants": "more crystals in caves", "personal_advantage": False, "player": "Eli"}])
         await self.agent.on_dm("Dana", "more crystals please")

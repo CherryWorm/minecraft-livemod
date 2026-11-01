@@ -64,7 +64,7 @@ DIRECTOR_SCHEMA = {
             "id": {"type": "string"}, "node": {"type": "string"}, "spec": {"type": "string"}, "category": {"type": "string", "enum": feedback.CATEGORIES},
             "answers": {"type": "array", "items": {"type": "integer"}}}, "required": ["id", "node", "spec", "category"]}},
         "decisions": {"type": "array", "items": {"type": "object", "properties": {
-            "number": {"type": "integer"}, "outcome": {"type": "string", "enum": [feedback.LATER, feedback.DECLINED, feedback.NEEDS_OWNER, "already_there"]}, "why": {"type": "string"}, "harm": {"type": "string"}},
+            "number": {"type": "integer"}, "outcome": {"type": "string", "enum": [feedback.LATER, feedback.DECLINED, feedback.ENGINE_LIMIT, "already_there"]}, "why": {"type": "string"}, "harm": {"type": "string"}},
             "required": ["number", "outcome", "why"]}},
         "new_nodes": {"type": "array", "items": NODE_SCHEMA},
     },
@@ -184,7 +184,8 @@ class Agent:
         except Exception as error:  # noqa: BLE001 - they're waiting for an answer, so even a failed call needs one
             print(f"a private reply failed: {error}", flush=True)
             result = None
-        reply = voice.guard(result.get("reply"), self.briefs(), voice.HELP_LIMIT) if result else None
+        # If all it said was that someone's been told, what's true is that it's recorded.
+        reply = (voice.guard(voice.honest_reply(result), self.briefs(), voice.HELP_LIMIT) or ("Noted." if result.get("intents") else None)) if result else None
         if reply:
             chat.append({"from": "you", "text": reply})
         self.save()
@@ -402,7 +403,7 @@ class Agent:
     async def apply_triage(self, result):
         self.record_intents(result.get("intents", []))
         # Nobody's met the character until the direction exists, so before then there's no one to answer.
-        reply = voice.guard(result.get("reply"), self.briefs(), voice.HELP_LIMIT) if self.state["direction_chosen"] else None
+        reply = voice.guard(voice.honest_reply(result), self.briefs(), voice.HELP_LIMIT) if self.state["direction_chosen"] else None
         if reply:
             await self.bridge.broadcast(voice.styled(reply))
 
@@ -497,7 +498,7 @@ class Agent:
 
     @staticmethod
     def tell_owner(source, requests):
-        """What the engine can't do goes to the owner, because adding it is reviewed human work."""
+        """Collects what the engine can't do, because adding it is reviewed human work. It's a file that notifies nobody, so nothing a player hears can say anyone's been told."""
         STATE.mkdir(parents=True, exist_ok=True)
         with (STATE / "host_requests.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(json.dumps({"at": time.time(), "feature": source, "requests": requests}) + "\n")
@@ -566,19 +567,19 @@ class Agent:
         news = []
         for decision in result.structured.get("decisions", []):
             number, outcome = decision.get("number"), decision.get("outcome")
-            if number not in undecided or outcome not in (feedback.LATER, feedback.DECLINED, feedback.NEEDS_OWNER, "already_there"):
+            if number not in undecided or outcome not in (feedback.LATER, feedback.DECLINED, feedback.ENGINE_LIMIT, "already_there"):
                 continue
             # A no has to say what it would damage. Without that it doesn't count, and the request comes back next time.
             if outcome == feedback.DECLINED and not decision.get("harm"):
                 print(f"request {number} was turned down with no harm named, so it comes back", flush=True)
                 continue
             before = self.requests.status(number)
-            # Someone looking at it again and coming to the same answer isn't news to the owner or the player.
-            still_needs_owner = outcome == feedback.NEEDS_OWNER and before == feedback.ASK_AGAIN
-            if outcome == feedback.NEEDS_OWNER and not still_needs_owner:
+            # Someone looking at it again and coming to the same answer isn't news, and it's already been collected.
+            still_cant = outcome == feedback.ENGINE_LIMIT and before == feedback.ASK_AGAIN
+            if outcome == feedback.ENGINE_LIMIT and not still_cant:
                 self.tell_owner(f"request {number}", [f"{undecided[number]['wants']}: {decision.get('why', '')}"])
             # It'll keep coming back as later, and they only need to hear that once.
-            if not still_needs_owner and not (outcome == feedback.LATER and before == feedback.LATER):
+            if not still_cant and not (outcome == feedback.LATER and before == feedback.LATER):
                 news.append((undecided[number], outcome, decision.get("why", "")))
             # Kept beside the verdict, so the next look at it can judge the reasoning and not only the answer.
             self.requests.mark(number, feedback.DONE if outcome == "already_there" else outcome, why=decision.get("why", ""), harm=decision.get("harm", ""))

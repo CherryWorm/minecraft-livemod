@@ -2,7 +2,7 @@
 
 None of these roles get shell or file tools. They receive text and return JSON, and the one tool some of them have only
 reads what's already out, so the worst a malicious chat message can do is make the character say something odd. Outgoing
-text then passes through guard(), which stops anything quoting a private brief.
+text then passes through guard(), which stops anything quoting a private brief or claiming someone outside the game was told.
 """
 import json
 import pathlib
@@ -100,8 +100,15 @@ WATCHER_SCHEMA = {
 }
 
 
+def honest_reply(result):
+    """A chat reply can only say it noted something if it recorded something, and whether it did is plain to check."""
+    recorded = any(not intent.get("personal_advantage") for intent in result.get("intents", []))
+    return result.get("reply") if recorded else feedback.without_noted(result.get("reply"))
+
+
 def guard(text, briefs, limit=256):
-    """Blocks a message that repeats a distinctive phrase from someone's private interview answers."""
+    """Blocks a message that repeats a distinctive phrase from someone's private interview answers, and removes any sentence claiming someone outside the game was told."""
+    text = feedback.without_relays(text)
     if not text:
         return None
     lowered = text.lower()

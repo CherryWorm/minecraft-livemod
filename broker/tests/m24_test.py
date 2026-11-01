@@ -120,7 +120,7 @@ def test_real_bug(dana):
     report("the job queue has nothing to do with it", now["queue"] == [] and now["in_flight"] == {}, str((now["queue"], now["in_flight"]))[:300])
     report("the director wasn't asked", not any(entry["role"] == "director" for entry in log("llm.jsonl")))
     # What it found can say "fixed" too, so this has to be the line that says it's done.
-    done = dana.wait_for("and it's live now|passed it to", 1200, start + 1)
+    done = dana.wait_for("and it's live now|on the list of", 1200, start + 1)
     print(f"finished in {round(time.monotonic() - began)}s: {done}", flush=True)
     report("the player hears when it's live", done and "live now" in done, done)
     report("it's marked as fixed", status(1) == "fixed", str(status(1)))

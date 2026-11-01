@@ -83,6 +83,58 @@ class Base(unittest.IsolatedAsyncioTestCase):
         self.ask.side_effect = respond
 
 
+class WhatVoicesClaim(Base):
+    def test_nothing_says_someone_outside_the_game_was_told_or_has_to_decide(self):
+        for text in ("It's been passed to the server's owner.", "This has been passed to the person who runs the server.", "Only the person who runs the server can change this.",
+                     "I've told the owner.", "I've passed that on.", "It's up to the owner.", "An admin will look at it.", "Das habe ich an den Betreiber weitergegeben."):
+            with self.subTest(text):
+                self.assertEqual(feedback.without_relays(f"Boats stay as they are. {text} Try the Skiff."), "Boats stay as they are. Try the Skiff.")
+
+    def test_ordinary_sentences_stay_as_they_were(self):
+        for text in ("The Hatch passes items on to the chest.", "The bench lists its owner's known recipes.", "I've told you where it is.", "It's on the list of what the engine is missing.",
+                     "The engine doesn't support new dimensions yet.", "Line one.\nLine two."):
+            with self.subTest(text):
+                self.assertEqual(feedback.without_relays(text), text)
+
+    def test_guard_removes_it_and_what_was_only_that_says_nothing(self):
+        self.assertEqual(voice.guard("Boats stay. I've told the owner.", []), "Boats stay.")
+        self.assertIsNone(voice.guard("I've told the owner.", []))
+
+    def test_what_was_saved_before_is_cleaned_too(self):
+        self.asked("a usage bar")
+        self.agent.requests.mark(1, feedback.ENGINE_LIMIT, why="The world can't see it. This has been passed to them.")
+        self.assertEqual(self.agent.requests.of_player("Dana")[0]["why"], "The world can't see it.")
+        self.assertNotIn("passed", json.dumps(self.agent.requests.decided()))
+
+    def test_a_reply_that_recorded_nothing_cant_say_it_noted_anything(self):
+        self.assertEqual(voice.honest_reply({"reply": "Noted. Boats are at the dock.", "intents": []}), "Boats are at the dock.")
+        self.assertEqual(voice.honest_reply({"reply": "Noted.", "intents": [{"wants": "a boat", "personal_advantage": False}]}), "Noted.")
+        self.assertEqual(voice.honest_reply({"reply": "Noted.", "intents": [{"wants": "gold for me", "personal_advantage": True}]}), "")
+
+    def test_no_prompt_leaves_decisions_to_the_owner_or_says_things_were_passed_on(self):
+        for role in ("director", "director_quick", "dm", "triage", "news"):
+            with self.subTest(role):
+                self.assertNotIn("needs_owner", llm.prompt_text(role))
+                self.assertNotIn("passed on to them", llm.prompt_text(role))
+
+    async def test_what_the_engine_lacks_says_so_and_never_that_anyone_was_told(self):
+        self.asked("new dimensions")
+        seen = []
+
+        async def respond(governor, name, prompt, **options):
+            if name == "director":
+                return result({"features": [], "decisions": [{"number": 1, "outcome": "engine_limit", "why": "The engine doesn't support new dimensions yet. This has been passed to them."}]})
+            seen.append(prompt)
+            return result({"reply": "The engine doesn't support that yet. I've told the owner."})
+        self.ask.side_effect = respond
+        await self.agent.next_features()
+        self.assertEqual(self.status(1), feedback.ENGINE_LIMIT)
+        self.assertIn("engine_limit", seen[0])
+        self.assertEqual(self.told(), ["§dKeeper§r: The engine doesn't support that yet."])
+        collected = [json.loads(line) for line in (self.folder / "host_requests.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertIn("new dimensions", collected[0]["requests"][0])
+
+
 class Sorting(Base):
     async def test_a_change_only_counts_if_something_really_changed(self):
         self.asked("copper is too rare")
@@ -265,11 +317,11 @@ class Directing(Base):
         self.assertNotIn("flatten", seen[0])
         self.assertNotIn("flatten", json.dumps(self.agent.requests.of_player("Dana")))
 
-    async def test_something_only_the_owner_can_fix_really_reaches_them(self):
+    async def test_what_the_engine_lacks_is_collected_and_the_player_hears(self):
         self.asked("the codex text is unreadable")
-        self.plan_answer(decisions=[{"number": 1, "outcome": "needs_owner", "why": "It's in the engine."}])
+        self.plan_answer(decisions=[{"number": 1, "outcome": "engine_limit", "why": "It's in the engine."}])
         await self.agent.next_features()
-        self.assertEqual(self.status(1), feedback.NEEDS_OWNER)
+        self.assertEqual(self.status(1), feedback.ENGINE_LIMIT)
         self.assertEqual(self.agent.requests.undecided(), [])
         owner = [json.loads(line) for line in (self.folder / "host_requests.jsonl").read_text(encoding="utf-8").splitlines()]
         self.assertEqual(owner[0]["feature"], "request 1")
@@ -284,17 +336,17 @@ class Directing(Base):
 
     async def test_nothing_comes_back_from_the_owner_until_they_say_so(self):
         self.asked("inventory tweaks")
-        self.plan_answer(decisions=[{"number": 1, "outcome": "needs_owner", "why": "It's in the engine."}])
+        self.plan_answer(decisions=[{"number": 1, "outcome": "engine_limit", "why": "It's in the engine."}])
         await self.agent.next_features()
         self.plan_answer()
         await self.agent.next_features()
         prompt = [call.args[2] for call in self.ask.await_args_list if call.args[1] == "director"][-1]
         self.assertIn("(no requests waiting)", prompt)
-        self.assertEqual(self.status(1), feedback.NEEDS_OWNER)
+        self.assertEqual(self.status(1), feedback.ENGINE_LIMIT)
 
     async def test_once_the_engine_changes_the_director_looks_again(self):
         self.asked("inventory tweaks", "faster boats")
-        self.plan_answer(decisions=[{"number": 1, "outcome": "needs_owner", "why": "It's in the engine."}, {"number": 2, "outcome": "declined", "why": "Boats stay as they are.", "harm": "Every boat in the world would change."}])
+        self.plan_answer(decisions=[{"number": 1, "outcome": "engine_limit", "why": "It's in the engine."}, {"number": 2, "outcome": "declined", "why": "Boats stay as they are.", "harm": "Every boat in the world would change."}])
         await self.agent.next_features()
         self.engine_updated()
         self.agent.sort_wanted.clear()
@@ -314,21 +366,21 @@ class Directing(Base):
         self.plan_answer()
         await self.agent.next_features()
         self.assertFalse(self.agent.engine_updated())
-        self.plan_answer(decisions=[{"number": 1, "outcome": "needs_owner", "why": "It's in the engine."}])
+        self.plan_answer(decisions=[{"number": 1, "outcome": "engine_limit", "why": "It's in the engine."}])
         await self.agent.next_features()
         self.plan_answer()
         await self.agent.next_features()
-        self.assertEqual(self.status(1), feedback.NEEDS_OWNER, "it isn't asked about again until it's touched again")
+        self.assertEqual(self.status(1), feedback.ENGINE_LIMIT, "it isn't asked about again until it's touched again")
 
     async def test_the_same_answer_again_isnt_news_to_anyone(self):
         self.asked("menus of their own")
-        self.plan_answer(decisions=[{"number": 1, "outcome": "needs_owner", "why": "It's in the engine."}])
+        self.plan_answer(decisions=[{"number": 1, "outcome": "engine_limit", "why": "It's in the engine."}])
         await self.agent.next_features()
         told = len(self.told())
         owner = (self.folder / "host_requests.jsonl").read_text(encoding="utf-8")
         self.engine_updated()
         await self.agent.next_features()
-        self.assertEqual(self.status(1), feedback.NEEDS_OWNER)
+        self.assertEqual(self.status(1), feedback.ENGINE_LIMIT)
         self.assertEqual(len(self.told()), told)
         self.assertEqual((self.folder / "host_requests.jsonl").read_text(encoding="utf-8"), owner)
 

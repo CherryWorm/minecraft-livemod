@@ -160,9 +160,9 @@ class Investigating(Base):
     async def test_the_engine_goes_to_the_owner_with_what_was_found(self):
         self.ask.return_value = finding(bugs.ENGINE, "Names come out wrong before any of this world's content is involved.", owner_note="Lang keys aren't sent to the client.")
         await self.report()
-        self.assertEqual(self.status(), bugs.NEEDS_OWNER)
+        self.assertEqual(self.status(), bugs.ENGINE_LIMIT)
         self.assertIn("Lang keys", self.agent.tell_owner.call_args.args[1][0])
-        self.assertIn("only the person who runs the server", self.told()[0])
+        self.assertIn("on the list of what the engine is missing", self.told()[0])
         self.agent.workshop.build.assert_not_awaited()
 
     async def test_a_feature_that_doesnt_exist_cant_be_fixed_so_it_goes_to_the_owner(self):
@@ -170,16 +170,16 @@ class Investigating(Base):
             with self.subTest(feature):
                 self.ask.return_value = finding(feature=feature, spec="Do something.")
                 await self.report()
-                self.assertEqual(self.status(len(self.desk.reports)), bugs.NEEDS_OWNER)
+                self.assertEqual(self.status(len(self.desk.reports)), bugs.ENGINE_LIMIT)
         self.agent.workshop.build.assert_not_awaited()
 
     async def test_if_looking_into_it_fails_it_tries_again_then_tells_everyone(self):
         self.ask.return_value = llm.Result("", None, "", 0.0, True, "error", 0.0)
         await self.report()
         self.assertEqual(self.ask.await_count, bugs.TRIES)
-        self.assertEqual(self.status(), bugs.NEEDS_OWNER)
+        self.assertEqual(self.status(), bugs.ENGINE_LIMIT)
         self.agent.tell_owner.assert_called_once()
-        self.assertIn("passed it", self.told()[0])
+        self.assertIn("on the list of what's still broken", self.told()[0])
 
     async def test_a_second_try_is_enough(self):
         self.ask.side_effect = [llm.Result("", None, "", 0.0, True, "error", 0.0), finding(bugs.NOT_A_BUG)]
@@ -189,8 +189,8 @@ class Investigating(Base):
     async def test_something_that_crashes_is_still_heard_about(self):
         self.ask.side_effect = RuntimeError("the model went away")
         await self.report()
-        self.assertEqual(self.status(), bugs.NEEDS_OWNER)
-        self.assertIn("passed it", self.told()[0])
+        self.assertEqual(self.status(), bugs.ENGINE_LIMIT)
+        self.assertIn("on the list of what's still broken", self.told()[0])
 
     async def test_a_private_phrase_never_reaches_the_player(self):
         self.agent.briefs.return_value = [{"wants": "exploring long dark caves with my friends every evening"}]
@@ -228,9 +228,9 @@ class Fixing(Base):
     async def test_a_fix_that_cant_pass_goes_to_the_owner(self):
         self.agent.workshop.build.return_value = False
         await self.report()
-        self.assertEqual(self.status(), bugs.NEEDS_OWNER)
+        self.assertEqual(self.status(), bugs.ENGINE_LIMIT)
         self.assertIn("Burns fuel twice", self.agent.tell_owner.call_args.args[1][0])
-        self.assertIn("passed it", self.told()[1])
+        self.assertIn("on the list of what's still broken", self.told()[1])
 
     async def test_a_fix_that_had_to_stop_carries_on(self):
         self.agent.workshop.build.side_effect = [None, True]
