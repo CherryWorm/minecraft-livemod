@@ -68,21 +68,9 @@ class BugDesk:
         return [{"reported": entry["text"], "status": entry["status"], **({"found": entry["findings"]} if entry.get("findings") else {})}
                 for entry in self.reports.values() if entry["player"] == player or player in entry.get("also", [])]
 
-    def _refusal(self, player):
-        mine = [entry for entry in self.reports.values() if entry["player"] == player]
-        if sum(entry["status"] in STILL_OPEN for entry in mine) >= MOST_OPEN_PER_PLAYER:
-            return "§7I'm still working on what you've already reported, so I haven't read that one. I'll tell you as soon as they're done, and then you can send it again."
-        if sum(time.time() - entry["at"] < DAY_SECONDS for entry in mine) >= MOST_A_DAY_PER_PLAYER:
-            return "§7That's as many bug reports as I can look into for one person in a day, so I haven't read that one. You can still tell me with §f/dm§7."
-        return None
-
     async def report(self, player, text):
         text = text.strip()[:LONGEST_REPORT]
         if not text:
-            return
-        refusal = self._refusal(player)
-        if refusal:
-            await self.agent.tell(player, refusal)
             return
         number = max((int(key) for key in self.reports), default=0) + 1
         self.reports[str(number)] = {"player": player, "text": text, "at": time.time(), "status": INVESTIGATING}
