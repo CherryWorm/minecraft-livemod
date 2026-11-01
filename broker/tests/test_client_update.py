@@ -29,6 +29,49 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
         pass
 
 
+class LaunchCommand(unittest.TestCase):
+    """Prism refuses to start the game if this command fails, so a wrong one locks everyone out. It reads instance.cfg with an older parser
+    when the file has no ConfigVersion, like the pack's, and with QSettings once it's saved the file itself. Both have to come out right."""
+
+    def line(self):
+        script = (REPO / "scripts/make-friend-pack.sh").read_text(encoding="utf-8")
+        return next(line for line in script.splitlines() if line.startswith("PreLaunchCommand=")).split("=", 1)[1]
+
+    @staticmethod
+    def older_parser(value):
+        # unquote(unescape(value)) in Prism's launcher/settings/INIFile.cpp.
+        out, previous = "", ""
+        for character in value:
+            if previous == "\\":
+                out += {"n": "\n", "t": "\t"}.get(character, character)
+                previous = ""
+            elif character == "\\":
+                previous = character
+            else:
+                out += character
+        if any(mark in out for mark in ";=,") and out.startswith('"') and out.endswith('"'):
+            out = out[1:-1]
+        return out
+
+    @staticmethod
+    def qsettings(value):
+        # Quotes that aren't escaped only group text, and are dropped. Escaped ones are kept.
+        out, index = "", 0
+        while index < len(value):
+            if value[index] == "\\":
+                index += 1
+                out += value[index]
+            elif value[index] != '"':
+                out += value[index]
+            index += 1
+        return out
+
+    def test_both_of_prisms_parsers_get_the_command_right(self):
+        wanted = '"$INST_JAVA" -jar livingmod-updater.jar'
+        self.assertEqual(self.older_parser(self.line()), wanted)
+        self.assertEqual(self.qsettings(self.line()), wanted)
+
+
 class Updating(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

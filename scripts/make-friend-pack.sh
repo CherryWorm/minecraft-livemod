@@ -43,9 +43,11 @@ if [[ -n "${UPDATE_TOKEN:-}" ]]; then
     echo "generation 0"
     for path in "$instance"/minecraft/mods/*; do echo "managed mods/$(basename "$path")"; done
   } >"$instance/minecraft/livingmod-updater.state"
+  # Written as Prism writes it, with no quotes around the whole value. Prism reads a file like this one with an older parser, which keeps
+  # them, and then it can't find the program, so the game won't start at all.
   cat >>"$instance/instance.cfg" <<'EOF'
 OverrideCommands=true
-PreLaunchCommand="\"$INST_JAVA\" -jar livingmod-updater.jar"
+PreLaunchCommand=\"$INST_JAVA\" -jar livingmod-updater.jar
 EOF
 fi
 cat >"$instance/mmc-pack.json" <<EOF
