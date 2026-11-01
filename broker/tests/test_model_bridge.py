@@ -1,6 +1,11 @@
 """Translating between Claude Code and a self-hosted model. A builder sees nothing different, so all of this has to be exact."""
+import contextlib
+import io
 import json
 import unittest
+import urllib.error
+import urllib.request
+from unittest import mock
 
 from orchestrator import model_bridge as bridge
 
@@ -71,8 +76,8 @@ class ToChat(unittest.TestCase):
         self.assertEqual(assistant["tool_calls"][0]["id"], tool["tool_call_id"])
         self.assertEqual(assistant["content"], "Reading.")
 
-    def test_usage_is_asked_for(self):
-        self.assertTrue(self.request["stream_options"]["include_usage"])
+    def test_it_only_sends_what_every_server_takes(self):
+        self.assertEqual(set(self.request) - {"tools"}, {"model", "messages", "stream"})
 
 
 class FromResponses(unittest.TestCase):
@@ -154,6 +159,92 @@ class FromChat(unittest.TestCase):
         message = bridge.collected(self.reply.take())
         self.assertEqual(message["content"], [{"type": "text", "text": "Done."}])
         self.assertEqual(message["stop_reason"], "end_turn")
+
+    def test_a_server_that_doesnt_report_usage_gets_a_rough_figure(self):
+        reader = bridge.ChatReader(self.reply, sent=400)
+        reader.feed({"choices": [{"delta": {"content": "12345678"}}]})
+        reader.done()
+        self.assertEqual(self.reply.take()[-2][1]["usage"], {"input_tokens": 100, "output_tokens": 2})
+
+
+class WhenItFails(unittest.TestCase):
+    def setUp(self):
+        self.bridge = bridge.ModelBridge("https://gpu.example/v1", "real-key", "m")
+        self.reply = bridge.Reply("claude-opus-5-5")
+
+    def test_it_starts_out_up(self):
+        self.assertFalse(self.bridge.is_down())
+
+    def test_claude_code_tries_again_after_what_might_pass(self):
+        for code in (429, 500, 503):
+            self.bridge._failed(self.reply, "no", code)
+            self.assertEqual(self.reply.status, code)
+
+    def test_claude_code_gives_up_on_what_wont(self):
+        self.bridge._failed(self.reply, "no", 401)
+        self.assertEqual(self.reply.status, 400)
+
+    def test_a_wrong_key_or_an_outage_means_its_down(self):
+        for code in (401, 403, 404, 429, 502):
+            self.bridge.failed_at = 0
+            self.bridge._failed(self.reply, "no", code)
+            self.assertTrue(self.bridge.is_down(), code)
+
+    def test_one_bad_request_doesnt(self):
+        self.bridge._failed(self.reply, "too long", 400)
+        self.assertFalse(self.bridge.is_down())
+
+    def test_working_again_means_its_back(self):
+        self.bridge._failed(self.reply, "no", 502)
+        self.bridge.worked_at = self.bridge.failed_at + 1
+        self.assertFalse(self.bridge.is_down())
+
+    def test_it_tries_again_after_a_while(self):
+        self.bridge._failed(self.reply, "no", 502)
+        self.bridge.failed_at -= bridge.DOWN_SECONDS + 1
+        self.bridge.worked_at = -1
+        self.assertFalse(self.bridge.is_down())
+
+    def test_a_server_repeating_the_key_doesnt_get_it_into_the_logs(self):
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            self.bridge._failed(self.reply, "Bad key: real-key", 401)
+        self.assertNotIn("real-key", printed.getvalue() + json.dumps(self.reply.take()))
+
+
+class Answering(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.bridge = bridge.ModelBridge("https://gpu.example/v1", "real-key", "m", api=bridge.CHAT)
+
+    def request(self):
+        body = {"model": "claude-opus-5-5", "stream": True, "messages": [{"role": "user", "content": "Hi."}]}
+        return mock.Mock(headers={"x-api-key": self.bridge.password}, json=mock.AsyncMock(return_value=body))
+
+    async def refused_with(self, code):
+        error = urllib.error.HTTPError("https://gpu.example", code, "no", {}, io.BytesIO(b"no"))
+        with mock.patch.object(urllib.request, "urlopen", side_effect=error), contextlib.redirect_stdout(io.StringIO()):
+            return await self.bridge.messages(self.request())
+
+    async def test_a_limit_reaches_claude_code_as_a_limit_so_it_waits(self):
+        self.assertEqual((await self.refused_with(429)).status_code, 429)
+
+    async def test_an_outage_reaches_it_as_an_outage_so_it_tries_again(self):
+        self.assertEqual((await self.refused_with(503)).status_code, 503)
+
+    async def test_a_wrong_key_makes_it_give_up_rather_than_try_all_over_again(self):
+        self.assertEqual((await self.refused_with(401)).status_code, 400)
+        self.assertTrue(self.bridge.is_down())
+
+    async def test_an_answer_still_streams_and_marks_it_as_working(self):
+        stream = mock.MagicMock()
+        stream.__enter__.return_value = [b'data: {"choices":[{"delta":{"content":"Hello"}}]}\n', b'data: {"choices":[{"delta":{"content":" there"}}]}\n', b"data: [DONE]\n"]
+        with mock.patch.object(urllib.request, "urlopen", return_value=stream):
+            answer = await self.bridge.messages(self.request())
+            sent = "".join([chunk async for chunk in answer.body_iterator])
+        self.assertEqual(answer.status_code, 200)
+        for piece in ("Hello", " there", "message_stop"):
+            self.assertIn(piece, sent)
+        self.assertGreater(self.bridge.worked_at, 0)
+        self.assertFalse(self.bridge.is_down())
 
 
 class TheKey(unittest.TestCase):

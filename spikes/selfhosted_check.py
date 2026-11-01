@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Whether the self-hosted model you've set up can really be a builder: it has to answer, call a tool, and act on what the
-tool says. Costs nothing from your plan. Run inside the agent's container, by the agent's entrypoint:
+"""Whether the model you've set up can really do the job: it has to answer, call a tool, act on what the tool says, and answer
+in the form it's given, which is how chat is read. Costs nothing from your plan. Run inside the agent's container, by the agent's entrypoint:
 
   ./scripts/stack.sh --profile agent run --rm -T --no-deps agent python3 /spikes/selfhosted_check.py
 """
@@ -34,12 +34,17 @@ async def run():
                                cwd=folder, max_turns=8, budget=5.0, lane=self_hosted.lane)
         written = pathlib.Path(folder) / "word.txt"
         worked = written.exists() and secret_word in written.read_text(encoding="utf-8")
+    form = {"type": "object", "properties": {"reply": {"type": "string"}}, "required": ["reply"]}
+    chat = await llm.ask(Meter(), "builder", "Say hello to Sam.", system="You're a friendly character.", schema=form, max_turns=3, budget=5.0, lane=self_hosted.lane)
+    spoke = isinstance(chat.structured, dict) and bool(chat.structured.get("reply"))
     server.cancel()
     print(f"answered: {not result.is_error} ({result.stop_reason}), in {result.seconds}s")
     print(f"used its tools properly: {worked}")
-    if result.is_error:
-        print(result.text[:800])
-    sys.exit(0 if worked else 1)
+    print(f"answered in the form it was given: {spoke}, in {chat.seconds}s")
+    for answer in (result, chat):
+        if answer.is_error:
+            print(answer.text[:800])
+    sys.exit(0 if worked and spoke else 1)
 
 
 asyncio.run(run())

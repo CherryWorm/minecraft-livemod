@@ -4,6 +4,7 @@ The agent works in a git worktree, and only plain code commits, requests checks 
 """
 import asyncio
 import dataclasses
+import hashlib
 import inspect
 import json
 import os
@@ -91,6 +92,21 @@ SUBAGENTS = {
         effort=llm.WORKER["effort"],
     ),
 }
+
+# Art is made by Opus, whatever model a builder runs on. A subagent always runs on its builder's model, so on any other model
+# these become a tool, and each runs as a session of its own on Claude.
+ART_KINDS = ("artist", "modeller")
+ART_TOOL = "mcp__art__make_art"
+ART_TURNS = 60
+ART_USAGE = 6.0
+ART_MADE = pathlib.Path("/workspace/state/art_made.json")
+ART_SCHEMA = {"type": "object", "required": ["jobs"], "properties": {"jobs": {"type": "array", "items": {
+    "type": "object", "required": ["kind", "brief"], "properties": {"kind": {"type": "string", "enum": list(ART_KINDS)}, "brief": {"type": "string"}}}}}}
+ART_NOTE = ("Claude Opus makes all of this world's art, so you don't: textures, sounds, models, panel images and shaders all come from the `make_art` tool. Ignore what "
+            "follows about `artist` and `modeller` subagents, and instead give `make_art` one job for each piece of work, all in one call, so they run at the same time: "
+            "`artist` for textures and sounds, and `modeller` for each creature or model block, with what the thing is and does and the name to save it under. Use the names "
+            "and sizes they give back. Anything you draw or generate yourself, including what a template leaves behind, gets redone by Opus before testing, so only write "
+            "feature.json, data and code yourself. The artists check how it looks, so you don't need to.\n\n")
 
 
 def _git(*args, cwd=REPO):
@@ -268,6 +284,18 @@ BUILDER_DENIED = ["Read(//proc/**)", "Read(//run/**)", "Read(//home/agent/.claud
                   "Glob(//workspace/state/**)", "WebFetch", "WebSearch"]
 
 
+def _art_in(folder):
+    """Every piece of art in a feature's folder, with the hash git would give it, so it can be compared with what's shipped."""
+    return {path.relative_to(folder).as_posix(): hashlib.sha1(b"blob %d\0" % path.stat().st_size + path.read_bytes(), usedforsecurity=False).hexdigest()
+            for path in sorted((folder / "assets").rglob("*")) if path.is_file() and path.name != "lang.json"}
+
+
+def _shipped_art(tree, feature_id):
+    prefix = f"mods/genesis/features/{feature_id}/"
+    lines = _git("ls-tree", "-r", "main", "--", f"{prefix}assets", cwd=tree).splitlines()
+    return {line.split("\t")[1].removeprefix(prefix): line.split()[2] for line in lines}
+
+
 @dataclasses.dataclass
 class Ready:
     """A feature that's passed everything, waiting to go out."""
@@ -292,6 +320,7 @@ class Workshop:
         self.hub = None  # Other machines that can do a builder's work.
         self.ready = []  # What's passed everything and is waiting for the next release.
         self.releasing = None
+        self.art_made = json.loads(ART_MADE.read_text(encoding="utf-8")) if ART_MADE.exists() else {}  # What Opus made, by feature and file.
 
     # Releases -----------------------------------------------------------------------------------------------
 
@@ -473,17 +502,71 @@ class Workshop:
 
     async def _attempt(self, feature_id, tree, prompt, session, small, lane, node, stage, max_turns, usage, tools, web, fix=None):
         """One go at the feature, by a model here or on another machine. Either way, what it did ends up in this tree."""
-        role = "bug_fixer" if fix else "small_builder" if small else "builder"
+        role = self._role(small, fix)
         if lane == lanes.REMOTE:
             # Being committed is what lets the machine see any earlier attempt's work.
             ready_commit(f"{feature_id}: before going to another machine", tree, feature_id, node)
             return await self.hub.attempt(feature_id, tree, {"prompt": prompt, "system": llm.prompt_text("builder"), "session": session, "small": small,
                                                              "node": node, "stage": stage, "max_turns": max_turns, "budget": usage})
-        chosen = self.lanes.get(lane)
-        return await llm.ask(self.governor, role, (chosen.note if chosen and not session else "") + prompt, system=llm.prompt_text("builder"), tools=tools, allowed_tools=tools,
-                             disallowed_tools=BUILDER_DENIED, agents=None if small else SUBAGENTS, cwd=str(tree), max_turns=max_turns, resume=session,
-                             mcp_servers={"broker": _tools_for(feature_id, tree, node), "web": web, "world": self.world_server()},
+        chosen = self._lane_for(role, lane)
+        names = [*tools, ART_TOOL] if chosen else tools
+        helpers = {name: helper for name, helper in SUBAGENTS.items() if not chosen or name not in ART_KINDS}
+        return await llm.ask(self.governor, role, (ART_NOTE if chosen and not session else "") + prompt, system=llm.prompt_text("builder"), tools=names, allowed_tools=names,
+                             disallowed_tools=BUILDER_DENIED, agents=None if small else helpers, cwd=str(tree), max_turns=max_turns, resume=session,
+                             mcp_servers={"broker": _tools_for(feature_id, tree, node), "web": web, "world": self.world_server(),
+                                          **({"art": self._art_server(feature_id, tree, node, web)} if chosen else {})},
                              budget=usage, lane=chosen)
+
+    @staticmethod
+    def _role(small, fix):
+        return "bug_fixer" if fix else "small_builder" if small else "builder"
+
+    def _lane_for(self, role, lane):
+        return self.lanes.get(lane) or llm.moved(role)
+
+    def _remember_art(self, feature_id, art):
+        self.art_made.setdefault(feature_id, {}).update(art)
+        ART_MADE.parent.mkdir(parents=True, exist_ok=True)
+        ART_MADE.write_text(json.dumps(self.art_made), encoding="utf-8")
+
+    async def _make_art(self, kind, brief, feature_id, tree, node, web):
+        """One piece of work by Opus, in the builder's tree. Only what it really changes counts as made by it."""
+        folder = tree / "mods/genesis/features" / feature_id
+        helper = SUBAGENTS[kind]
+        before = _art_in(folder)
+        result = await llm.ask(self.governor, kind, f"The feature's folder is mods/genesis/features/{feature_id}/.\n\n{brief}", system=helper.prompt, tools=helper.tools,
+                               allowed_tools=helper.tools, disallowed_tools=BUILDER_DENIED, cwd=str(tree), max_turns=ART_TURNS, budget=ART_USAGE,
+                               mcp_servers={"broker": _tools_for(feature_id, tree, node), "web": web})
+        self._remember_art(feature_id, {path: blob for path, blob in _art_in(folder).items() if before.get(path) != blob})
+        return result
+
+    def _art_server(self, feature_id, tree, node, web):
+        @tool("make_art", "Has Claude Opus make art for this feature. Give it every job at once, and they run at the same time. This takes minutes, and it replies with what was made.", ART_SCHEMA)
+        async def make_art(args):
+            jobs = [job for job in args.get("jobs", []) if job.get("kind") in ART_KINDS and job.get("brief")]
+            print(f"{feature_id}: asked for {len(jobs)} pieces of art", flush=True)
+            results = await asyncio.gather(*(self._make_art(job["kind"], job["brief"], feature_id, tree, node, web) for job in jobs), return_exceptions=True)
+            answers = [f"That one failed: {result}" if isinstance(result, Exception) else f"That one failed: {result.stop_reason}" if result.is_error else result.text for result in results]
+            return _text("\n\n".join(f"{job['kind']}: {answer}" for job, answer in zip(jobs, answers)) or "Give each job a kind and a brief.")
+        return create_sdk_mcp_server("art", tools=[make_art])
+
+    async def _finish_art(self, feature_id, spec, tree, node, web):
+        """A builder on another model may have drawn something itself or left what a template made, so Opus redoes it before anything
+        tests it. What's already shipped isn't touched. False means it has to wait until Claude can do that."""
+        folder = tree / "mods/genesis/features" / feature_id
+        made, shipped = self.art_made.get(feature_id, {}), _shipped_art(tree, feature_id)
+        left = sorted(path for path, blob in _art_in(folder).items() if blob not in (made.get(path), shipped.get(path)))
+        if not left:
+            return True
+        print(f"{feature_id}: {len(left)} pieces of art going to Opus", flush=True)
+        result = await self._make_art("artist", f"The builder of this feature made these without you: {', '.join(left)}. Read feature.json and redo each one, so that it's your own "
+                                                f"work and does what's needed here. Keep the names.\n\n{llm.untrusted('spec', spec)}", feature_id, tree, node, web)
+        if result.is_error:
+            print(f"{feature_id}: Opus couldn't redo its art: {result.stop_reason}", flush=True)
+            return not self.governor.why_not_build()  # A reviewer on Claude still looks at it, so this needn't stop it for good.
+        # It's seen them all, so it isn't asked twice about whatever it chose to leave.
+        self._remember_art(feature_id, {path: blob for path, blob in _art_in(folder).items() if path in left})
+        return True
 
     async def build(self, feature_id, spec, node, stage, small=False, lane=None, about="", fix=None, on_released=None):
         """Takes one feature from spec to released. Returns True if it reached players, False if it couldn't be done,
@@ -509,6 +592,7 @@ class Workshop:
                                   f"in the world is in bible/progression.json.\n\n{llm.untrusted('spec', spec)}\n\n"
                                   f"Your feature folder is mods/genesis/features/{feature_id}/.")
             began = time.monotonic()
+            chosen = self._lane_for(self._role(small, fix), lane)
             result = await self._attempt(feature_id, tree, prompt, session, small, lane, node, stage, max_turns, usage, tools, web, fix)
             if result.stop_reason in lanes.MACHINE_GONE:
                 print(f"{feature_id}: the machine it was on has gone, so it's going back in the queue", flush=True)
@@ -517,8 +601,16 @@ class Workshop:
             session = result.session_id or session
             if result.is_error:
                 print(f"{feature_id}: builder failed: {result.stop_reason} {result.text[:200]}", flush=True)
+                if chosen and chosen.is_down():
+                    print(f"{feature_id}: its model isn't answering, which says nothing about the feature, so it's going back in the queue", flush=True)
+                    return None
                 last_problem = f"The builder stopped: {result.stop_reason}"
                 continue
+
+            if (chosen or lane == lanes.REMOTE) and not await self._finish_art(feature_id, spec, tree, node, web):
+                print(f"{feature_id}: pausing until Claude can finish its art", flush=True)
+                return None
+            timings[f"art_{attempt}"] = round(time.monotonic() - began - timings[f"build_{attempt}"], 1)
 
             began = time.monotonic()
             gates = await checked_against_main("gates", f"{feature_id}: attempt {attempt}", tree, feature_id, node, release_id=f"{fix or feature_id}-{attempt}", hurry=small, first=bool(fix))

@@ -30,8 +30,12 @@ ROLES = {
     "icon": {"model": "claude-opus-5-5", "effort": "medium"},
     "bug_investigator": {"model": "claude-opus-5-5", "effort": "medium"},
     "bug_fixer": {"model": "claude-opus-5-5", "effort": "medium"},
+    "artist": {"model": "claude-opus-5-5", "effort": "low"},
+    "modeller": {"model": "claude-opus-5-5", "effort": "medium"},
 }
 WORKER = {"model": "claude-opus-5-5", "effort": "low"}
+MOVED = {}  # The roles the owner has moved off Claude, and the lane each now runs on.
+SPEAKERS = ("interviewer", "triage", "dm", "watcher", "news", "teaser", "mind")  # Players are waiting on these, so Claude answers if the other model can't.
 
 
 @dataclasses.dataclass
@@ -55,10 +59,30 @@ def untrusted(label, text):
     return f"<{label}>\n{cleaned}\n</{label}>"
 
 
-async def ask(governor: Governor, role, prompt, *, system=None, schema=None, resume=None, tools=None,
-              allowed_tools=None, disallowed_tools=None, cwd=None, agents=None, max_turns=4, mcp_servers=None,
-              permission_mode="dontAsk", budget=None, env=None, lane=None):
-    """Runs one conversation turn for a role. By default it can use no tools at all, and it runs on Claude unless given a lane."""
+def moved(role):
+    """The lane a role runs on if the owner has moved it. While that model's down, it runs on Claude."""
+    lane = MOVED.get(role)
+    return lane if lane and not lane.is_down() else None
+
+
+async def ask(governor: Governor, role, prompt, *, lane=None, **options):
+    """Runs one conversation turn for a role. By default it can use no tools at all, and it runs on Claude unless given a lane or moved."""
+    lane = lane or moved(role)
+    if lane is None or role not in SPEAKERS:
+        return await _ask(governor, role, prompt, lane=lane, **options)
+    try:
+        result = await _ask(governor, role, prompt, lane=lane, **options)
+        if not result.is_error and (result.structured is not None or not options.get("schema")):
+            return result
+        print(f"{role} got no answer from the other model: {result.stop_reason}", flush=True)
+    except Exception as error:  # noqa: BLE001 - whatever went wrong there, Claude can still answer
+        print(f"{role} got no answer from the other model: {type(error).__name__}", flush=True)
+    return await _ask(governor, role, prompt, lane=None, **options)
+
+
+async def _ask(governor, role, prompt, *, system=None, schema=None, resume=None, tools=None,
+               allowed_tools=None, disallowed_tools=None, cwd=None, agents=None, max_turns=4, mcp_servers=None,
+               permission_mode="dontAsk", budget=None, env=None, lane=None):
     config = ROLES[role]
     options = ClaudeAgentOptions(
         model=config["model"],

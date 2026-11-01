@@ -1,7 +1,8 @@
-"""Which model a builder runs on. Everything else that thinks stays on Claude: directing, reviewing, chat and minds.
+"""Which model a job runs on. Directing, reviewing and art always stay on Claude, and so does research, which needs Claude's web tools.
 
-Claude is the plan's limited allowance. A self-hosted model has no such limit, so it takes work on top of what Claude's
-builders can do. A reviewer on Claude still has to pass everything it makes, so it can't lower what reaches players.
+Claude is the plan's limited allowance, and another model doesn't have to be. Left as it comes, that model takes work on top of
+what Claude's builders can do. The owner can also move roles onto it completely, so that those don't use the plan at all. A
+reviewer on Claude still has to pass everything it makes, so it can't lower what reaches players.
 """
 import dataclasses
 import os
@@ -11,6 +12,7 @@ from orchestrator import model_bridge
 SELF_HOSTED = "self_hosted"
 REMOTE = "remote"
 MACHINE_GONE = ("no_worker", "worker_silent")  # An attempt that never really happened.
+MOVABLE = ("builder", "small_builder", "bug_investigator", "bug_fixer", "interviewer", "triage", "dm", "watcher", "news", "teaser", "mind")
 MODEL_KEY_FD = 5
 # Keeps a builder's history within what the model can hold, because Claude Code assumes Claude's otherwise.
 COMPACT_ENV = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
@@ -24,6 +26,7 @@ class Lane:
     env: dict
     counted: bool = False  # Whether it uses up the plan's allowance.
     note: str = ""
+    is_down: object = lambda: False
 
 
 def _read_key():
@@ -41,14 +44,23 @@ class SelfHosted:
     def __init__(self):
         self.url = os.environ.get("AGENT_SELFHOSTED_URL", "")
         self.slots = int(os.environ.get("AGENT_SELFHOSTED_BUILDERS", "0"))
+        self.roles = set(os.environ.get("AGENT_SELFHOSTED_ROLES", "").split(",")) & set(MOVABLE)
         self.bridge = None
         self.lane = None
         if self.url and self.slots > 0:
             vision = os.environ.get("AGENT_SELFHOSTED_VISION", "") == "1"
             self.bridge = model_bridge.ModelBridge(self.url, _read_key(), os.environ.get("AGENT_SELFHOSTED_MODEL", ""),
                                                    os.environ.get("AGENT_SELFHOSTED_API", model_bridge.RESPONSES), vision)
-            env = {**self.bridge.client_env(), COMPACT_ENV: os.environ.get("AGENT_SELFHOSTED_CONTEXT", "128000")}
-            self.lane = Lane(SELF_HOSTED, env, note="" if vision else NO_IMAGES_NOTE)
+            # Claude Code can hide tools until they're asked for, in a way only Claude's service understands.
+            env = {**self.bridge.client_env(), COMPACT_ENV: os.environ.get("AGENT_SELFHOSTED_CONTEXT", "128000"), "ENABLE_TOOL_SEARCH": "false"}
+            self.lane = Lane(SELF_HOSTED, env, note="" if vision else NO_IMAGES_NOTE, is_down=self.bridge.is_down)
+
+    def is_up(self):
+        return self.lane is not None and not self.lane.is_down()
+
+    def takes(self, role):
+        """Whether a role runs here rather than on Claude. It goes back while the model's down, so the world keeps growing."""
+        return self.is_up() and role in self.roles
 
     async def serve(self):
         if self.bridge:

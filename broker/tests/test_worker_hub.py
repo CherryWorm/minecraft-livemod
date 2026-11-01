@@ -130,7 +130,7 @@ class Attempts(unittest.IsolatedAsyncioTestCase):
         self.shop.lanes[lanes.SELF_HOSTED] = lane
         await self.attempt(lanes.SELF_HOSTED)
         self.assertIs(self.ask.await_args.kwargs["lane"], lane)
-        self.assertEqual(self.ask.await_args.args[2], "No images. Build it.")
+        self.assertEqual(self.ask.await_args.args[2], workshop.ART_NOTE + "Build it.")
 
     async def test_another_machine_gets_everything_it_needs_and_no_model_runs_here(self):
         await self.attempt(lanes.REMOTE)

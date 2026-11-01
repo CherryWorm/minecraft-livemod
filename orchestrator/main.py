@@ -85,8 +85,11 @@ class Agent:
         self.minds = minds.Minds(self.governor, self.bridge, self.private_words)
         self.workshop = workshop.Workshop(self.governor, self.on_released, self.research, lambda: self.reached)
         self.self_hosted = lanes.SelfHosted()
+        self.model_was_down = False
         if self.self_hosted.lane:
             self.workshop.lanes[lanes.SELF_HOSTED] = self.self_hosted.lane
+            llm.MOVED.update(dict.fromkeys(self.self_hosted.roles, self.self_hosted.lane))
+            self.governor.talks_on_plan = "dm" not in self.self_hosted.roles
         self.hub = worker_hub.WorkerHub(workshop.REPO, workshop.request, self.governor, lambda: self.reached)
         self.workshop.hub = self.hub
         self.told_about_dm = set()
@@ -625,16 +628,20 @@ class Agent:
     def running_on(self):
         return collections.Counter(feature.get("lane") for feature in self.building.values() if not feature.get("small"))
 
+    def claude_slots(self):
+        return 0 if self.self_hosted.takes("builder") else self.governor.builders_allowed()
+
     def big_slots(self):
-        return self.governor.builders_allowed() + self.self_hosted.slots * bool(self.self_hosted.lane) + self.running_on()[lanes.REMOTE] + self.hub.free_slots()
+        return self.claude_slots() + self.self_hosted.slots * bool(self.self_hosted.lane) + self.running_on()[lanes.REMOTE] + self.hub.free_slots()
 
     def lane_with_room(self):
-        """Claude first, so that what's being built now is as good as it was, and anything else takes what's left over. A warning
-        from the plan leaves Claude's builders with less room, so more work moves over by itself. False means nowhere has room."""
+        """Claude first, so that what's being built now is as good as it was, and anything else takes what's left over, unless the
+        owner has moved builders off Claude. A warning from the plan leaves Claude's builders with less room, so more work moves
+        over by itself. False means nowhere has room."""
         running = self.running_on()
-        if running[None] < self.governor.builders_allowed():
+        if running[None] < self.claude_slots():
             return None
-        if self.self_hosted.lane and running[lanes.SELF_HOSTED] < self.self_hosted.slots:
+        if self.self_hosted.is_up() and running[lanes.SELF_HOSTED] < self.self_hosted.slots:
             return lanes.SELF_HOSTED
         if self.hub.free_slots() > 0:
             return lanes.REMOTE
@@ -757,6 +764,10 @@ class Agent:
                 self.reached = (await self.bridge.call("progress")).get("reached", [])
             except (RuntimeError, ConnectionError, TimeoutError) as error:
                 print(f"couldn't read the game's status: {error}", flush=True)
+            down = bool(self.self_hosted.lane) and not self.self_hosted.is_up()
+            if down and not self.model_was_down:
+                self.tell_owner("the other model", ["It isn't answering, so what it runs is on Claude and using the plan until it's back. Its failures are in the agent's log."])
+            self.model_was_down = down
             await asyncio.sleep(10)
 
     async def watch_loop(self):

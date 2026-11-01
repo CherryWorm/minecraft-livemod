@@ -9,9 +9,12 @@ could find the real key, and whatever login it sends is never passed on.
 import asyncio
 import contextlib
 import hmac
+import http.client
 import json
+import re
 import secrets
 import threading
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -25,6 +28,9 @@ RESPONSES = "responses"
 CHAT = "chat"
 NO_VISION = "[There was an image here, but this model can't see images.]"
 READ_TIMEOUT_SECONDS = 600
+CHARS_PER_TOKEN = 4
+DOWN_SECONDS = 300  # How long after a failure everything waits before trying the model again.
+ABOUT_THE_REQUEST = (400, 413, 422)  # The model's there, and it's only this one request that's wrong.
 
 
 def _text_of(content):
@@ -128,9 +134,9 @@ def to_chat(body, model, vision):
                 parts.append({"type": "image_url", "image_url": {"url": _data_url(block)}} if vision else {"type": "text", "text": NO_VISION})
         if parts:
             messages.append({"role": "user", "content": parts})
-    request = {"model": model, "messages": messages, "stream": True, "stream_options": {"include_usage": True}}
-    if body.get("max_tokens"):
-        request["max_tokens"] = body["max_tokens"]
+    # No limit on length and no asking for usage. Servers disagree on how to ask, and may refuse what they don't know. What
+    # Claude Code asks for is Claude's limit anyway, which can be more than another model allows.
+    request = {"model": model, "messages": messages, "stream": True}
     tools = _tools(body)
     if tools:
         request["tools"] = [{"type": "function", "function": {"name": tool["name"], "description": tool.get("description", ""), "parameters": tool["input_schema"]}} for tool in tools]
@@ -154,6 +160,7 @@ class Reply:
         self.text_open = False
         self.used_tool = False
         self.finished = False
+        self.status = 502
         self.events = [("message_start", {"type": "message_start", "message": {
             "id": f"msg_{uuid.uuid4().hex}", "type": "message", "role": "assistant", "model": model, "content": [],
             "stop_reason": None, "stop_sequence": None, "usage": {"input_tokens": 0, "output_tokens": 0}}})]
@@ -195,8 +202,9 @@ class Reply:
                                               "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens}}))
         self.events.append(("message_stop", {"type": "message_stop"}))
 
-    def error(self, message):
+    def error(self, message, status=502):
         self.finished = True
+        self.status = status
         self.events.append(("error", {"type": "error", "error": {"type": "api_error", "message": str(message)[:500]}}))
 
 
@@ -226,23 +234,29 @@ class ResponsesReader:
 
 
 class ChatReader:
-    def __init__(self, reply):
+    """Claude Code goes by usage to know when to compact a builder's history, so a server that doesn't report it gets a rough figure."""
+
+    def __init__(self, reply, sent=0):
         self.reply = reply
         self.calls = {}
         self.too_long = False
         self.usage = {}
+        self.sent = sent
+        self.written = 0
 
     def feed(self, event):
         self.usage = event.get("usage") or self.usage
         for choice in event.get("choices") or []:
             delta = choice.get("delta") or {}
             self.reply.text(delta.get("content"))
+            self.written += len(delta.get("content") or "")
             for call in delta.get("tool_calls") or []:
                 held = self.calls.setdefault(call.get("index", 0), {"id": None, "name": None, "arguments": ""})
                 held["id"] = call.get("id") or held["id"]
                 function = call.get("function") or {}
                 held["name"] = function.get("name") or held["name"]
                 held["arguments"] += function.get("arguments") or ""
+                self.written += len(function.get("arguments") or "")
             if choice.get("finish_reason") == "length":
                 self.too_long = True
 
@@ -250,7 +264,7 @@ class ChatReader:
         for _, call in sorted(self.calls.items()):
             self.reply.tool(call["id"], call["name"], call["arguments"])
         self.calls = {}
-        self.reply.finish(self.usage.get("prompt_tokens", 0), self.usage.get("completion_tokens", 0), self.too_long)
+        self.reply.finish(self.usage.get("prompt_tokens") or self.sent // CHARS_PER_TOKEN, self.usage.get("completion_tokens") or self.written // CHARS_PER_TOKEN, self.too_long)
 
 
 def collected(events):
@@ -290,6 +304,11 @@ class ModelBridge:
         self.vision = vision
         self.port = port
         self.password = secrets.token_urlsafe(32)
+        self.failed_at = 0
+        self.worked_at = 0
+
+    def is_down(self):
+        return self.failed_at > self.worked_at and time.monotonic() - self.failed_at < DOWN_SECONDS
 
     def client_env(self):
         """What a builder's Claude Code needs to use this. The empty one stops it sending the owner's login here."""
@@ -305,12 +324,22 @@ class ModelBridge:
         return urllib.request.Request(self.url + path, data=json.dumps(translated).encode(), method="POST", headers={
             "Content-Type": "application/json", "Accept": "text/event-stream", **({"Authorization": f"Bearer {self.key}"} if self.key else {})})
 
+    def _failed(self, reply, message, code):
+        """Claude Code waits and tries again after a 429 or a 5xx, and gives up straight away on anything else, like a wrong key."""
+        if code not in ABOUT_THE_REQUEST:
+            self.failed_at = time.monotonic()
+        if self.key:
+            message = message.replace(self.key, "[the key]")
+        print(message[:500], flush=True)
+        reply.error(message, code if code == 429 or code >= 500 else 400)
+
     def _pump(self, upstream, reader, reply, queue, loop):
         """Reads the model's stream on a thread, because the standard library's client blocks."""
         def send(events):
             asyncio.run_coroutine_threadsafe(queue.put(events), loop).result()
         try:
             with urllib.request.urlopen(upstream, timeout=READ_TIMEOUT_SECONDS) as stream:
+                self.worked_at = time.monotonic()
                 for line in stream:
                     if not line.startswith(b"data:"):
                         continue
@@ -322,9 +351,9 @@ class ModelBridge:
                         send(reply.take())
             reader.done()
         except urllib.error.HTTPError as error:
-            reply.error(f"The model's server said {error.code}: {error.read()[:300].decode('utf-8', 'replace')}")
-        except (OSError, ValueError) as error:
-            reply.error(f"Couldn't reach the model's server: {error}")
+            self._failed(reply, f"The model's server said {error.code}: {error.read()[:300].decode('utf-8', 'replace')}", error.code)
+        except (OSError, ValueError, http.client.HTTPException) as error:
+            self._failed(reply, f"Couldn't reach the model's server: {error}", 502)
         send(reply.take())
         send(None)
 
@@ -332,17 +361,24 @@ class ModelBridge:
         if not self._allowed(request):
             return JSONResponse({"type": "error", "error": {"type": "authentication_error", "message": "Not for you."}}, status_code=401)
         body = await request.json()
-        translate = to_responses if self.api == RESPONSES else to_chat
+        translated = (to_responses if self.api == RESPONSES else to_chat)(body, self.model, self.vision)
         reply = Reply(body.get("model", self.model))
-        reader = ResponsesReader(reply) if self.api == RESPONSES else ChatReader(reply)
+        # Pictures say next to nothing about how many tokens they take.
+        reader = ResponsesReader(reply) if self.api == RESPONSES else ChatReader(reply, len(re.sub(r'data:[^"]*', "", json.dumps(translated))))
         queue = asyncio.Queue()
-        upstream = self._upstream(translate(body, self.model, self.vision))
-        threading.Thread(target=self._pump, args=(upstream, reader, reply, queue, asyncio.get_running_loop()), daemon=True).start()
+        threading.Thread(target=self._pump, args=(self._upstream(translated), reader, reply, queue, asyncio.get_running_loop()), daemon=True).start()
+        first = await queue.get()
+        failure = next((data for name, data in first if name == "error"), None)
+        if failure:
+            # Nothing's been sent yet, so Claude Code can be given a real status and know whether to try again.
+            return JSONResponse(failure, status_code=reply.status)
 
         async def events():
-            while (batch := await queue.get()) is not None:
+            batch = first
+            while batch is not None:
                 for event in batch:
                     yield event
+                batch = await queue.get()
 
         if body.get("stream"):
             async def stream():
@@ -351,7 +387,7 @@ class ModelBridge:
             return StreamingResponse(stream(), media_type="text/event-stream")
         everything = [event async for event in events()]
         failure = next((data for name, data in everything if name == "error"), None)
-        return JSONResponse(failure, status_code=502) if failure else JSONResponse(collected(everything))
+        return JSONResponse(failure, status_code=reply.status) if failure else JSONResponse(collected(everything))
 
     async def count_tokens(self, request):
         if not self._allowed(request):

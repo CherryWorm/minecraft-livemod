@@ -4,6 +4,7 @@ needs no game, only the agent's image: first through each API with secrets where
 trip between two containers that can only reach each other.
 
 Usage: python3 broker/tests/m21_test.py <source folder> [lanes|machines|egress]
+       python3 broker/tests/m21_test.py <source folder> art <the Claude token's file>
 """
 import json
 import pathlib
@@ -125,6 +126,47 @@ def lane_test(source, api):
         shutil.rmtree(folder, ignore_errors=True)
 
 
+def art_test(source, token):
+    """A real builder on the stand-in asks for art, and real Opus makes it. Unlike the rest, it uses a little of the plan and needs a way out."""
+    folder = pathlib.Path(tempfile.mkdtemp(prefix="m21-art-"))
+    workspace = writable(folder / "workspace")
+    try:
+        start_fake(source, folder, [
+            {"tool": "mcp__art__make_art", "input": {"jobs": [
+                {"kind": "artist", "brief": "One 16x16 texture called ember_ore: stone with warm glowing flecks."},
+                {"kind": "modeller", "brief": "A small round ember beetle called ember_beetle, kept simple: about 5 parts, and one round of checking is enough."}]}},
+            {"text": "All built."}])
+        secrets = {"model_key": secret(folder, "key", MODEL_KEY), "claude_token": token}
+        name = "m21-art"
+        command = hardened(source, name, workspace, secrets, "AGENT_SELFHOSTED_URL=http://m21-fake:9000/v1", "AGENT_SELFHOSTED_MODEL=local-model",
+                           "AGENT_SELFHOSTED_API=chat", "AGENT_SELFHOSTED_BUILDERS=1", "AGENT_SELFHOSTED_ROLES=builder")
+        docker(*command, IMAGE, "python3", "/x/spikes/m21_art.py")
+        out = wait_for_file(workspace / "art-out.json", name, 1500)
+        report("art: the builder finishes on the other model", out and not out["is_error"] and out["text"] == "All built.", out)
+        if not out:
+            return
+        print(f"art took {out['seconds']}s, and made {out['art']}", flush=True)
+        report("art: a texture and a model were really made", any(path.endswith(".png") for path in out["art"]) and any(path.endswith(".bbmodel") for path in out["art"]), out["art"])
+        report("art: all of it counts as made by Opus", out["made"] and not out["left"], out)
+        by_role = {call["role"]: call for call in out["calls"]}
+        report("art: the artists ran on Claude", all(role in by_role and "lane" not in by_role[role] and by_role[role]["estimate"] > 0 for role in ("artist", "modeller")), out["calls"])
+        report("art: the builder ran on the other model", by_role.get("builder", {}).get("lane") == "self_hosted", out["calls"])
+        entries = logged(folder)
+        everything = json.dumps(entries)
+        report("art: the other model is offered the tool", workshop_tool_offered(entries), [entry["tools"] for entry in entries])
+        report("art: nothing the artists were told reached the other model", "You make Minecraft art" not in everything and "You model creatures" not in everything)
+        report("art: the other model hears back what was made", any("artist:" in str(entry["outputs"]) and "modeller:" in str(entry["outputs"]) for entry in entries), [entry["outputs"] for entry in entries][-1])
+        report("art: the other model isn't asked for a length or usage", all("stream_options" not in entry["request"] and "max_tokens" not in entry["request"] for entry in entries))
+    finally:
+        docker("rm", "-f", "m21-art", "m21-fake", check=False)
+        subprocess.run(["docker", "run", "--rm", "-v", f"{folder}:/m", "alpine:3.22", "rm", "-rf", "/m/workspace"], capture_output=True, check=False, stdin=subprocess.DEVNULL)
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def workshop_tool_offered(entries):
+    return any('"name": "mcp__art__make_art"' in entry["request"] for entry in entries)
+
+
 def machine_test(source):
     folder = pathlib.Path(tempfile.mkdtemp(prefix="m21-machine-"))
     main_space, worker_space = writable(folder / "main"), writable(folder / "worker")
@@ -211,10 +253,12 @@ print(json.dumps({"model": get("http://m21-fake:9000/v1/responses"), "other": ge
 
 def main():
     source = pathlib.Path(sys.argv[1]).resolve()
+    only = sys.argv[2] if len(sys.argv) > 2 else None
     docker("network", "rm", NETWORK, check=False)
-    docker("network", "create", "--internal", NETWORK)
+    docker("network", "create", *([] if only == "art" else ["--internal"]), NETWORK)
     try:
-        only = sys.argv[2] if len(sys.argv) > 2 else None
+        if only == "art":
+            art_test(source, sys.argv[3])
         if only in (None, "lanes"):
             lane_test(source, "responses")
             lane_test(source, "chat")

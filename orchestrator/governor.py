@@ -28,6 +28,7 @@ class Governor:
         self.path = STATE_ROOT / "governor.json"
         self.state = {"day": "", "usage": 0.0, "paused_until": 0, "last_warning": 0, "failures": 0, "last_player_seen": 0}
         self.owner_stopped = False  # Set from the game, which is what actually enforces it.
+        self.talks_on_plan = True  # What players hear doesn't have to stop with the plan, if the owner has moved it to another model.
         self.mind_calls = []
         if self.path.exists():
             self.state.update(json.loads(self.path.read_text(encoding="utf-8")))
@@ -96,14 +97,16 @@ class Governor:
         """Talking is cheap, so it only stops for the kill switch or a hard limit."""
         if self.killed():
             return "kill switch"
-        if time.time() < self.state["paused_until"]:
-            return "paused until limits reset"
-        return None
+        return self.why_out_of_plan() if self.talks_on_plan else None
+
+    def why_out_of_plan(self):
+        return "paused until limits reset" if time.time() < self.state["paused_until"] else None
 
     def why_not_build(self):
         """Returns the reason building should wait, or None if it can go ahead."""
         self._roll_day()
-        reason = self.why_not_speak()
+        # Reviews and art need Claude, wherever the builders run.
+        reason = self.why_not_speak() or self.why_out_of_plan()
         if reason:
             return reason
         # A run of failed builds shouldn't silence the character, so this only stops building.
