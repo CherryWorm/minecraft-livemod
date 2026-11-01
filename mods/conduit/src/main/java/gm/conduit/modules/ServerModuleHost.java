@@ -7,6 +7,7 @@ import gm.conduit.api.ItemBehavior;
 import gm.conduit.api.MachineAttempt;
 import gm.conduit.api.MachineBehavior;
 import gm.conduit.api.MobBehavior;
+import gm.conduit.api.PlayerKey;
 import gm.conduit.api.ServerModule;
 import gm.conduit.api.ServerModuleContext;
 import gm.conduit.api.WorldEvents;
@@ -24,6 +25,7 @@ import gm.conduit.slots.ButtonMenu;
 import gm.conduit.slots.ItemBars;
 import gm.conduit.slots.SlotBlock;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.core.BlockPos;
@@ -46,6 +48,7 @@ import net.minecraft.world.SimpleMenuProvider;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -63,12 +66,14 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -87,6 +92,8 @@ public final class ServerModuleHost {
 	private static final int MAX_FAILURES = 5;
 	private static final int TEXT_ID_LENGTH = 16;
 	private static final float LEFT_ON = 1.0F;
+	/** What the game itself wants for sprinting by double tapping. */
+	private static final int DOUBLE_TAP_TICKS = 7;
 
 	private final Map<String, LoadedModule> modules = new LinkedHashMap<>();
 	private final Map<String, LoadedModule> ownerBySlot = new HashMap<>();
@@ -98,6 +105,8 @@ public final class ServerModuleHost {
 	private Map<String, String> slotsByName = Map.of();
 	private MinecraftServer server;
 	private boolean askingAboutHit;
+	private final Map<UUID, Map<PlayerKey, Integer>> lastPresses = new HashMap<>();
+	private final ModuleStates states = new ModuleStates();
 
 	private ServerModuleHost() {}
 
@@ -144,12 +153,17 @@ public final class ServerModuleHost {
 			return false;
 		});
 		ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> INSTANCE.fire(events -> events.mobKilled(entity, source)));
+		ServerChunkEvents.CHUNK_LOAD.register((level, chunk, isNew) -> INSTANCE.fire(events -> events.chunkLoaded(level, chunk, isNew)));
+		ServerChunkEvents.CHUNK_UNLOAD.register((level, chunk) -> INSTANCE.fire(events -> events.chunkUnloaded(level, chunk)));
+		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> INSTANCE.lastPresses.remove(handler.player.getUUID()));
+		INSTANCE.states.register();
 		// Fabric says so before the player is in the world or the player list, so a module would be handed someone half arrived.
 		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> INSTANCE.joining.add(handler.player));
 	}
 
 	public void start(MinecraftServer server) {
 		this.server = server;
+		this.states.start(server);
 		reloadAll();
 	}
 
@@ -219,6 +233,28 @@ public final class ServerModuleHost {
 		});
 		this.askingAboutHit = false;
 		return left[0];
+	}
+
+	/** What a client now says it's holding, against what it said before. */
+	public void keysChanged(ServerPlayer player, Input before, Input after) {
+		for (PlayerKey key : PlayerKey.values()) {
+			boolean was = key.isHeldIn(before);
+			boolean is = key.isHeldIn(after);
+			if (is && !was) {
+				fire(events -> events.keyPressed(player, key));
+				int now = this.server.getTickCount();
+				Map<PlayerKey, Integer> presses = this.lastPresses.computeIfAbsent(player.getUUID(), id -> new EnumMap<>(PlayerKey.class));
+				Integer last = presses.get(key);
+				if (last != null && now - last <= DOUBLE_TAP_TICKS) {
+					presses.remove(key);
+					fire(events -> events.keyDoubleTapped(player, key));
+				} else {
+					presses.put(key, now);
+				}
+			} else if (was && !is) {
+				fire(events -> events.keyReleased(player, key));
+			}
+		}
 	}
 
 	/** Tells every module that's listening. One that throws only loses its own turn. */
@@ -306,6 +342,7 @@ public final class ServerModuleHost {
 		}
 		module.closeMenus();
 		guard(module, module.module::disable);
+		this.states.save(moduleId);
 		this.ownerBySlot.entrySet().removeIf(entry -> {
 			if (entry.getValue() == module) {
 				this.blocks.remove(entry.getKey());
@@ -620,6 +657,11 @@ public final class ServerModuleHost {
 		@Override
 		public void openBook(ServerPlayer player, String title, List<Component> pages) {
 			Codex.showBook(player, title, pages.stream().map(Filterable::passThrough).toList());
+		}
+
+		@Override
+		public CompoundTag state() {
+			return ServerModuleHost.this.states.of(this.moduleId);
 		}
 
 		@Override

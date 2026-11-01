@@ -137,6 +137,13 @@ public interface ServerModuleContext {
 	/** Hears what another module publishes, or this one, by "other_feature/topic". It only goes on while this module is loaded. */
 	void subscribe(String topic, Consumer<CompoundTag> listener);
 
+	/**
+	 * This module's own saved data, for what it knows that isn't in the world: who's doing what, how much of something is left. Keep using this same tag rather than a
+	 * copy of it, and change it whenever you like. It's saved with the world, it's still here when this module is replaced or the server restarts, and it goes
+	 * with the world if that's rolled back. It's the one place a module's fields can go to survive that, so read it in {@code enable}. Keep it small.
+	 */
+	CompoundTag state();
+
 	/** Whether a player knows one of this feature's knowledge entries. */
 	boolean knows(Player player, String knowledge);
 

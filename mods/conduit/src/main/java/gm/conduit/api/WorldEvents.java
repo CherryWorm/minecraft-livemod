@@ -9,6 +9,7 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
 
 /**
  * Things that happen anywhere in the world, for a module to react to instead of checking every tick. Runs on the server.
@@ -48,6 +49,27 @@ public interface WorldEvents {
 	default double knockback(LivingEntity target, DamageSource source, double power) {
 		return power;
 	}
+
+	/** A player's feet have just left the ground in a jump. For the key itself, such as to jump again in the air, see {@link #keyPressed}. */
+	default void playerJumped(ServerPlayer player) {}
+
+	/** A player has just pressed one of these keys. It's what their client says, so it's true whatever they're doing, on the ground or in the air, though not with a screen open. */
+	default void keyPressed(ServerPlayer player, PlayerKey key) {}
+
+	/** A player has just let go of one of these keys. {@code player.getLastClientInput()} says what's held right now. */
+	default void keyReleased(ServerPlayer player, PlayerKey key) {}
+
+	/** A player has just pressed a key twice in quick succession, within 7 ticks, the same as the game wants for sprinting. It comes after the second {@link #keyPressed}. */
+	default void keyDoubleTapped(ServerPlayer player, PlayerKey key) {}
+
+	/**
+	 * A chunk is now loaded and in the world, and {@code isNew} is whether it's just been generated. This can come hundreds of times a second while someone
+	 * explores, so check it quickly and do any real work later. Most things that want this want to stay away from where players have built, so see {@code context.isNatural}.
+	 */
+	default void chunkLoaded(ServerLevel level, LevelChunk chunk, boolean isNew) {}
+
+	/** A chunk is about to leave the world, because nobody's near it. It's still all there. */
+	default void chunkUnloaded(ServerLevel level, LevelChunk chunk) {}
 
 	/** Something living has died, whatever the cause, and that includes players. {@code source.getEntity()} is who did it, if anyone. */
 	default void mobKilled(LivingEntity mob, DamageSource source) {}

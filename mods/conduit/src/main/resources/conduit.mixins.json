@@ -10,7 +10,8 @@
 		"LevelChunkMixin",
 		"LivingEntityMixin",
 		"RecipeCraftingHolderMixin",
-		"ServerCommonPacketListenerImplMixin"
+		"ServerCommonPacketListenerImplMixin",
+		"ServerGamePacketListenerImplMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

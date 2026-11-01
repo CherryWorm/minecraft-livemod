@@ -5,6 +5,7 @@ import com.llamalad7.mixinextras.sugar.ref.LocalDoubleRef;
 import com.llamalad7.mixinextras.sugar.ref.LocalFloatRef;
 import gm.conduit.modules.ServerModuleHost;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.LivingEntity;
@@ -28,6 +29,14 @@ abstract class LivingEntityMixin {
 			info.setReturnValue(false);
 		}
 		amount.set(said);
+	}
+
+	/** A player moves by itself, and only the move that shows they've left the ground gets here, which is on the server. */
+	@Inject(method = "jumpFromGround", at = @At("HEAD"))
+	private void conduit$tellOfJump(CallbackInfo info) {
+		if ((Object) this instanceof ServerPlayer player) {
+			ServerModuleHost.instance().fire(events -> events.playerJumped(player));
+		}
 	}
 
 	@Inject(method = "knockback(DDDLnet/minecraft/world/damagesource/DamageSource;FZ)V", at = @At("HEAD"))

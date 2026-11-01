@@ -5,6 +5,7 @@ import gm.conduit.api.ItemBehavior;
 import gm.conduit.api.MachineAttempt;
 import gm.conduit.api.MachineBehavior;
 import gm.conduit.api.MobBehavior;
+import gm.conduit.api.PlayerKey;
 import gm.conduit.api.ServerModule;
 import gm.conduit.api.ServerModuleContext;
 import gm.conduit.api.WorldEvents;
@@ -27,6 +28,7 @@ import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.BlockHitResult;
 
 import java.util.ArrayList;
@@ -53,7 +55,44 @@ public final class ModuleApiModule implements ServerModule {
 		bindKiln();
 		bindMobs();
 		bindItems();
+		// It counts every time this module starts, so a test can tell it's been replaced, and that this came through.
+		context.state().putInt("started", context.state().getIntOr("started", 0) + 1);
+		say("state started " + context.state().getIntOr("started", 0) + " uses " + context.state().getIntOr("uses", 0));
 		context.listen(new WorldEvents() {
+			@Override
+			public void playerJumped(ServerPlayer player) {
+				say("jumped " + player.getName().getString());
+			}
+
+			@Override
+			public void keyPressed(ServerPlayer player, PlayerKey key) {
+				say("pressed " + key);
+			}
+
+			@Override
+			public void keyReleased(ServerPlayer player, PlayerKey key) {
+				say("released " + key);
+			}
+
+			@Override
+			public void keyDoubleTapped(ServerPlayer player, PlayerKey key) {
+				say("double tapped " + key);
+			}
+
+			@Override
+			public void chunkLoaded(ServerLevel level, LevelChunk chunk, boolean isNew) {
+				if (chunk.getPos().x() == 625 && chunk.getPos().z() == 625) {
+					say("chunk loaded new " + isNew);
+				}
+			}
+
+			@Override
+			public void chunkUnloaded(ServerLevel level, LevelChunk chunk) {
+				if (chunk.getPos().x() == 625 && chunk.getPos().z() == 625) {
+					say("chunk unloaded");
+				}
+			}
+
 			@Override
 			public float damage(LivingEntity target, DamageSource source, float amount) {
 				if (target.getType() == context.mob("api_ox") && amount > 0) {
@@ -234,6 +273,7 @@ public final class ModuleApiModule implements ServerModule {
 			public InteractionResult use(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
 				int light = state.getLightEmission() == LAMP_HIGH ? 0 : LAMP_HIGH;
 				ModuleApiModule.this.context.setLight(level, pos, light);
+				ModuleApiModule.this.context.state().putInt("uses", ModuleApiModule.this.context.state().getIntOr("uses", 0) + 1);
 				say("lamp now " + light);
 				return InteractionResult.SUCCESS;
 			}

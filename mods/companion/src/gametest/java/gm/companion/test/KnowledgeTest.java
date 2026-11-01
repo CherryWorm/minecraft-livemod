@@ -321,6 +321,13 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				});
 				LOGGER.info("[M8] bar: {}", bar);
 			}
+			case "holdjump" -> context.getInput().holdKeyFor(options -> options.keyJump, Integer.parseInt(words[1]));
+			case "holdforward" -> context.getInput().holdKeyFor(options -> options.keyUp, Integer.parseInt(words[1]));
+			case "doubletapjump" -> {
+				context.getInput().holdKeyFor(options -> options.keyJump, 2);
+				context.waitTicks(2);
+				context.getInput().holdKeyFor(options -> options.keyJump, 2);
+			}
 			case "hotbarclick" -> context.runOnClient(client -> client.gameMode.handleContainerInput(client.player.containerMenu.containerId,
 					client.player.containerMenu.slots.size() - 9 + Integer.parseInt(words[1]), LEFT_BUTTON, ContainerInput.PICKUP, client.player));
 			case "oldcompanion" -> rejoinWithout(context, "inventory_hooks");

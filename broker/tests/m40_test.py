@@ -3,7 +3,7 @@
 both ways, comparators, light a module sets, blocks nothing can break, and a model's named parts moved, tinted and scaled. Reuses whatever world is
 there, as long as it has land near the spot, so a run needs no reset. Name the stages to run, or leave them out for all of them.
 
-Usage: python3 -m broker.tests.m40_test [blocks mobs items ...]
+Usage: python3 -m broker.tests.m40_test [blocks mobs items input ...]
 """
 import json
 import pathlib
@@ -660,9 +660,74 @@ def play_bench(client):
     rcon("clear", PLAYER)
 
 
+def play_keys(client):
+    x, y, z = SPOT
+    rcon("tp", PLAYER, str(x + 0.5), str(y), str(z + 0.5), "0", "0")
+    time.sleep(2)
+    client.ask("holdjump 2")
+    check("a module hears the jump key", holds(client, "pressed JUMP"))
+    check("and the player leaving the ground", holds(client, f"jumped {PLAYER}"))
+    check("and the key being let go", holds(client, "released JUMP"))
+    time.sleep(2)
+    jumped = client.text().count(f"chat: API jumped {PLAYER}")
+    client.ask("doubletapjump")
+    check("a module hears a double tap", holds(client, "double tapped JUMP"))
+    time.sleep(2)
+    client.ask("holdforward 2")
+    check("and other keys", holds(client, "pressed FORWARD"))
+    before = client.text().count("chat: API double tapped")
+    client.ask("holdjump 2")
+    time.sleep(1)
+    client.ask("holdjump 2")
+    time.sleep(1)
+    check("two presses far apart aren't a double tap", client.text().count("chat: API double tapped") == before)
+
+
+def play_chunks(client):
+    x, y, z = SPOT
+    far = 625 * 16 + 8
+    rcon("tp", PLAYER, str(far), "200", str(far))
+    check("a module hears a chunk load, and that it's new", holds(client, "chunk loaded new true", 60))
+    rcon("tp", PLAYER, str(x + 0.5), str(y), str(z + 0.5))
+    check("and that chunk going", holds(client, "chunk unloaded", 120))
+
+
+def play_state(client):
+    x, y, z = SPOT
+    lamp = slot("api_lamp")
+    rcon("setblock", str(x), str(y), str(z), lamp)
+    rcon("tp", PLAYER, str(x + 0.5), str(y), str(z + 3.5), "180", "20")
+    time.sleep(1)
+    started = int(re.findall(r"chat: API state started (\d+) uses \d+", client.text())[-1]) if re.search(r"chat: API state started", client.text()) else None
+    client.ask(f"useblock {x} {y} {z}")
+    time.sleep(1)
+    client.ask(f"useblock {x} {y} {z}")
+    time.sleep(1)
+    # Taking its jar away and putting it back is what a release does to a module that's changed.
+    modules = runtime.RUNTIME / "prod" / "modules" / "server"
+    jar = modules / "moduleapi.jar"
+    aside = runtime.RUNTIME / "m40-moduleapi.jar"
+    shutil.move(jar, aside)
+    rcon("conduit", "modules", "reload")
+    time.sleep(1)
+    shutil.move(aside, jar)
+    rcon("conduit", "modules", "reload")
+    found = holds(client, r"state started \d+ uses [1-9]")
+    check("what a module keeps comes back when it's replaced", found)
+    lines = re.findall(r"chat: API state started (\d+) uses (\d+)", client.text())
+    uses = int(lines[-1][1])
+    check("and it's still all there", uses >= 2 and (started is None or int(lines[-1][0]) == started + 1), str(lines[-3:]))
+    rcon("save-all", "flush")
+    time.sleep(2)
+    saved = runtime.RUNTIME / "prod" / "world" / "conduit_modules" / "moduleapi.nbt"
+    check("and it's saved beside the world", saved.exists(), str(saved))
+    rcon("setblock", str(x), str(y), str(z), "minecraft:air")
+
+
 STAGES = {"blocks": (play_facing, play_placing, play_redstone, play_light, play_unbreakable, play_parts, play_machine_slots),
           "mobs": (play_mob_drops, play_flying, play_walking, play_damage),
-          "items": (play_bar, play_recipes, play_bench)}
+          "items": (play_bar, play_recipes, play_bench),
+          "input": (play_keys, play_chunks, play_state)}
 
 
 def main():
