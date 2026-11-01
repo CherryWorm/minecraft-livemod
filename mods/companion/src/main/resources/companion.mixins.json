@@ -5,7 +5,9 @@
 	"client": [
 		"AbstractContainerScreenAccessor",
 		"GameRendererMixin",
-		"KeyboardHandlerMixin"
+		"KeyboardHandlerMixin",
+		"PostPassMixin",
+		"ShaderManagerMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

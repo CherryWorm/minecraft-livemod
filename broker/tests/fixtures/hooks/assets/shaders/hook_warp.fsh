@@ -1,7 +1,7 @@
 #version 330
 #extension GL_ARB_separate_shader_objects : require
 
-#moj_import <minecraft:globals.glsl>
+#include <minecraft:globals.glsl>
 
 uniform sampler2D InSampler;
 

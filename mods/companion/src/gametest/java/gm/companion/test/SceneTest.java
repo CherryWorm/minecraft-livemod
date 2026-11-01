@@ -8,6 +8,8 @@ import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
+import net.minecraft.client.renderer.LevelTargetBundle;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.Entity;
 import org.slf4j.Logger;
@@ -63,6 +65,11 @@ public final class SceneTest implements FabricClientGameTest {
 			if (request.startsWith("mine ")) {
 				context.getInput().holdKeyFor(options -> options.keyAttack, Integer.parseInt(request.substring(5)));
 				LOGGER.info("[SCENE] mined");
+			}
+			if (request.startsWith("effect ")) {
+				Identifier effect = Identifier.parse(request.substring(7));
+				boolean works = context.computeOnClient(client -> client.getShaderManager().getPostChain(effect, LevelTargetBundle.MAIN_TARGETS) != null);
+				LOGGER.info("[SCENE] effect {} {}", effect, works ? "works" : "failed");
 			}
 			if (request.startsWith("shot ")) {
 				String name = request.substring(5);

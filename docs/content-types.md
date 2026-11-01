@@ -353,7 +353,7 @@ List names in `"screen_effects": ["warp"]`, with `assets/shaders/warp.fsh`:
 #version 330
 #extension GL_ARB_separate_shader_objects : require
 
-#moj_import <minecraft:globals.glsl>
+#include <minecraft:globals.glsl>
 
 uniform sampler2D InSampler;
 
@@ -373,7 +373,7 @@ context.screenEffect("warp");
 context.screenEffect(null);
 ```
 
-It goes by itself when the module unloads. Needing a client module, it won't show for anyone without the companion. A shader the game can't compile on someone's computer just doesn't appear for them, and test clients render in software, so it hasn't been seen on a real graphics card until a real player sees it.
+It goes by itself when the module unloads. Needing a client module, it won't show for anyone without the companion. The release gates compile it on a real client, and one that won't compile is refused. If someone's graphics card ever can't run one that passed, it just doesn't appear for them. Test clients render in software, so it hasn't been seen on a real graphics card until a real player sees it.
 
 ## Using your content from a module
 

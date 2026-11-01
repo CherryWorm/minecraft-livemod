@@ -119,6 +119,18 @@ def film(mobs, log, process):
     return filmed
 
 
+def check_screen_effects(log, process):
+    """Only a real client can say whether a shader compiles, and one that doesn't would never appear for anyone."""
+    folder = runtime.RUNTIME / "shadow" / "live-assets" / "assets" / "gm" / "post_effect"
+    for path in sorted(folder.glob("*.json")) if folder.exists() else []:
+        _tell(f"SCENE effect gm:{path.stem}")
+        _wait_log(log, rf"\[SCENE\] effect gm:{path.stem} (works|failed)$", SHOT_TIMEOUT, process)
+        text = log.read_text(encoding="utf-8", errors="replace")
+        if f"[SCENE] effect gm:{path.stem} failed" in text:
+            errors = [line.split("Couldn't parse GLSL: ")[-1] for line in text.splitlines() if f"gm:post/{path.stem}:" in line and "error:" in line]
+            _fail("A screen effect won't compile on a real client, with its line numbers:\n" + "\n".join(errors[:10]))
+
+
 def motion_sheet(slot, rows, shots_dir, out):
     """One image per mob, with a row for each animation, which is far easier to judge than a pile of separate shots."""
     sheet = None
@@ -182,6 +194,7 @@ def run_gate(blocks, items, mods_dir, report_dir, mobs=(), client_modules=False)
             _wait_log(log, rf"\[SCENE\] took {name}$", SHOT_TIMEOUT, process)
             shots.append(name)
         runtime.rcon("shadow", "time", "set", "noon", check=False)
+        check_screen_effects(log, process)
         filmed = film(mobs, log, process)
         _tell("SCENE done")
         process.wait(timeout=120)

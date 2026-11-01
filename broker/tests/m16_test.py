@@ -553,6 +553,31 @@ def check_mark(results, shots):
     results.append(report("and it goes when the module unloads", near(off, unloaded), str(unloaded)))
 
 
+def play_broken_effect(client, results):
+    """A shader that passed but won't compile on someone's computer. On its own, the game would drop every pack, and with them the server."""
+    for path in (runtime.RUNTIME / "prod" / "live-assets" / "assets" / "gm" / "shaders" / "post").glob("*.fsh"):
+        path.write_text("#version 330\nthis is not a shader\n", encoding="utf-8")
+    pack = runtime.RUNTIME / "prod" / "polymer" / "resource_pack.zip"
+    before = pack.stat().st_mtime
+    rcon("polymer", "generate-pack", "reload")
+    deadline = time.monotonic() + 30
+    while pack.stat().st_mtime == before and time.monotonic() < deadline:
+        time.sleep(0.25)
+    # Back in with the new pack, and the module that uses it, which is unloaded by now.
+    client.ask("oldcompanion", 300)
+    rcon("conduit", "module", "reload")
+    time.sleep(5)
+    client.ask(f"press {KEY_J}")
+    time.sleep(2)
+    try:
+        client.ask("screen", 20)
+        stayed = True
+    except TimeoutError:
+        stayed = False
+    results.append(report("the game really tried the broken effect", "Failed to load post chain" in client.text()))
+    results.append(report("and a shader that won't compile doesn't take anyone off the server", stayed))
+
+
 def check_old_companions(results, client):
     results.append(report("a current companion isn't told it's out of date", OUT_OF_DATE not in client.text()))
     result = subprocess.run([sys.executable, "-u", "scripts/smoketest_join.py", "--name", "nocompanion", "--stay", "6", "--watch-for", OUT_OF_DATE],
@@ -587,6 +612,7 @@ def main():
         check_ruin_loot(results)
         play_inventory_hooks(client, results)
         check_old_companions(results, client)
+        play_broken_effect(client, results)
     finally:
         client.stop()
     shots = mods / "companion" / "build" / "run" / "clientGameTest" / "screenshots"

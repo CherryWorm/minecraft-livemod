@@ -338,6 +338,8 @@ def check_screen_effects(features):
                 _fail(f"{label} is {len(text)} characters long, over the limit of {MOST_SHADER_CHARACTERS}. It runs for every pixel of every frame, so keep it simple.")
             if not text.lstrip().startswith("#version 330"):
                 _fail(f"{label} has to start with #version 330, which is what the game's own are. See 'Screen effects' in docs/content-types.md.")
+            if "#moj_import" in text:
+                _fail(f"{label} uses #moj_import, which this version of the game doesn't have. Use #include <minecraft:globals.glsl>.")
             if re.search(r"\b(while|do)\b", text):
                 _fail(f"{label} uses a while or do loop, which could never finish and hang a player's graphics card. Use a for loop with a fixed count.")
 

@@ -405,9 +405,11 @@ def _copy_screen_effects(feature, feature_id, pack):
         target = pack / "assets/gm/shaders/post" / f"{hashed}.fsh"
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
+        # Listing Globals is what lets the shader use the game's clock. The companion takes this fixed value away again.
         _write_json(pack / "assets/gm/post_effect" / f"{hashed}.json", {"targets": {"swap": {}}, "passes": [
             {"vertex_shader": "minecraft:core/screenquad", "fragment_shader": f"gm:post/{hashed}",
-             "inputs": [{"sampler_name": "In", "target": "minecraft:main"}], "output": "swap"},
+             "inputs": [{"sampler_name": "In", "target": "minecraft:main"}], "output": "swap",
+             "uniforms": {"Globals": [{"name": "GameTime", "type": "float", "value": 0.0}]}},
             {"vertex_shader": "minecraft:core/screenquad", "fragment_shader": "minecraft:post/blit",
              "inputs": [{"sampler_name": "In", "target": "swap"}], "output": "minecraft:main",
              "uniforms": {"BlitConfig": [{"name": "ColorModulate", "type": "vec4", "value": [1.0, 1.0, 1.0, 1.0]}]}},

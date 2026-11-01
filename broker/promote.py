@@ -190,7 +190,8 @@ def run_gates(tier, jars, content, old_ledger, new_ledger, old_content, mods, re
             return
 
     new_patches = patches_changed(content, old_content)
-    client_modules = jar_hashes(content / "modules" / "client") != jar_hashes(old_content / "modules" / "client")
+    client_modules = (jar_hashes(content / "modules" / "client") != jar_hashes(old_content / "modules" / "client")
+                      or bundles.tree_hash(content / "pack/assets/gm/shaders/post") != bundles.tree_hash(old_content / "pack/assets/gm/shaders/post"))
     sign.mark_for_testing(content)
     report["shadow"] = stages.run("shadow", lambda: shadow.run_gate(tier, jars, content, new_patches))
 
