@@ -21,7 +21,17 @@ def _read_env(path):
 ENV = {**_read_env(REPO / "versions.env"), **_read_env(REPO / ".env")}
 RUNTIME = pathlib.Path(ENV["RUNTIME_DIR"])
 BROKER = RUNTIME / "broker"
-WORK = BROKER / "work"
+
+
+def lane_folder(lane):
+    """Where a job in this lane keeps its files, so that jobs running at the same time can't touch each other's. No lane is
+    the folders the broker has always used, which is also where anything run by hand works."""
+    return RUNTIME / "lanes" / lane if lane else BROKER
+
+
+LANE = os.environ.get("BROKER_LANE", "")
+WORK = lane_folder(LANE) / "work"
+LAST_REPORT = lane_folder(LANE) / "last.json"
 REPORTS = BROKER / "reports"
 RELEASES = RUNTIME / "releases"
 HISTORY = RELEASES / "history"
@@ -95,8 +105,11 @@ def load_state():
 
 
 def save_state(state):
+    """Replaced in one step, because jobs running beside a release read this while it's being changed."""
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(state, indent=1) + "\n", encoding="utf-8")
+    temporary = STATE_FILE.with_suffix(".tmp")
+    temporary.write_text(json.dumps(state, indent=1) + "\n", encoding="utf-8")
+    temporary.replace(STATE_FILE)
 
 
 def record_timeline(entry):

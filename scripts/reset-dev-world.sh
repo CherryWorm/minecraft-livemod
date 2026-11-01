@@ -30,6 +30,7 @@ for server in prod shadow; do
   rm -rf "${RUNTIME_DIR:?}/$server"/{world,live-assets,modules,polymer,config/conduit}
 done
 rm -rf "${RUNTIME_DIR:?}/broker"/{state.json,last.json,passed_gates.json,assembled,work,reports}
+rm -rf "${RUNTIME_DIR:?}/lanes"
 rm -rf "${RUNTIME_DIR:?}/releases/history"
 rm -f "${RUNTIME_DIR:?}/timeline.jsonl" "$RUNTIME_DIR/control/decide_now" "$RUNTIME_DIR/control/agent_disabled"
 rm -f "$RUNTIME_DIR/velocity/server-icon.png"

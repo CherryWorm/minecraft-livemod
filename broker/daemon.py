@@ -7,12 +7,14 @@ that polices it, comes from this trusted checkout, so the agent can't change the
 
 Usage: python3 -m broker.daemon
 """
+import collections
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 
 from PIL import Image, ImageStat
@@ -23,7 +25,6 @@ WORKSPACE = runtime.RUNTIME / "agent-workspace"
 REQUESTS = WORKSPACE / "requests"
 RESPONSES = WORKSPACE / "responses"
 AGENT_REPO = WORKSPACE / "repo"
-ASSEMBLED = runtime.BROKER / "assembled"
 REPORTS_FOR_AGENT = WORKSPACE / "reports"
 CACHE_JAR = "/cache/gradle/caches/fabric-loom/26.3/minecraft-client.jar"
 AGENT_ICON = WORKSPACE / "icon" / "server-icon.png"
@@ -32,6 +33,13 @@ ICON_SIZE = 64
 STARTED = runtime.BROKER / "started.json"
 TRIES_BEFORE_REFUSING = 2  # How many times one request can take the whole broker down before it's answered instead.
 QUICK = ("lint", "check", "javap", "server_icon", "set_rule", "server_errors")  # None of these touch the shadow server, and someone is waiting on each one.
+# These don't wait for anything. They share nothing with whatever else is running, and they take seconds at most.
+AT_ONCE = ("lint", "javap", "server_icon", "set_rule", "server_errors")
+MOST_AT_ONCE = 16  # Of each kind. Far more than the builders can ask for at a time, so it only matters if something floods the broker.
+POLL_SECONDS = 0.25
+# Written by scripts/update-engine.sh. Nothing new starts while it's here, so what's running can finish before the broker stops.
+DRAINING = runtime.BROKER / "draining"
+MOST_DRAINING_SECONDS = 1500  # Longer than any job can run, so that a script that died can't leave the broker idle for good.
 PROD_LOG = runtime.RUNTIME / "prod" / "logs" / "latest.log"
 MOST_LOG_LINES = 200
 MOST_LOG_CHARACTERS = 16000
@@ -43,10 +51,11 @@ RULES = {"players_sleeping_percentage": lambda value: isinstance(value, int) and
          "spawn_phantoms": lambda value: isinstance(value, bool), "keep_inventory": lambda value: isinstance(value, bool)}
 
 
-def assemble(commit):
+def assemble(commit, lane=""):
     """Trusted code plus the agent's features and documents, as they were at one commit."""
-    runtime.sync_tree(runtime.REPO, ASSEMBLED, ".env", "build/", ".gradle/", "run/", "runtime/")
-    features = ASSEMBLED / "mods" / "genesis" / "features"
+    assembled = runtime.lane_folder(lane) / "assembled"
+    runtime.sync_tree(runtime.REPO, assembled, ".env", "build/", ".gradle/", "run/", "runtime/")
+    features = assembled / "mods" / "genesis" / "features"
     if features.exists():
         shutil.rmtree(features)
     features.mkdir(parents=True)
@@ -58,18 +67,18 @@ def assemble(commit):
         # An early commit may have no features yet, which git archive reports as an error for that path.
         archive = subprocess.run(["git", "-c", "safe.directory=*", "-C", str(AGENT_REPO), "archive", commit],
                                  capture_output=True, check=True)
-    subprocess.run(["tar", "-x", "-C", str(ASSEMBLED), "mods/genesis/features", "bible"], input=archive.stdout, check=False)
-    return ASSEMBLED
+    subprocess.run(["tar", "-x", "-C", str(assembled), "mods/genesis/features", "bible"], input=archive.stdout, check=False)
+    return assembled
 
 
-def promote(commit, release_id, *flags):
-    source = assemble(commit)
+def promote(commit, release_id, *flags, lane=""):
+    source = assemble(commit, lane)
     # If this run dies before reporting, the agent must hear that rather than the previous run's result.
-    last = runtime.BROKER / "last.json"
+    last = runtime.lane_folder(lane) / "last.json"
     last.unlink(missing_ok=True)
     result = subprocess.run(
         [sys.executable, "-m", "broker.promote", "--source", str(source), "--release-id", release_id, *flags],
-        cwd=runtime.REPO, stdin=subprocess.DEVNULL, capture_output=True, text=True, check=False, timeout=1200,
+        cwd=runtime.REPO, env={**os.environ, "BROKER_LANE": lane}, stdin=subprocess.DEVNULL, capture_output=True, text=True, check=False, timeout=1200,
     )
     if not last.exists():
         return {"result": "blocked", "gate": "broker", "reason": f"The broker crashed:\n{result.stderr[-1500:]}"}
@@ -150,13 +159,13 @@ def server_errors(contains=""):
     return {"output": "\n".join(lines[-MOST_LOG_LINES:])[-MOST_LOG_CHARACTERS:] or "Nothing like that in the log."}
 
 
-def handle(request):
+def handle(request, lane=""):
     kind = request["kind"]
     if runtime.agent_disabled() and kind != "javap":
         return {"result": "blocked", "gate": "control", "reason": "The kill switch is on."}
     release_id = request.get("release_id", f"check-{request['id']}")
     if kind == "lint":
-        return promote(request["commit"], release_id, "--lint-only")
+        return promote(request["commit"], release_id, "--lint-only", lane=lane)
     if kind == "server_icon":
         return install_icon()
     if kind == "set_rule":
@@ -187,14 +196,115 @@ def started_again(request_id):
 
 
 def next_request(pending):
-    """Still one at a time, because there's one shadow server and releases must not overlap. But with several builders
-    working, a quick check shouldn't wait behind everyone else's full test run, and a small change a player is waiting
-    for goes ahead of a big one that's being built in the background. So does a release, because that's finished work
-    that everything still being tested would otherwise have to be tested again on top of. A bug fix goes ahead of all of those."""
+    """With several builders working, a quick check shouldn't wait behind everyone else's full test run, and a small change a
+    player is waiting for goes ahead of a big one that's being built in the background. So does a release, because that's
+    finished work that everything still being tested would otherwise have to be tested again on top of. A bug fix goes ahead of all of those."""
     def order(path):
         request = json.loads(path.read_text(encoding="utf-8"))
         return (0 if request["kind"] in QUICK else 1 if request.get("first") else 2 if request.get("hurry") or request["kind"] == "release" else 3, path.stat().st_mtime)
     return min(pending, key=order)
+
+
+def lanes_for(kind):
+    """Which lanes a kind of job can run in, in the order they're used. A lane holds one job at a time. Jobs that use the shadow
+    server or build anything still share the one lane, because there's one of each and releases must not overlap."""
+    if kind in AT_ONCE:
+        return [f"{kind}-{number}" for number in range(MOST_AT_ONCE)]
+    return [""]
+
+
+def free_lane(kind, running):
+    """The lane a job of this kind can start in now, or None if it has to wait."""
+    taken = {job.lane for job in running.values()}
+    return next((lane for lane in lanes_for(kind) if lane not in taken), None)
+
+
+def draining():
+    try:
+        return time.time() - DRAINING.stat().st_mtime < MOST_DRAINING_SECONDS
+    except FileNotFoundError:
+        return False
+
+
+Job = collections.namedtuple("Job", "kind lane thread")
+
+
+def finish(path, request, answer, seconds, waited):
+    # Written in one go, because several jobs can be finishing at once and each line has to stay whole.
+    sys.stdout.write(f"{request['kind']} {request['id']}: {answer.get('result', 'answered')} in {seconds:.1f}s, after waiting {waited:.1f}s\n")
+    sys.stdout.flush()
+    temporary = RESPONSES / f".{request['id']}.tmp"
+    temporary.write_text(json.dumps(answer), encoding="utf-8")
+    temporary.rename(RESPONSES / f"{request['id']}.json")
+    path.unlink(missing_ok=True)
+
+
+def run_job(path, request, lane, waited):
+    began = time.monotonic()
+    try:
+        answer = handle(request, lane)
+    except Exception as error:  # noqa: BLE001 - the agent should hear about any failure, not hang
+        answer = {"result": "blocked", "gate": "broker", "reason": f"{type(error).__name__}: {error}"}
+    finish(path, request, answer, time.monotonic() - began, waited)
+
+
+def start_job(path, running):
+    """Raises FileNotFoundError if whoever asked has stopped waiting and taken it back."""
+    request = json.loads(path.read_text(encoding="utf-8"))
+    waited = time.time() - path.stat().st_mtime
+    if started_again(request["id"]) > TRIES_BEFORE_REFUSING:
+        finish(path, request, {"result": "blocked", "gate": "broker",
+                               "reason": f"The broker itself died each of the {TRIES_BEFORE_REFUSING} times it ran this, so it hasn't been checked. "
+                                         "That may well not be anything in your work."}, 0, waited)
+        return
+    lane = free_lane(request["kind"], running)
+    thread = threading.Thread(target=run_job, args=(path, request, lane, waited), daemon=True)
+    running[path.name] = Job(request["kind"], lane, thread)
+    thread.start()
+
+
+def can_start(path, running):
+    return path.name not in running and free_lane(json.loads(path.read_text(encoding="utf-8"))["kind"], running) is not None
+
+
+def tick(running):
+    """Starts the next job there's room for. Returns whether it did, because then there may be room for another straight away."""
+    for name in [name for name, job in running.items() if not job.thread.is_alive()]:
+        del running[name]
+    if draining():
+        return False
+    try:
+        ready = [path for path in REQUESTS.glob("*.json") if can_start(path, running)]
+        if not ready:
+            return False
+        start_job(next_request(ready), running)
+    except FileNotFoundError:
+        pass  # Whoever asked has stopped waiting and taken it back.
+    return True
+
+
+def retry_suspects():
+    """Whatever was running when the broker stopped might be what stopped it, so after a restart each goes by itself, with nothing
+    beside it. Otherwise a harmless job that happened to be running next to a bad one would use up its tries as well."""
+    started = json.loads(STARTED.read_text(encoding="utf-8")) if STARTED.exists() else {}
+    suspects = [path for path in REQUESTS.glob("*.json") if path.stem in started]
+    while suspects:
+        if draining():
+            time.sleep(POLL_SECONDS)
+            continue
+        try:
+            path = next_request(suspects)
+        except FileNotFoundError:
+            suspects = [path for path in suspects if path.exists()]
+            continue
+        suspects.remove(path)
+        running = {}
+        try:
+            start_job(path, running)
+        except FileNotFoundError:
+            continue
+        for job in running.values():
+            job.thread.join()
 
 
 def main():
@@ -204,33 +314,13 @@ def main():
     client_jar = runtime.RUNTIME / CACHE_JAR.removeprefix("/")
     if client_jar.exists():
         reference_textures.extract(client_jar, WORKSPACE / "reference-textures")
+    DRAINING.unlink(missing_ok=True)
     print("broker waiting for requests", flush=True)
+    retry_suspects()
+    running = {}
     while True:
-        pending = list(REQUESTS.glob("*.json"))
-        if not pending:
-            time.sleep(0.5)
-            continue
-        try:
-            path = next_request(pending)
-            request = json.loads(path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            continue  # Whoever asked has stopped waiting and taken it back.
-        started = time.monotonic()
-        if started_again(request["id"]) > TRIES_BEFORE_REFUSING:
-            answer = {"result": "blocked", "gate": "broker",
-                      "reason": f"The broker itself died each of the {TRIES_BEFORE_REFUSING} times it ran this, so it hasn't been checked. "
-                                "That may well not be anything in your work."}
-        else:
-            try:
-                answer = handle(request)
-            except Exception as error:  # noqa: BLE001 - the agent should hear about any failure, not hang
-                answer = {"result": "blocked", "gate": "broker", "reason": f"{type(error).__name__}: {error}"}
-        print(f"{request['kind']} {request['id']}: {answer.get('result', 'answered')} "
-              f"in {time.monotonic() - started:.1f}s", flush=True)
-        temporary = RESPONSES / f".{request['id']}.tmp"
-        temporary.write_text(json.dumps(answer), encoding="utf-8")
-        temporary.rename(RESPONSES / f"{request['id']}.json")
-        path.unlink(missing_ok=True)
+        if not tick(running):
+            time.sleep(POLL_SECONDS)
 
 
 if __name__ == "__main__":

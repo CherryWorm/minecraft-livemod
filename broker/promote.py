@@ -4,7 +4,7 @@
 Usage: python3 -m broker.promote --source DIR [--no-deploy] [--release-id ID] [--chaos-in-prod]
 
 Exit codes: 0 released (or nothing to release), 2 blocked by a gate, 3 released then rolled back.
-The result is also written to runtime/broker/last.json, so the agent can read why something failed.
+The result is also written to runtime/broker/last.json, or the lane's own copy, so the agent can read why something failed.
 """
 import argparse
 import hashlib
@@ -323,8 +323,8 @@ def main():
         code = 3
     report["stages"] = stages.times
     report["total_seconds"] = stages.total()
-    runtime.BROKER.mkdir(parents=True, exist_ok=True)
-    (runtime.BROKER / "last.json").write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
+    runtime.LAST_REPORT.parent.mkdir(parents=True, exist_ok=True)
+    runtime.LAST_REPORT.write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=1))
     sys.exit(code)
 
