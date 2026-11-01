@@ -10,6 +10,7 @@
 		"LevelChunkMixin",
 		"LivingEntityMixin",
 		"RecipeCraftingHolderMixin",
+		"RecipeSyncImplMixin",
 		"ServerCommonPacketListenerImplMixin",
 		"ServerGamePacketListenerImplMixin"
 	],

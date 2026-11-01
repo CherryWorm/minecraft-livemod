@@ -72,7 +72,7 @@ The director looks at new requests twice. Its quick pass, on a faster model, tak
 
 Everything new has to be worth having the day it ships, so the director puts whatever has to arrive together in one feature, and a reviewer treats anything without a real use as serious. A real use gives players something vanilla doesn't, or does it better: turning back into vanilla items doesn't count. The director plans ahead whenever fewer features are waiting than can be built at once, so `/board` can show an empty queue only briefly.
 
-JEI shows this world's recipes through a plugin in the companion, under "Recipes you know". The server sends each player only what they've earned: open recipes once they've held something it uses, gated ones once learned, and machine recipes the same way, or once made if they're there to be worked out. Players with an older companion just don't get it.
+JEI shows this world's recipes through a plugin in the companion, under "Recipes you know". The server sends each player only what they've earned: open recipes once they've held something it uses, gated ones once learned, and machine recipes the same way, or once made if they're there to be worked out. Players with an older companion just don't get it. JEI's own pages, like crafting and smelting, only ever get vanilla's recipes, because a recipe can only tell a client about one of this world's items as its stand-in. So the + button that fills in a crafting grid isn't there for this world's recipes. JEI runs as it comes, with nothing patched, so it says this world's items are from Minecraft: it asks what the stand-in's from, and its plugin API can't answer that for one item.
 
 ## The page about the world
 

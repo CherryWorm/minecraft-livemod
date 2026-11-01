@@ -36,8 +36,8 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * Tells a player's recipe viewer which of this world's recipes they know. JEI on its own only reads vanilla's recipes
- * from the player's own game, so without this it can't show anything from here. Only what they've earned goes out, so
+ * Tells a player's recipe viewer which of this world's recipes they know. JEI on its own only gets vanilla's recipes,
+ * as RecipeSyncImplMixin keeps it, so without this it can't show anything from here. Only what they've earned goes out, so
  * it spoils nothing, and only to a companion that can read it. The companion's KnownRecipes must stay in step with this.
  */
 public final class KnownRecipes {

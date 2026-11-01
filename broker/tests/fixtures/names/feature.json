@@ -10,7 +10,12 @@
     "name_token": {"display": "Name Token", "texture": "name_token"},
     "name_reader": {"display": "Name Reader", "texture": "name_token", "retired": true},
     "name_kit": {"display": "Name Kit", "texture": "name_token"},
-    "name_chart": {"display": "Name Chart", "texture": "name_token", "from_module": true}
+    "name_chart": {"display": "Name Chart", "texture": "name_token", "from_module": true},
+    "name_ash": {"display": "Name Ash", "texture": "name_token"},
+    "name_chip": {"display": "Name Chip", "texture": "name_token"},
+    "name_seal": {"display": "Name Seal", "texture": "name_token"},
+    "name_bundle": {"display": "Name Bundle", "texture": "name_token"},
+    "name_badge": {"display": "Name Badge", "texture": "name_token"}
   },
   "recipes": {
     "name_token": {
@@ -27,6 +32,51 @@
         "type": "minecraft:crafting_shapeless",
         "ingredients": ["$item:name_token", "minecraft:paper"],
         "result": {"id": "$item:name_kit", "count": 1}
+      }
+    },
+    "name_ash": {
+      "mode": "open",
+      "json": {
+        "type": "minecraft:smelting",
+        "ingredient": "$item:name_token",
+        "result": {"id": "$item:name_ash", "count": 1},
+        "experience": 0.1,
+        "cookingtime": 200
+      }
+    },
+    "name_chip": {
+      "mode": "open",
+      "json": {
+        "type": "minecraft:stonecutting",
+        "ingredient": "$item:name_ash",
+        "result": {"id": "$item:name_chip", "count": 1}
+      }
+    },
+    "name_seal": {
+      "mode": "open",
+      "json": {
+        "type": "minecraft:crafting_shaped",
+        "pattern": ["XY"],
+        "key": {"X": "$item:name_chip", "Y": ["$item:name_kit", "minecraft:paper"]},
+        "result": {"id": "$item:name_seal", "count": 1}
+      }
+    },
+    "name_bundle": {
+      "mode": "open",
+      "json": {
+        "type": "minecraft:crafting_shapeless",
+        "ingredients": ["#$tag:name_things", "minecraft:stick"],
+        "result": {"id": "$item:name_bundle", "count": 1}
+      }
+    },
+    "name_badge": {
+      "mode": "open",
+      "json": {
+        "type": "minecraft:smithing_transform",
+        "template": "$item:name_seal",
+        "base": "minecraft:paper",
+        "addition": "$item:name_chip",
+        "result": {"id": "$item:name_badge", "count": 1}
       }
     }
   }

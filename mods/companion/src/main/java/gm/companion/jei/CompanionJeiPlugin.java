@@ -120,4 +120,9 @@ public final class CompanionJeiPlugin implements IModPlugin {
 			runtime.getRecipesGui().showTypes(List.of(KnownRecipeCategory.TYPE));
 		}
 	}
+
+	/** For tests: JEI itself, to read what it really shows, or null if it isn't running. */
+	public static IJeiRuntime runtime() {
+		return runtime;
+	}
 }

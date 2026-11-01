@@ -264,6 +264,20 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				context.takeScreenshot("m8_jei");
 				context.runOnClient(client -> client.gui.setScreen(null));
 			}
+			case "jeipages" -> {
+				String pages = context.computeOnClient(client -> JeiPages.everySlot());
+				LOGGER.info("[M8] jei pages: {}", pages);
+			}
+			case "jeimod" -> {
+				String mod = context.computeOnClient(client -> JeiPages.modOf(client.player.getMainHandItem()));
+				LOGGER.info("[M8] jei mod: {}", mod);
+			}
+			case "jeiuses" -> {
+				context.runOnClient(client -> JeiPages.showUses(client.player.getMainHandItem()));
+				context.waitTicks(40);
+				context.takeScreenshot("m8_jei_uses");
+				context.runOnClient(client -> client.gui.setScreen(null));
+			}
 			case "command" -> context.runOnClient(client -> client.player.connection.sendCommand(request.substring(8)));
 			case "sidebar" -> {
 				context.waitTicks(10);

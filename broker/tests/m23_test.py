@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """How this world's names and pictures reach a real client: a module writing an item's name into a message, an item used up in the
-hand that becomes another one, what a recipe's slots show in the recipe book, and what blocks that aren't cubes look like in an
-inventory. Start with a world from reset-dev-world.sh and a baseline, and reset it afterwards.
+hand that becomes another one, what a recipe's slots show in the recipe book and on every page of JEI, and what blocks that aren't
+cubes look like in an inventory. Start with a world from reset-dev-world.sh and a baseline, and reset it afterwards.
 
 Usage: python3 -m broker.tests.m23_test
 """
@@ -31,6 +31,9 @@ RAW_KEY = re.compile(r"(item|block)\.gm\.")
 FIRST_HOTBAR = (8, 142)
 SECOND_HOTBAR = (26, 142)
 SLOT_SIZE = 16
+# What a client gets for one of this world's items when nothing says which.
+STAND_IN = "minecraft:trial_key"
+KNOWN_PAGE = "gm:known_recipes"
 
 
 def build_source():
@@ -161,12 +164,48 @@ def check_icons(client, shots):
     report("a plant coloured by its biome is green when held", plant is not None and plant[1] > plant[0] + TOLERANCE, plant)
 
 
-def check_jei(client):
+def jei_pages(client):
+    # Slow, because it lays out every recipe JEI has.
+    client.ask("jeipages", 300)
+    return json.loads(last(client, r"\[M8\] jei pages: (.*)$"))
+
+
+def check_jei_knows_nothing(client):
+    """A player who's earned nothing can't have it from a page of JEI's own, any more than from the one that's ours."""
+    pages = jei_pages(client)
+    seen = {name: page["ours"][:2] for name, page in pages.items() if page["ours"]}
+    report("no page of JEI shows anything from this world to a player who knows none of it", not seen, seen)
+    report("and its own crafting page still has vanilla's recipes", pages["minecraft:crafting"]["recipes"] > 100, pages["minecraft:crafting"]["recipes"])
+
+
+def check_jei(client, shots):
     rcon("clear", PLAYER)
     time.sleep(8)
     client.ask("jei")
     shown = json.loads(last(client, r"\[M8\] jei: (.*)$"))
     report("JEI still lists the recipes", any("Name Kit" in line for line in shown), shown[:5])
+
+    pages = jei_pages(client)
+    print("JEI's pages:", {name: page["recipes"] for name, page in pages.items()}, flush=True)
+    bare = {name: [recipe for recipe in page["ours"] if any(STAND_IN in place for place in recipe)][:2] for name, page in pages.items()}
+    report("no slot on any page of JEI ever shows the stand-in", not any(bare.values()), {name: found for name, found in bare.items() if found})
+    elsewhere = {name: page["ours"][:2] for name, page in pages.items() if page["ours"] and name != KNOWN_PAGE}
+    report("this world's recipes are only on the page for what the player knows", not elsewhere, elsewhere)
+
+    known = pages.get(KNOWN_PAGE, {"ours": []})["ours"]
+    wanted = len(json.loads((FIXTURE / "feature.json").read_text(encoding="utf-8"))["recipes"])
+    report("every kind of recipe of this world's is on that page", len(known) == wanted, known)
+    places = [place for recipe in known for place in recipe]
+    report("a slot with a choice of items shows all of them, by name of their own", any(len(place) == 2 and "minecraft:paper" in place and any(model.startswith("gm:") for model in place) for place in places), places)
+
+    # Not a check: JEI asks what the stand-in's from, and nothing in its plugin API can answer that for one item.
+    holding((slot("name_token"), 1))
+    client.ask("jeimod")
+    print("JEI says this world's items are from:", last(client, r"\[M8\] jei mod: (.*)$"), flush=True)
+
+    client.ask("jeiuses")
+    client.ask("jeipage")
+    print("screenshots of JEI:", sorted(path.name for path in shots.glob("*m8_jei*.png")), flush=True)
 
 
 def main():
@@ -195,11 +234,12 @@ def main():
         rcon("tp", PLAYER, x, y, z, 0, 0)
         time.sleep(1)
         rcon("gamemode", "survival", PLAYER)
+        check_jei_knows_nothing(client)
         check_names(client)
         check_hand(client)
         check_recipe_book(client)
         check_icons(client, shots)
-        check_jei(client)
+        check_jei(client, shots)
     finally:
         client.stop()
 
@@ -207,8 +247,9 @@ def main():
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True, exist_ok=True)
-    for path in shots.glob("*m8_icons*.png"):
-        shutil.copy(path, out)
+    for pattern in ("*m8_icons*.png", "*m8_jei*.png"):
+        for path in shots.glob(pattern):
+            shutil.copy(path, out)
     failed = results.count(False)
     print(f"{len(results) - failed} of {len(results)} checks passed", flush=True)
     sys.exit(1 if failed else 0)
