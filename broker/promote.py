@@ -19,6 +19,7 @@ from broker.gates import GateFailed, advice, balance, bytecode, client, progress
 
 SERVER_MODS = ("conduit",)
 PROGRESS_SNAPSHOT = "progress_snapshot.json"
+PASSES_KEPT_SECONDS = 86400
 
 
 class Stages:
@@ -195,17 +196,28 @@ def fingerprint(content, jars, current):
     return digest.hexdigest()
 
 
+def remember_pass(passes, proof, screenshots):
+    """One file for each thing that's passed, because passes now come from several lanes at once, and a release may be for any of them.
+    It's replaced in one step, so a release can't read half of one. What a pass proved was on top of one particular release,
+    so old ones can never match again, and they're only here until they're tidied away."""
+    passes.mkdir(parents=True, exist_ok=True)
+    temporary = passes / f"{proof}.{runtime.LANE or 'main'}.tmp"
+    temporary.write_text(json.dumps({"screenshots": screenshots}), encoding="utf-8")
+    temporary.replace(passes / f"{proof}.json")
+    for old in passes.glob("*.json"):
+        if time.time() - old.stat().st_mtime > PASSES_KEPT_SECONDS:
+            old.unlink(missing_ok=True)
+
+
 def run_gates(tier, jars, content, old_ledger, new_ledger, old_content, mods, release_id, stages, report):
     """The slow gates. The agent runs them, has the work reviewed, then asks to release the same commit, and
-    running them a second time would only make players wait, so a match with the last pass is enough."""
+    running them a second time would only make players wait, so a match with an earlier pass is enough, whichever lane it was in."""
     proof = fingerprint(content, jars, runtime.load_state().get("current"))
-    passed_file = runtime.BROKER / "passed_gates.json"
-    if passed_file.exists():
-        passed = json.loads(passed_file.read_text(encoding="utf-8"))
-        if passed["fingerprint"] == proof:
-            print("these exact gates have already passed", flush=True)
-            report["screenshots"] = passed["screenshots"]
-            return
+    passes = runtime.BROKER / "passed_gates"
+    if (passes / f"{proof}.json").exists():
+        print("these exact gates have already passed", flush=True)
+        report["screenshots"] = json.loads((passes / f"{proof}.json").read_text(encoding="utf-8"))["screenshots"]
+        return
 
     new_patches = patches_changed(content, old_content)
     client_modules = (jar_hashes(content / "modules" / "client") != jar_hashes(old_content / "modules" / "client")
@@ -218,8 +230,7 @@ def run_gates(tier, jars, content, old_ledger, new_ledger, old_content, mods, re
     panels = changed_panels(content, old_content)
     shots = stages.run("client", lambda: client.run_gate(blocks, items, mods, report_dir, mobs, client_modules, panels))
     report["screenshots"] = [str(path) for path in shots]
-    passed_file.parent.mkdir(parents=True, exist_ok=True)
-    passed_file.write_text(json.dumps({"fingerprint": proof, "screenshots": report["screenshots"]}), encoding="utf-8")
+    remember_pass(passes, proof, report["screenshots"])
 
 
 def patches_changed(content, old_content):

@@ -40,7 +40,7 @@ Aim for about 8 fast cores and 32 GB of RAM. That's an estimate: prod 8 to 10 GB
 
 To update the code later: run `./scripts/update-engine.sh` as root. It pauses the broker between jobs, pulls, releases the new engine with the world's own features through every gate, restarts the agent, and rebuilds the friend pack if the companion changed. Players get one restart, at a safe moment. Don't promote from the repo folder directly: it has none of the agent's features, so the gates refuse it once the world has any. A change under `infra/` also needs `./scripts/stack.sh build` and `./scripts/stack.sh up -d`. Those recreate the game server and the proxy at once, whether or not it's a safe moment, so only run them for that. A changed `infra/site/Caddyfile` also needs `./scripts/stack.sh up -d --force-recreate site`, because the container keeps the old file until then.
 
-**What's open to the internet:** only what's in `compose.yaml` with no `127.0.0.1` in front of it, which is 25565 for the game, plus 80 and 443 for the site. 25566, 25567, 25568 and RCON aren't published beyond this machine. Docker writes its own firewall rules, so `ufw` can't close a published port, and that's why nothing else is published.
+**What's open to the internet:** only what's in `compose.yaml` with no `127.0.0.1` in front of it, which is 25565 for the game, plus 80 and 443 for the site. 25566, 25567, 25568, the test lanes' ports from 25572 up, and RCON aren't published beyond this machine. Docker writes its own firewall rules, so `ufw` can't close a published port, and that's why nothing else is published.
 
 ## The password
 
@@ -137,7 +137,11 @@ The kill switch stops releases and silences the character. The game keeps runnin
 
 Lookups, lint and the other small jobs start as soon as they're asked for. Each job that's bigger than that has a lane, which is a set of folders under `runtime/lanes` that nothing else uses, and its own copy of Gradle's files. `CHECK_LANES` in `.env` says how many compile checks can run side by side, 1 by default. A lane costs about 1.4 GB of disk, and it's copied from `runtime/cache` the first time it's used. Changing the number needs `systemctl restart livingmod-broker`, and nothing else.
 
-A bigger job beside others only starts if there's room for it and 4 GB to spare, which leaves the live server room to grow to its limit. `grep -E 'waiting [0-9]{2,}' <(journalctl -u livingmod-broker)` shows anything that's had to wait long. If memory runs out anyway, the system stops the broker and the builds, rather than the live server.
+`GATE_LANES` in `.env` says how many test runs can go side by side, 1 by default. Releases use a test lane too, but only one goes at a time, whatever this says. The first lane is the `shadow` and `shadow-proxy` services as they've always been. Each one after it is those same services, plus `shadow-pack`, as a compose project of its own called `livingmod-gates-N`, with folders under `runtime/lanes/gates-N` and two ports on this machine only: 25570 plus twice N for the proxy, and one above that for the pack. So starting or stopping a lane can't touch the live server, the proxy or the site. They start the first time they're needed, and cost about 5 GB of disk and up to 8 GB of memory while they're up. Lowering the number stops the spare ones the next time the broker starts.
+
+To change either number, edit `.env` and run `systemctl restart livingmod-broker`. Don't run `./scripts/stack.sh up -d` for this.
+
+A bigger job beside others only starts if there's room for it and 4 GB to spare, which leaves the live server room to grow to its limit. `journalctl -u livingmod-broker | grep -E 'waiting [0-9]{2,}'` shows anything that's had to wait long. If memory runs out anyway, the system stops the broker and everything it's running, rather than the live server.
 
 ## What the numbers hold it to
 

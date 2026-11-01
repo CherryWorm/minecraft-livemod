@@ -32,6 +32,7 @@ class Deploy(unittest.TestCase):
         for target, name, stand_in in ((deploy.runtime, "rcon", mock.Mock(side_effect=self.rcon)), (deploy.runtime, "apply_content", record("apply")),
                                        (deploy.runtime, "reload_content", record("reload")), (deploy.runtime, "load_state", mock.Mock(return_value={})),
                                        (deploy.runtime, "save_state", mock.Mock()), (deploy.runtime, "utc_now", mock.Mock(return_value="now")),
+                                       (deploy.runtime, "world_lock", mock.MagicMock()),
                                        (deploy, "wait_for_safe_moment", mock.Mock(side_effect=lambda: self.calls.append(("safe", ())) or True)),
                                        (deploy, "backup", record("backup")), (deploy, "_install_jars", record("jars")),
                                        (deploy, "_restart_prod", record("restart")), (deploy, "health_check", mock.Mock(return_value=None))):
@@ -81,7 +82,7 @@ class Daemon(unittest.TestCase):
     def test_the_reason_reaches_the_release(self):
         with mock.patch.object(daemon, "promote") as promote, mock.patch.object(daemon.runtime, "agent_disabled", return_value=False):
             daemon.handle({"id": "1", "kind": "release", "commit": "abc", "release_id": "r1", "why": "a recipe fix"})
-        promote.assert_called_once_with("abc", "r1", "--why=a recipe fix")
+        promote.assert_called_once_with("abc", "r1", "--why=a recipe fix", lane="")
 
 
 class Words(unittest.TestCase):

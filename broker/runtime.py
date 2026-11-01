@@ -1,4 +1,6 @@
 """Talking to the stack: paths, compose, server commands and logs."""
+import contextlib
+import fcntl
 import json
 import os
 import pathlib
@@ -32,7 +34,50 @@ def lane_folder(lane):
 LANE = os.environ.get("BROKER_LANE", "")
 WORK = lane_folder(LANE) / "work"
 LAST_REPORT = lane_folder(LANE) / "last.json"
+DIFF = lane_folder(LANE) / "diff"
 REPORTS = BROKER / "reports"
+PROJECT = ENV.get("COMPOSE_PROJECT_NAME", "livingmod")
+FIRST_LANE_PORT = 25570
+
+
+def shadow_env(lane):
+    """Compose settings for this lane's test server. It's the same services under another project name, with folders and ports of
+    its own, so a mistake can't reach the live server: to compose, that's not in this project at all. The first lane doesn't
+    need any, because it's what the compose file says already."""
+    if not lane.startswith("gates-"):
+        return {}
+    number = int(lane.removeprefix("gates-"))
+    return {"COMPOSE_PROJECT_NAME": f"{PROJECT}-{lane}", "SHADOW_FOLDER": str(lane_folder(lane)),
+            "SHADOW_PROXY_PORT": str(FIRST_LANE_PORT + number * 2), "SHADOW_PACK_PORT": str(FIRST_LANE_PORT + number * 2 + 1)}
+
+
+SHADOW_ENV = shadow_env(LANE)
+SHADOW_PROXY_PORT = SHADOW_ENV.get("SHADOW_PROXY_PORT") or ENV.get("SHADOW_PROXY_PORT", "25566")
+# The first lane's test server has the site as its way in to its resource pack, and the others have a service of their own for that.
+SHADOW_SERVICES = ("--no-deps", "shadow", "shadow-proxy", "shadow-pack") if SHADOW_ENV else ("shadow", "shadow-proxy")
+
+
+def server_folder(server):
+    return lane_folder(LANE) / server if server.startswith("shadow") and SHADOW_ENV else RUNTIME / server
+
+
+def candidate_folder():
+    """The jars this lane's test server starts with."""
+    return lane_folder(LANE) / "candidate" if SHADOW_ENV else RELEASES / "candidate"
+
+
+def _compose_env(server):
+    return SHADOW_ENV if server == "shadow" else {}
+
+
+@contextlib.contextmanager
+def world_lock():
+    """Held while the live world is being copied, backed up or restarted. Saving is turned off for a copy and back on after it, so if
+    two overlapped, the first to finish would turn it back on while the other was still copying, and that copy could be torn."""
+    BROKER.mkdir(parents=True, exist_ok=True)
+    with (BROKER / "world.lock").open("w", encoding="utf-8") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
 RELEASES = RUNTIME / "releases"
 HISTORY = RELEASES / "history"
 STATE_FILE = BROKER / "state.json"
@@ -75,16 +120,17 @@ def run(command, *, check=True, capture=True, env=None, timeout=None, cwd=REPO):
 
 
 def stack(*args, env=None, check=True, timeout=None):
-    return run(["./scripts/stack.sh", "--profile", "shadow", "--profile", "tools", *args], env=env, check=check, timeout=timeout)
+    """The test server's own compose project, so this lane's if it's in one."""
+    return run(["./scripts/stack.sh", "--profile", "shadow", "--profile", "tools", *args], env={**SHADOW_ENV, **(env or {})}, check=check, timeout=timeout)
 
 
 def rcon(server, *command, check=True):
-    result = run(["./scripts/mc.sh", "--server", server, *command], check=check)
+    result = run(["./scripts/mc.sh", "--server", server, *command], check=check, env=_compose_env(server))
     return (result.stdout or "").strip()
 
 
 def container(server):
-    return f"livingmod-{server}-1"
+    return f"{_compose_env(server).get('COMPOSE_PROJECT_NAME', PROJECT)}-{server}-1"
 
 
 def inspect_state(server):
@@ -108,7 +154,7 @@ def wait_ready(server, timeout=180):
     """Waits until the server answers commands. Returns the seconds it took."""
     started = time.monotonic()
     while time.monotonic() - started < timeout:
-        result = run(["./scripts/mc.sh", "--server", server, "list"], check=False)
+        result = run(["./scripts/mc.sh", "--server", server, "list"], check=False, env=_compose_env(server))
         if result.returncode == 0:
             return time.monotonic() - started
         time.sleep(0.5)
@@ -155,7 +201,7 @@ def sync_tree(source, target, *excludes, exact=False):
 
 def apply_content(server, content):
     """Copies a release's content into a server's data folder."""
-    data = RUNTIME / server
+    data = server_folder(server)
     sync_tree(content / "pack", data / "live-assets")
     sync_tree(content / "datapack", data / "world" / "datapacks" / "gm_content")
     conduit_config = data / "config" / "conduit"
@@ -180,7 +226,7 @@ def reload_content(server):
     if "gm_content" not in listed:
         rcon(server, "datapack", "enable", '"file/gm_content"', check=False)
         time.sleep(1.5)
-    pack = RUNTIME / server / "polymer" / "resource_pack.zip"
+    pack = server_folder(server) / "polymer" / "resource_pack.zip"
     before = pack.stat().st_mtime if pack.exists() else 0
     rcon(server, "polymer", "generate-pack", "reload")
     # Polymer reports completion to the command's sender, not the log, so the file is what to watch.

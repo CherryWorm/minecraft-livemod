@@ -11,7 +11,7 @@ from broker import runtime
 from broker.gates import GateFailed
 
 GATE = "client"
-CONTAINER = "livingmod-gate-client"
+CONTAINER = f"{runtime.PROJECT}-gate-client-{runtime.LANE}" if runtime.SHADOW_ENV else f"{runtime.PROJECT}-gate-client"
 PLAYER = "Player0"
 SHOT_TIMEOUT = 90
 REFERENCE_BLOCKS = ("minecraft:stone", "minecraft:iron_ore", "minecraft:oak_planks", "minecraft:grass_block", "minecraft:copper_block")
@@ -97,7 +97,7 @@ def check_image(path):
 def film(mobs, log, process):
     """Holds new mobs at set points in their animations, on the real client, for a reviewer to judge how they move."""
     filmed = {}
-    definitions = json.loads((runtime.RUNTIME / "shadow" / "config" / "conduit" / "mobs.json").read_text(encoding="utf-8"))
+    definitions = json.loads((runtime.server_folder("shadow") / "config" / "conduit" / "mobs.json").read_text(encoding="utf-8"))
     for slot in mobs[:FILMED_MOBS]:
         # Close enough that it fills the frame, whatever its size, with the camera level with the middle of it.
         height = max(0.5, min(float(definitions.get(f"gm:{slot}", {}).get("height", 1)), 8))
@@ -123,7 +123,7 @@ def film(mobs, log, process):
 
 def check_screen_effects(log, process):
     """Only a real client can say whether a shader compiles, and one that doesn't would never appear for anyone."""
-    folder = runtime.RUNTIME / "shadow" / "live-assets" / "assets" / "gm" / "post_effect"
+    folder = runtime.server_folder("shadow") / "live-assets" / "assets" / "gm" / "post_effect"
     for path in sorted(folder.glob("*.json")) if folder.exists() else []:
         _tell(f"SCENE effect gm:{path.stem}")
         _wait_log(log, rf"\[SCENE\] effect gm:{path.stem} (works|failed)$", SHOT_TIMEOUT, process)
@@ -188,8 +188,8 @@ def run_gate(blocks, items, mods_dir, report_dir, mobs=(), client_modules=False,
             cwd=runtime.REPO, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT,
             # Nothing's signed until a release is really going out, so this client takes unsigned modules. It's
             # the test's own copy of the game, and it still refuses anything that fails the code check.
-            env={**__import__("os").environ, "MODS_DIR": str(mods_dir), "CLIENT_TEST": "scene",
-                 "TEST_SERVER": "localhost:25566", "COMPANION_ALLOW_UNSIGNED": "true"},
+            env={**__import__("os").environ, "MODS_DIR": str(mods_dir), "CLIENT_TEST": "scene", **runtime.tools_cache(),
+                 "TEST_SERVER": f"localhost:{runtime.SHADOW_PROXY_PORT}", "COMPANION_ALLOW_UNSIGNED": "true"},
         )
     try:
         _wait_log(log, r"\[SCENE\] joined as [A-Za-z0-9_]+$", 300, process)

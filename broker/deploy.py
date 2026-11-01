@@ -110,29 +110,31 @@ def deploy(tier, release_folder, why=""):
     """Applies a stored release to prod, first telling players why. Raises RolledBack if it had to be undone."""
     state = runtime.load_state()
     safe = wait_for_safe_moment()
-    tell_players(f"{RESTARTING if tier == 'T3' else RELOADING} What's changing: {(why or NOTHING_NAMED)[:MOST_WHY]}.")
-    mark = runtime.utc_now()
-    content = release_folder / "content"
-    backup_file = None
-    if tier == "T3":
-        backup_file = backup()
-        _install_jars(release_folder)
-        runtime.apply_content("prod", content)
-        # A crash during the restart has to count as this release's failure, so the watch starts first.
-        try:
-            _restart_prod()
-        except (TimeoutError, RuntimeError) as error:
-            reason = f"the server didn't come back: {error}"
-            rollback(state, reason)
-            raise RolledBack(reason) from error
-    else:
-        runtime.apply_content("prod", content)
-        runtime.reload_content("prod")
+    # Test runs in other lanes carry on meanwhile, so none of them can be copying the world while this changes or restarts it.
+    with runtime.world_lock():
+        tell_players(f"{RESTARTING if tier == 'T3' else RELOADING} What's changing: {(why or NOTHING_NAMED)[:MOST_WHY]}.")
+        mark = runtime.utc_now()
+        content = release_folder / "content"
+        backup_file = None
+        if tier == "T3":
+            backup_file = backup()
+            _install_jars(release_folder)
+            runtime.apply_content("prod", content)
+            # A crash during the restart has to count as this release's failure, so the watch starts first.
+            try:
+                _restart_prod()
+            except (TimeoutError, RuntimeError) as error:
+                reason = f"the server didn't come back: {error}"
+                rollback(state, reason)
+                raise RolledBack(reason) from error
+        else:
+            runtime.apply_content("prod", content)
+            runtime.reload_content("prod")
 
-    reason = health_check(tier, mark)
-    if reason:
-        rollback(state, reason)
-        raise RolledBack(reason)
+        reason = health_check(tier, mark)
+        if reason:
+            rollback(state, reason)
+            raise RolledBack(reason)
 
     state["previous"] = state.get("current")
     state["current"] = release_folder.name

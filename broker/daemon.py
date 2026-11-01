@@ -37,10 +37,13 @@ QUICK = ("lint", "check", "javap", "server_icon", "set_rule", "server_errors")  
 # These don't wait for anything. They share nothing with whatever else is running, and they take seconds at most.
 AT_ONCE = ("lint", "javap", "server_icon", "set_rule", "server_errors")
 MOST_AT_ONCE = 16  # Of each kind. Far more than the builders can ask for at a time, so it only matters if something floods the broker.
-CHECK_LANES = int(runtime.ENV.get("CHECK_LANES", "1"))  # Compile checks side by side. Each lane's Gradle files and work folder take about 1.5 GB of disk.
+CHECK_LANES = int(runtime.ENV.get("CHECK_LANES", "1"))  # Compile checks side by side. Each lane's Gradle files and work folder take about 1.4 GB of disk.
+GATE_LANES = int(runtime.ENV.get("GATE_LANES", "1"))  # Test runs side by side. Each after the first has its own test server, proxy, test client, ports and copy of the world.
 # These need real memory, and the live server must never go short. So one beside others only starts if there's room for what it'll use,
 # as well as this much to spare, which is what lets the live server grow to its limit. Measured in GB.
 BIG_JOBS = {"check": 3, "gates": 4, "release": 4}
+# A test server and proxy that aren't running yet. After the first job they stay up, so they're already in the system's figures.
+NEW_LANE_GB = int(runtime.ENV.get("SHADOW_MEMORY", "6G").removesuffix("G")) + 1
 KEEP_FREE_GB = 4
 SETTLING_SECONDS = 60  # A job has reached its full size by about now. Until then what it's going to use isn't in the system's figures yet.
 POLL_SECONDS = 0.25
@@ -180,9 +183,9 @@ def handle(request, lane=""):
     if kind == "check":
         return promote(request["commit"], release_id, "--check-only", lane=lane)
     if kind == "gates":
-        return promote(request["commit"], release_id, "--no-deploy")
+        return promote(request["commit"], release_id, "--no-deploy", lane=lane)
     if kind == "release":
-        return promote(request["commit"], release_id, f"--why={request.get('why', '')}")
+        return promote(request["commit"], release_id, f"--why={request.get('why', '')}", lane=lane)
     if kind == "javap":
         return javap(request["class_name"])
     if kind == "server_errors":
@@ -213,13 +216,13 @@ def next_request(pending):
 
 
 def lanes_for(kind):
-    """Which lanes a kind of job can run in, in the order they're used. A lane holds one job at a time. Jobs that use the shadow
-    server still share the one lane, because there's one of it and releases must not overlap."""
+    """Which lanes a kind of job can run in, in the order they're used. A lane holds one job at a time. A release uses a test lane
+    like anything else, because it needs a test server unless what it's releasing has just passed. No lane is the first one."""
     if kind in AT_ONCE:
         return [f"{kind}-{number}" for number in range(MOST_AT_ONCE)]
     if kind == "check":
         return [f"check-{number}" for number in range(CHECK_LANES)]
-    return [""]
+    return ["", *(f"gates-{number}" for number in range(1, GATE_LANES))]
 
 
 def memory_available_gb():
@@ -229,20 +232,24 @@ def memory_available_gb():
     raise RuntimeError("The system doesn't say how much memory is available.")
 
 
-def room_for(kind, running):
+def room_for(kind, lane, running):
     """Only big jobs need room, and only beside other big jobs. One by itself always goes ahead, or a small machine would never do anything."""
     big = [job for job in running.values() if job.kind in BIG_JOBS]
     if kind not in BIG_JOBS or not big:
         return True
+    new_lane = NEW_LANE_GB if lane.startswith("gates-") and lane not in lanes_used else 0
     settling = sum(BIG_JOBS[job.kind] for job in big if time.monotonic() - job.began < SETTLING_SECONDS)
-    return memory_available_gb() - settling >= BIG_JOBS[kind] + KEEP_FREE_GB
+    return memory_available_gb() - settling >= BIG_JOBS[kind] + new_lane + KEEP_FREE_GB
 
 
 def free_lane(kind, running):
-    """The lane a job of this kind can start in now, or None if it has to wait."""
+    """The lane a job of this kind can start in now, or None if it has to wait. Releases go one at a time, however many lanes there
+    are, because there's one signer, one ledger and one live server, and each is tested on top of the last."""
+    if kind == "release" and any(job.kind == "release" for job in running.values()):
+        return None
     taken = {job.lane for job in running.values()}
     lane = next((lane for lane in lanes_for(kind) if lane not in taken), None)
-    return lane if lane is not None and room_for(kind, running) else None
+    return lane if lane is not None and room_for(kind, lane, running) else None
 
 
 def draining():
@@ -252,7 +259,8 @@ def draining():
         return False
 
 
-Job = collections.namedtuple("Job", "kind lane thread began")
+Job = collections.namedtuple("Job", "kind lane thread began release_id", defaults=(None,))
+lanes_used = set()
 
 
 def finish(path, request, answer, seconds, waited):
@@ -278,19 +286,29 @@ def start_job(path, running):
     """Raises FileNotFoundError if whoever asked has stopped waiting and taken it back."""
     request = json.loads(path.read_text(encoding="utf-8"))
     waited = time.time() - path.stat().st_mtime
+    lane = free_lane(request["kind"], running)
+    if lane is None:
+        return  # Memory has gone since it was last looked at, so this waits for the next look.
     if started_again(request["id"]) > TRIES_BEFORE_REFUSING:
         finish(path, request, {"result": "blocked", "gate": "broker",
                                "reason": f"The broker itself died each of the {TRIES_BEFORE_REFUSING} times it ran this, so it hasn't been checked. "
                                          "That may well not be anything in your work."}, 0, waited)
         return
-    lane = free_lane(request["kind"], running)
     thread = threading.Thread(target=run_job, args=(path, request, lane, waited), daemon=True)
-    running[path.name] = Job(request["kind"], lane, thread, time.monotonic())
+    running[path.name] = Job(request["kind"], lane, thread, time.monotonic(), request.get("release_id"))
+    lanes_used.add(lane)
     thread.start()
 
 
 def can_start(path, running):
-    return path.name not in running and free_lane(json.loads(path.read_text(encoding="utf-8"))["kind"], running) is not None
+    """Someone who's waited a very long time asks again with the same name, and the earlier one may still be running. They'd share a
+    report folder, so the second waits."""
+    if path.name in running:
+        return False
+    request = json.loads(path.read_text(encoding="utf-8"))
+    if request.get("release_id") and request["release_id"] in {job.release_id for job in running.values()}:
+        return False
+    return free_lane(request["kind"], running) is not None
 
 
 def tick(running):
@@ -333,6 +351,15 @@ def retry_suspects():
             job.thread.join()
 
 
+def stop_spare_lanes():
+    """A test server stays up between jobs so the next one is quicker, so one in a lane that's been taken away would only be using memory.
+    The services are named, because this should only ever stop these three."""
+    for folder in (runtime.RUNTIME / "lanes").glob("gates-*"):
+        if int(folder.name.removeprefix("gates-")) >= GATE_LANES:
+            runtime.run(["./scripts/stack.sh", "--profile", "shadow", "--profile", "lanes", "stop", "shadow", "shadow-proxy", "shadow-pack"],
+                        env=runtime.shadow_env(folder.name), check=False)
+
+
 def main():
     for folder in (REQUESTS, RESPONSES, REPORTS_FOR_AGENT):
         folder.mkdir(parents=True, exist_ok=True)
@@ -343,6 +370,7 @@ def main():
     DRAINING.unlink(missing_ok=True)
     # If memory does run out, the system should stop this, and what it's running, rather than the live server. See started_again.
     pathlib.Path("/proc/self/oom_score_adj").write_text("500", encoding="utf-8")
+    stop_spare_lanes()
     print("broker waiting for requests", flush=True)
     retry_suspects()
     running = {}

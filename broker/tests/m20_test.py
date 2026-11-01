@@ -237,7 +237,7 @@ def play_without_companion(client, results):
 
 def main():
     if "--again" in sys.argv:
-        promoted = json.loads((runtime.BROKER / "passed_gates.json").read_text(encoding="utf-8"))
+        promoted = json.loads(max((runtime.BROKER / "passed_gates").glob("*.json"), key=lambda path: path.stat().st_mtime).read_text(encoding="utf-8"))
     else:
         build_source()
         print("building and releasing the test feature", flush=True)

@@ -25,7 +25,7 @@ class Case(unittest.TestCase):
         self.requests.mkdir()
         self.responses.mkdir()
         for name, value in (("REQUESTS", self.requests), ("RESPONSES", self.responses), ("STARTED", self.root / "started.json"),
-                            ("DRAINING", self.root / "draining")):
+                            ("DRAINING", self.root / "draining"), ("CHECK_LANES", 1), ("GATE_LANES", 1), ("lanes_used", set())):
             patcher = mock.patch.object(daemon, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -188,8 +188,8 @@ class Memory(Case):
 
     def test_one_alone_always_goes_ahead(self):
         with mock.patch.object(daemon, "memory_available_gb", return_value=0.5):
-            self.assertTrue(daemon.room_for("gates", {}))
-            self.assertTrue(daemon.room_for("gates", {"a": self.job("lint")}))
+            self.assertTrue(daemon.room_for("gates", "", {}))
+            self.assertTrue(daemon.room_for("gates", "", {"a": self.job("lint")}))
 
     def test_small_jobs_never_wait_for_memory(self):
         with mock.patch.object(daemon, "memory_available_gb", return_value=0.5):
@@ -200,15 +200,31 @@ class Memory(Case):
         running = {"a": self.job("gates")}
         need = daemon.BIG_JOBS["check"] + daemon.KEEP_FREE_GB
         with mock.patch.object(daemon, "memory_available_gb", return_value=need):
-            self.assertTrue(daemon.room_for("check", running))
+            self.assertTrue(daemon.room_for("check", "check-0", running))
         with mock.patch.object(daemon, "memory_available_gb", return_value=need - 0.1):
-            self.assertFalse(daemon.room_for("check", running))
+            self.assertFalse(daemon.room_for("check", "check-0", running))
 
     def test_what_a_job_that_just_started_will_use_is_counted(self):
         need = daemon.BIG_JOBS["check"] + daemon.KEEP_FREE_GB
         with mock.patch.object(daemon, "memory_available_gb", return_value=need + 1):
-            self.assertTrue(daemon.room_for("check", {"a": self.job("gates")}))
-            self.assertFalse(daemon.room_for("check", {"a": self.job("gates", age=1)}))
+            self.assertTrue(daemon.room_for("check", "check-0", {"a": self.job("gates")}))
+            self.assertFalse(daemon.room_for("check", "check-0", {"a": self.job("gates", age=1)}))
+
+    def test_a_lane_thats_never_been_used_needs_room_for_its_test_server_too(self):
+        running = {"a": self.job("gates")}
+        need = daemon.BIG_JOBS["gates"] + daemon.KEEP_FREE_GB
+        with mock.patch.object(daemon, "memory_available_gb", return_value=need + daemon.NEW_LANE_GB - 0.1):
+            self.assertFalse(daemon.room_for("gates", "gates-1", running))
+            daemon.lanes_used.add("gates-1")
+            self.assertTrue(daemon.room_for("gates", "gates-1", running))
+
+    def test_memory_going_at_the_last_moment_only_means_another_look(self):
+        path = self.request("late", "check", commit="a")
+        with mock.patch.object(daemon, "free_lane", return_value=None):
+            daemon.start_job(path, self.running)
+        self.assertEqual(self.running, {})
+        self.assertFalse(daemon.STARTED.exists(), "it hasn't been tried, so that shouldn't count as a try")
+        self.assertTrue(path.exists())
 
     def test_waiting_for_memory_starts_when_theres_room(self):
         with mock.patch.object(daemon, "CHECK_LANES", 2), mock.patch.object(daemon, "memory_available_gb", return_value=1) as memory:
@@ -222,6 +238,230 @@ class Memory(Case):
             self.running = {name: job._replace(began=0) for name, job in self.running.items()}
             self.serve_until(lambda: "b" in self.active)
             self.finish_all()
+
+
+class TestRuns(Case):
+    def setUp(self):
+        super().setUp()
+        for patcher in (mock.patch.object(daemon, "GATE_LANES", 3), mock.patch.object(daemon, "memory_available_gb", return_value=30)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_several_run_side_by_side_each_in_its_own_lane(self):
+        for name in ("a", "b", "c"):
+            self.request(name, "gates", commit=name)
+        self.serve_until(lambda: len(self.active) == 3)
+        self.assertEqual(sorted(lane for _, lane in self.ran), ["", "gates-1", "gates-2"])
+        self.finish_all()
+
+    def test_any_more_wait_and_small_ones_are_still_first(self):
+        for name in ("a", "b", "c"):
+            self.request(name, "gates", commit=name)
+        self.serve_until(lambda: len(self.active) == 3)
+        self.request("big", "gates", commit="big")
+        self.request("small", "gates", commit="small", hurry=True)
+        for _ in range(5):
+            daemon.tick(self.running)
+        self.assertEqual(self.active, {"a", "b", "c"})
+        self.slow.set()
+        self.serve_until(lambda: self.answered("small") and self.answered("big"))
+        started = [name for name, _ in self.ran]
+        self.assertLess(started.index("small"), started.index("big"))
+
+    def test_a_release_gets_the_next_lane_before_anything_else(self):
+        for name in ("a", "b", "c"):
+            self.request(name, "gates", commit=name)
+        self.serve_until(lambda: len(self.active) == 3)
+        self.request("waiting", "gates", commit="w")
+        self.request("going_out", "release", commit="r")
+        self.slow.set()
+        self.serve_until(lambda: self.answered("waiting") and self.answered("going_out"))
+        started = [name for name, _ in self.ran]
+        self.assertLess(started.index("going_out"), started.index("waiting"))
+
+    def test_only_one_release_at_a_time_however_many_lanes_there_are(self):
+        self.request("first", "release", commit="a")
+        self.request("second", "release", commit="b")
+        self.request("gating", "gates", commit="c")
+        self.serve_until(lambda: {"first", "gating"} <= self.active)
+        for _ in range(5):
+            daemon.tick(self.running)
+        self.assertEqual(self.active, {"first", "gating"})
+        self.slow.set()
+        self.serve_until(lambda: self.answered("second"))
+        for name, beside in zip([name for name, _ in self.ran], self.overlap):
+            if name == "second":
+                self.assertNotIn("first", beside)
+
+    def test_a_release_runs_in_a_lane_a_test_run_isnt_using(self):
+        self.request("gating", "gates", commit="c")
+        self.serve_until(lambda: "gating" in self.active)
+        self.request("going_out", "release", commit="a")
+        self.serve_until(lambda: "going_out" in self.active)
+        self.assertEqual(sorted(lane for _, lane in self.ran), ["", "gates-1"])
+        self.finish_all()
+
+    def test_quick_jobs_and_checks_dont_wait_for_any_of_them(self):
+        for name in ("a", "b", "c"):
+            self.request(name, "gates", commit=name)
+        self.serve_until(lambda: len(self.active) == 3)
+        self.request("lookup", "javap", class_name="a.B")
+        self.request("linting", "lint", commit="abc")
+        self.serve_until(lambda: self.answered("lookup") and self.answered("linting"))
+        self.request("compile", "check", commit="abc")
+        self.serve_until(lambda: "compile" in self.active)
+        self.finish_all()
+
+    def test_asking_again_doesnt_run_beside_the_first_try(self):
+        self.request("first_try", "gates", commit="a", release_id="feature-1")
+        self.serve_until(lambda: "first_try" in self.active)
+        (self.requests / "first_try.json").unlink()
+        self.request("second_try", "gates", commit="a", release_id="feature-1")
+        for _ in range(5):
+            daemon.tick(self.running)
+        self.assertEqual(self.active, {"first_try"})
+        self.slow.set()
+        self.serve_until(lambda: self.answered("second_try"))
+
+    def test_one_lane_means_what_it_always_has(self):
+        with mock.patch.object(daemon, "GATE_LANES", 1):
+            self.assertEqual(daemon.lanes_for("gates"), [""])
+            self.assertEqual(daemon.lanes_for("release"), [""])
+
+    def test_a_job_keeps_its_place_when_memory_is_short_and_one_is_running(self):
+        with mock.patch.object(daemon, "memory_available_gb", return_value=1):
+            self.request("a", "gates", commit="a")
+            self.request("b", "gates", commit="b")
+            self.serve_until(lambda: "a" in self.active)
+            for _ in range(5):
+                daemon.tick(self.running)
+            self.assertEqual(self.active, {"a"})
+            self.slow.set()
+            self.serve_until(lambda: self.answered("b"))
+            self.assertEqual([lane for name, lane in self.ran if name == "b"], [""], "it should have got the first lane back")
+
+
+class TestServerFolders(unittest.TestCase):
+    """Each lane's test server has to be separate from every other's, and it has to be impossible for one to reach the live one."""
+
+    def settings(self, lane):
+        script = ("import json; from broker import runtime as r; from broker.gates import client; print(json.dumps({'env': r.SHADOW_ENV, 'port': r.SHADOW_PROXY_PORT, "
+                  "'services': r.SHADOW_SERVICES, 'shadow': str(r.server_folder('shadow')), 'proxy': str(r.server_folder('shadow-proxy')), 'prod': str(r.server_folder('prod')), "
+                  "'candidate': str(r.candidate_folder()), 'diff': str(r.DIFF), 'work': str(r.WORK), 'shadow_container': r.container('shadow'), 'prod_container': r.container('prod'), "
+                  "'client': client.CONTAINER, 'report': str(r.LAST_REPORT)}))")
+        return json.loads(subprocess.run([sys.executable, "-c", script], cwd=runtime.REPO, env={**os.environ, "BROKER_LANE": lane}, capture_output=True, text=True, check=True).stdout)
+
+    def test_the_first_lane_is_what_its_always_been(self):
+        first = self.settings("")
+        self.assertEqual(first["env"], {})
+        self.assertEqual(first["services"], ["shadow", "shadow-proxy"])
+        self.assertEqual(first["shadow"], str(runtime.RUNTIME / "shadow"))
+        self.assertEqual(first["candidate"], str(runtime.RELEASES / "candidate"))
+        self.assertEqual(first["diff"], str(runtime.BROKER / "diff"))
+        self.assertEqual(first["client"], f"{runtime.PROJECT}-gate-client")
+        self.assertEqual(first["shadow_container"], f"{runtime.PROJECT}-shadow-1")
+
+    def test_no_two_lanes_share_anything_of_their_own(self):
+        lanes = [self.settings(lane) for lane in ("", "gates-1", "gates-2")]
+        for key in ("port", "shadow", "proxy", "candidate", "diff", "work", "shadow_container", "client", "report"):
+            self.assertEqual(len({lane[key] for lane in lanes}), 3, key)
+        pack_ports = {lane["env"].get("SHADOW_PACK_PORT", "25568") for lane in lanes}
+        self.assertEqual(len(pack_ports | {lane["port"] for lane in lanes}), 6, "two lanes would fight over a port")
+
+    def test_every_lane_still_means_the_real_live_server(self):
+        for lane in ("", "gates-1", "check-0", "lint-0"):
+            found = self.settings(lane)
+            self.assertEqual(found["prod"], str(runtime.RUNTIME / "prod"), lane)
+            self.assertEqual(found["prod_container"], f"{runtime.PROJECT}-prod-1", lane)
+
+    def test_a_lane_never_asks_for_the_site_or_the_live_server(self):
+        found = self.settings("gates-1")
+        self.assertEqual(found["services"], ["--no-deps", "shadow", "shadow-proxy", "shadow-pack"])
+        self.assertEqual(found["env"]["COMPOSE_PROJECT_NAME"], f"{runtime.PROJECT}-gates-1")
+
+    def test_other_jobs_have_no_test_server_settings(self):
+        for lane in ("check-0", "lint-0"):
+            self.assertEqual(self.settings(lane)["env"], {})
+
+    def test_server_commands_go_to_the_right_project(self):
+        calls = []
+        with mock.patch.object(runtime, "SHADOW_ENV", {"COMPOSE_PROJECT_NAME": "lane"}), \
+                mock.patch.object(runtime, "run", lambda command, **kwargs: calls.append(kwargs["env"]) or subprocess.CompletedProcess(command, 0, "", "")):
+            runtime.rcon("shadow", "list")
+            runtime.rcon("prod", "list")
+        self.assertEqual(calls, [{"COMPOSE_PROJECT_NAME": "lane"}, {}])
+
+
+class WorldCopies(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.root = pathlib.Path(folder.name)
+        patcher = mock.patch.object(runtime, "BROKER", self.root)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_only_one_thing_at_a_time_has_saving_turned_off(self):
+        """Run as separate processes, because that's what lanes are."""
+        script = ("import sys, time; from broker import runtime; import pathlib; runtime.BROKER = pathlib.Path(sys.argv[1])\n"
+                  "with runtime.world_lock():\n    print('in', time.monotonic(), flush=True); time.sleep(0.4); print('out', time.monotonic(), flush=True)\n")
+        first = subprocess.Popen([sys.executable, "-c", script, str(self.root)], cwd=runtime.REPO, stdout=subprocess.PIPE, text=True)
+        second = subprocess.Popen([sys.executable, "-c", script, str(self.root)], cwd=runtime.REPO, stdout=subprocess.PIPE, text=True)
+        events = sorted((float(line.split()[1]), line.split()[0]) for process in (first, second) for line in process.communicate()[0].splitlines())
+        self.assertEqual([kind for _, kind in events], ["in", "out", "in", "out"], "they overlapped")
+
+    def test_a_clone_holds_it_and_turns_saving_back_on_when_it_fails(self):
+        order = []
+        lock = mock.MagicMock()
+        lock.__enter__.side_effect = lambda: order.append("locked")
+        lock.__exit__.side_effect = lambda *args: order.append("unlocked")
+        (self.root / "prod" / "world").mkdir(parents=True)
+        with mock.patch.object(runtime, "RUNTIME", self.root), mock.patch.object(runtime, "world_lock", return_value=lock), \
+                mock.patch.object(runtime, "inspect_state", return_value={"Running": True}), \
+                mock.patch.object(runtime, "rcon", side_effect=lambda server, *command, **_: order.append(command[0])), \
+                mock.patch.object(runtime, "sync_tree", side_effect=OSError("disk full")):
+            from broker.gates import shadow
+            with self.assertRaises(OSError):
+                shadow.clone_prod_world()
+        self.assertEqual(order, ["locked", "save-off", "save-all", "save-on", "unlocked"])
+
+    def test_a_test_server_started_with_other_jars_is_started_again(self):
+        from broker.gates import shadow
+        candidate = self.root / "candidate"
+        candidate.mkdir()
+        (candidate / "conduit.jar").write_bytes(b"old engine")
+        new = self.root / "built" / "conduit.jar"
+        new.parent.mkdir()
+        new.write_bytes(b"new engine")
+        with mock.patch.object(runtime, "candidate_folder", return_value=candidate):
+            self.assertFalse(shadow.running_these_jars([new]))
+            new.write_bytes(b"old engine")
+            self.assertTrue(shadow.running_these_jars([new]))
+
+
+class Passes(unittest.TestCase):
+    """A release can use a pass from any lane, and a pass in one lane can't hide one in another."""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.passes = pathlib.Path(folder.name) / "passed_gates"
+
+    def test_several_are_kept_at_once(self):
+        from broker import promote
+        promote.remember_pass(self.passes, "one", ["a.png"])
+        promote.remember_pass(self.passes, "two", ["b.png"])
+        self.assertEqual(json.loads((self.passes / "one.json").read_text(encoding="utf-8"))["screenshots"], ["a.png"])
+        self.assertEqual(json.loads((self.passes / "two.json").read_text(encoding="utf-8"))["screenshots"], ["b.png"])
+        self.assertEqual(list(self.passes.glob("*.tmp")), [])
+
+    def test_old_ones_are_tidied_away(self):
+        from broker import promote
+        promote.remember_pass(self.passes, "old", [])
+        long_ago = time.time() - promote.PASSES_KEPT_SECONDS - 1
+        os.utime(self.passes / "old.json", (long_ago, long_ago))
+        promote.remember_pass(self.passes, "new", [])
+        self.assertEqual([path.stem for path in self.passes.glob("*.json")], ["new"])
 
 
 class Crashes(Case):

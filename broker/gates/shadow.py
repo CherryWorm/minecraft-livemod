@@ -1,7 +1,6 @@
 """Tries a release on a copy of the live world, with real boots and a real client login."""
 import re
 import shutil
-import subprocess
 import sys
 import time
 
@@ -53,28 +52,29 @@ def _running():
 
 def clone_prod_world():
     """Copies the live world for testing, briefly pausing saves so the copy is consistent."""
-    target = runtime.RUNTIME / "shadow" / "world"
+    target = runtime.server_folder("shadow") / "world"
     source = runtime.RUNTIME / "prod" / "world"
     if not source.exists():
         target.mkdir(parents=True, exist_ok=True)
         return
-    prod_up = runtime.inspect_state("prod")
-    prod_up = bool(prod_up and prod_up.get("Running"))
-    if prod_up:
-        runtime.rcon("prod", "save-off")
-        runtime.rcon("prod", "save-all", "flush")
-    try:
-        runtime.sync_tree(source, target, "session.lock")
-    finally:
+    with runtime.world_lock():
+        prod_up = runtime.inspect_state("prod")
+        prod_up = bool(prod_up and prod_up.get("Running"))
         if prod_up:
-            runtime.rcon("prod", "save-on")
+            runtime.rcon("prod", "save-off")
+            runtime.rcon("prod", "save-all", "flush")
+        try:
+            runtime.sync_tree(source, target, "session.lock")
+        finally:
+            if prod_up:
+                runtime.rcon("prod", "save-on")
 
 
 def cold_boot(jars):
     """Stops the shadow server, copies in the live world and candidate jars, and starts it."""
     runtime.stack("stop", "shadow", check=False)
     clone_prod_world()
-    candidate = runtime.RELEASES / "candidate"
+    candidate = runtime.candidate_folder()
     candidate.mkdir(parents=True, exist_ok=True)
     for old in candidate.glob("*.jar"):
         old.unlink()
@@ -82,8 +82,17 @@ def cold_boot(jars):
         shutil.copy(jar, candidate)
 
 
+def running_these_jars(jars):
+    """Another lane can have shipped a new engine since this test server started, and testing on top of the old one would prove nothing."""
+    started_with = {path.name: path.read_bytes() for path in runtime.candidate_folder().glob("*.jar")}
+    return started_with == {jar.name: jar.read_bytes() for jar in jars}
+
+
 def start():
-    runtime.stack("up", "-d", "shadow", "shadow-proxy")
+    # Docker would make these as root if they weren't there, and then the server couldn't write to them.
+    runtime.server_folder("shadow").mkdir(parents=True, exist_ok=True)
+    runtime.server_folder("shadow-proxy").mkdir(parents=True, exist_ok=True)
+    runtime.stack("up", "-d", *runtime.SHADOW_SERVICES)
     return runtime.wait_ready("shadow", timeout=240)
 
 
@@ -91,7 +100,7 @@ def smoke_join():
     """Logs a test client in through the shadow's proxy: login, pack offer, checksum, world entry."""
     time.sleep(3.5)  # Velocity limits how fast one address can log in.
     result = runtime.run(
-        [sys.executable, "scripts/smoketest_join.py", "--port", "25566", "--name", "gatebot", "--stay", "4"],
+        [sys.executable, "scripts/smoketest_join.py", "--port", runtime.SHADOW_PROXY_PORT, "--name", "gatebot", "--stay", "4"],
         check=False, timeout=90,
     )
     if result.returncode != 0:
@@ -113,13 +122,13 @@ def world_after_patches():
         time.sleep(1)
     runtime.rcon("shadow", "save-all", "flush")
     time.sleep(2)
-    after = runtime.BROKER / "diff" / "after"
+    after = runtime.DIFF / "after"
     runtime.sync_tree(regions, after)
     return after
 
 
 def _region_dir():
-    found = sorted((runtime.RUNTIME / "shadow" / "world").rglob("region"))
+    found = sorted((runtime.server_folder("shadow") / "world").rglob("region"))
     overworld = [path for path in found if "overworld" in str(path) or path.parent.name == "world"]
     return (overworld or found or [None])[0]
 
@@ -128,7 +137,7 @@ def snapshot_regions():
     regions = _region_dir()
     if regions is None:
         return None
-    before = runtime.BROKER / "diff" / "before"
+    before = runtime.DIFF / "before"
     runtime.sync_tree(regions, before)
     return before
 
@@ -148,7 +157,7 @@ def run_gate(tier, jars, content, patches):
     """Returns timings. Warm for live changes, cold only when the server must restart anyway."""
     timings = {}
     mark = runtime.utc_now()
-    cold = tier == "T3" or not _running()
+    cold = tier == "T3" or not _running() or not running_these_jars(jars)
     before = None
     if cold:
         started = time.monotonic()
@@ -212,5 +221,4 @@ def run_gate(tier, jars, content, patches):
 
 
 def stop():
-    subprocess.run(["./scripts/stack.sh", "--profile", "shadow", "stop", "shadow", "shadow-proxy"],
-                   cwd=runtime.REPO, stdin=subprocess.DEVNULL, capture_output=True, check=False)
+    runtime.stack("stop", "shadow", "shadow-proxy", check=False)
