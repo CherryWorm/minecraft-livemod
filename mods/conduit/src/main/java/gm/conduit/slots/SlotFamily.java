@@ -28,7 +28,12 @@ public enum SlotFamily {
 	GLOW_PLANT(2110, 2, BlockModelType.PLANT, () -> base(0.0f, 0.0f, SoundType.GRASS).noCollision().randomTicks().lightLevel(state -> 10)),
 	TINTED_PLANT(2150, 12, BlockModelType.BIOME_PLANT, () -> base(0.0f, 0.0f, SoundType.GRASS).noCollision().randomTicks()),
 	/** Drawn by a model rather than a texture, so it has no model type: it costs none of Polymer's limited block states. */
-	MODEL(2300, 200, null, () -> base(3.5f, 6.0f, SoundType.METAL).requiresCorrectToolForDrops().noOcclusion());
+	MODEL(2300, 200, null, () -> base(3.5f, 6.0f, SoundType.METAL).requiresCorrectToolForDrops().noOcclusion()),
+	/** A deep ore that gives off a little light, so it can be spotted across a dark cave. */
+	GLOW_ORE(2500, 20, BlockModelType.FULL_BLOCK, () -> base(4.5f, 3.0f, SoundType.DEEPSLATE).requiresCorrectToolForDrops().lightLevel(state -> 4)),
+	/** These choose a client block state for each stage or shape, so they ask for those themselves. See CropSlotBlock and ConnectedSlotBlock. */
+	CROP(2200, 7, null, () -> base(0.0f, 0.0f, SoundType.CROP).noCollision().randomTicks()),
+	CONNECTED(2600, 2, null, () -> base(0.5f, 0.5f, SoundType.COPPER).noOcclusion());
 
 	private final int firstId;
 	private final int count;

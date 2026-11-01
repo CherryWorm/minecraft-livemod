@@ -388,7 +388,9 @@ public final class OrePatchQueue {
 				(originX << 4) + random.nextInt(16),
 				patch.minY() + random.nextInt(Math.max(1, patch.maxY() - patch.minY())),
 				(originZ << 4) + random.nextInt(16));
-		for (int step = 0; step < patch.veinSize(); step++) {
+		// Worked out only for a range, so what a fixed size gets from the random numbers stays what it always was.
+		int size = patch.smallestVein() == patch.veinSize() ? patch.veinSize() : patch.smallestVein() + random.nextInt(patch.veinSize() - patch.smallestVein() + 1);
+		for (int step = 0; step < size; step++) {
 			if (ChunkPos.containing(pos).equals(chunk.getPos())) {
 				tryPlace(level, chunk, patch, visited, pos);
 			}
@@ -408,6 +410,9 @@ public final class OrePatchQueue {
 		if (visited && !fullyHidden(level, pos)) {
 			return;
 		}
+		if (patch.touchingAir() && !touchesAir(level, pos)) {
+			return;
+		}
 		if (!patch.biomes().isEmpty() && patch.biomes().stream().noneMatch(level.getBiome(pos)::is)) {
 			return;
 		}
@@ -417,6 +422,17 @@ public final class OrePatchQueue {
 		section.setBlockState(pos.getX() & 15, pos.getY() & 15, pos.getZ() & 15, patch.ore().defaultBlockState());
 		level.getChunkSource().blockChanged(pos);
 		this.oresPlaced++;
+	}
+
+	private static boolean touchesAir(ServerLevel level, BlockPos pos) {
+		for (Direction direction : Direction.values()) {
+			BlockPos next = pos.relative(direction);
+			LevelChunk neighbour = level.getChunkSource().getChunkNow(next.getX() >> 4, next.getZ() >> 4);
+			if (neighbour != null && neighbour.getBlockState(next).isAir()) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private static boolean fullyHidden(ServerLevel level, BlockPos pos) {

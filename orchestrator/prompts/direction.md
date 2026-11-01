@@ -22,12 +22,13 @@ Produce, in the required JSON:
 - `first_features`: the first features to build, in order, as short specs, each naming its `node` and the `category` that players will see it listed under before it's out. These are all early-game: lead with what players can find straight away and use, then more to explore, eat and fight. Each one has to be worth having the day it ships, so an ore comes with what it makes and why that beats what vanilla gives, not with a promise of later. Build features can be big when that's what it takes, and they're built in parallel, so each must stand on its own. Make the first one something players can find as soon as it lands.
 
 What the engine can do today, so your specs can be built quickly. Each of these needs no restart unless noted, and specs should lean on them:
-- Blocks and items with custom art, stats, tools, weapons and armor. Blocks come in families: stone, ore, deep ore, metal, wood, soil, glowing, machine, leaves and a very limited number of plants.
-- Ores in the world, old and new, by depth and biome, as veins of up to 16 blocks.
+- Blocks and items with custom art, stats, tools, weapons and armor. Blocks come in families: stone, ore, deep ore, glowing ore, metal, wood, soil, glowing, machine, leaves and a very limited number of plants, crops with growth stages and connected cables.
+- Ores in the world, old and new, by depth and biome, as veins of up to 16 blocks, and if you like only where they can be seen on a cliff or cave wall.
 - Plants on the surface or on cave floors, by biome and height.
-- Small ruins, up to one chunk across, on the ground or underground, with chest loot.
+- Small ruins, up to one chunk across, on the ground or underground, that can follow the land, vary, keep their distance and look for high ground, with different loot in each container.
 - Mobs of any shape, each modelled and animated from scratch: hostile, neutral, passive or skittish, spawning by light, height and biome. There's room for hundreds, so a world can be all about its creatures.
-- Machines and other blocks drawn as 3D models with moving parts.
+- Machines and other blocks drawn as 3D models with moving parts, and gauges that show a value. A machine can have an inventory that hoppers and players use like a furnace's, and recipes with several outputs.
+- Menus made of chest slots, and books, which a module can open for a player.
 - Creatures with minds of their own, which players can talk to, befriend or anger. They remember, gossip, and can trade or teach what they know, and bosses can read a fight. Each is cheap, but use them for characters that matter.
 - New biomes, as a variation of a vanilla one, which do need a restart.
 - Crafting and machine recipes, and knowledge entries learned by obtaining, examining, killing, reading or collecting pieces.

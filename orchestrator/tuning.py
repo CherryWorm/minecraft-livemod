@@ -152,5 +152,5 @@ def apply(manifest, table, name, field, value, reason):
 def _recipe_outputs(manifest, name):
     """The names in this feature that a recipe makes, because changing a recipe changes them."""
     recipe = manifest["recipes"][name]
-    text = json.dumps(recipe.get("output") or recipe.get("json", {}).get("result"))
+    text = json.dumps(recipe.get("outputs") or recipe.get("output") or recipe.get("json", {}).get("result"))
     return [thing for table in ("items", "blocks") for thing in manifest.get(table, {}) if f":{thing}\"" in text or f"/{thing}\"" in text]

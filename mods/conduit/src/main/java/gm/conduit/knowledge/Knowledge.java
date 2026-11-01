@@ -113,6 +113,11 @@ public final class Knowledge {
 		});
 	}
 
+	/** Examines something on a player's behalf, teaching whatever any feature teaches for looking closely at it. */
+	public void examineFor(ServerPlayer player, String target) {
+		examine(player, target);
+	}
+
 	private static boolean isExamining(Player player, InteractionHand hand) {
 		return hand == InteractionHand.MAIN_HAND && player.isShiftKeyDown() && player.getMainHandItem().isEmpty();
 	}
@@ -293,21 +298,31 @@ public final class Knowledge {
 			int matched = matching(recipe, offered);
 			boolean exact = matched == recipe.inputs().size() && offered.size() == recipe.inputs().size();
 			if (exact) {
-				if (recipe.mode().equals("known") && recipe.needs().stream().noneMatch(entry -> knows(player, entry))) {
+				if (recipe.mode().equals("known") && !canUseRecipe(player, recipe)) {
 					locked = true;
 					continue;
 				}
 				if (player instanceof ServerPlayer serverPlayer && this.ledger.markFound(scopeKey(player), "machine:" + recipe.id())) {
 					emitDiscovery(serverPlayer, "a machine recipe: " + this.plan.names().getOrDefault(recipe.outputItem(), recipe.outputItem()));
 				}
-				return new MachineAttempt(recipe.output(), recipe.inputs().size(), recipe.inputs().size(), false);
+				List<ItemStack> outputs = recipe.outputStacks();
+				return new MachineAttempt(outputs.getFirst(), recipe.inputs().size(), recipe.inputs().size(), false, outputs, recipe.id(), recipe.inputStacks());
 			}
 			if (matched > closest || (matched == closest && recipe.inputs().size() < needed)) {
 				closest = matched;
 				needed = recipe.inputs().size();
 			}
 		}
-		return new MachineAttempt(ItemStack.EMPTY, closest, needed, locked);
+		return new MachineAttempt(ItemStack.EMPTY, closest, needed, locked, List.of(), null, List.of());
+	}
+
+	/** With nobody there, as with a machine a hopper keeps fed, a recipe has to be one this whole world knows. */
+	private boolean canUseRecipe(Player player, KnowledgePlan.MachineRecipe recipe) {
+		if (player == null && !this.plan.shared()) {
+			return false;
+		}
+		String scope = player == null ? KnowledgeLedger.SHARED : scopeKey(player);
+		return recipe.needs().stream().anyMatch(entry -> this.ledger.knows(scope, entry));
 	}
 
 	private static int matching(KnowledgePlan.MachineRecipe recipe, List<ItemStack> offered) {

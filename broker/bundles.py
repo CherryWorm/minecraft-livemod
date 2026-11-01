@@ -14,7 +14,14 @@ TOKEN = re.compile(r"\$(block|item|mob|sound):([a-z0-9_]+(?:/[a-z0-9_]+)?)")
 
 TOOL_TAGS = {"pickaxe": "pickaxe", "axe": "axe", "shovel": "shovel", "hoe": "hoe"}
 LEVEL_TAGS = {"stone": "needs_stone_tool", "iron": "needs_iron_tool", "diamond": "needs_diamond_tool"}
-ORE_FAMILIES = {"ore", "deep_ore"}
+ORE_FAMILIES = {"ore", "deep_ore", "glow_ore"}
+CROP_STAGES = 4
+# In the order the game numbers directions, which is how a connected block's 64 shapes are numbered.
+CONNECTED_ARMS = (((6, 0, 6), (10, 6, 10)), ((6, 10, 6), (10, 16, 10)), ((6, 6, 0), (10, 10, 6)),
+                  ((6, 6, 10), (10, 10, 16)), ((0, 6, 6), (6, 10, 10)), ((10, 6, 6), (16, 10, 10)))
+CUBE_FACES = ("down", "up", "north", "south", "west", "east")
+LIGHT_EMISSION_FULL = 15
+USE_SOUND = "minecraft:intentionally_empty"
 LOOKS_ONLY_ATTRIBUTES = ("minecraft:visual/", "minecraft:audio/")
 BLOCK_FACES = {"top", "bottom", "front", "back", "left", "right", "side"}
 
@@ -158,6 +165,26 @@ def _wearable(components):
     return components
 
 
+def _item_definition(feature, item, slot, parent, pack):
+    """How a client picks what to draw for an item, for those that aren't always the same picture. It's None for most, which the mod's own plain one covers."""
+    def picture(texture, suffix):
+        _copy_texture(feature, "item", f"{slot}_{suffix}", texture, pack)
+        _write_json(pack / f"assets/gm/models/item/{slot}_{suffix}.json", {"parent": parent, "textures": {"layer0": f"gm:item/{slot}_{suffix}"}})
+        return {"type": "minecraft:model", "model": f"gm:item/{slot}_{suffix}"}
+
+    if not item.get("compass") and not item.get("variants"):
+        return None
+    model = {"type": "minecraft:model", "model": f"gm:item/{slot}"}
+    if item.get("compass"):
+        frames = item["compass"]
+        model = {"type": "minecraft:range_dispatch", "property": "minecraft:compass", "target": "lodestone", "scale": len(frames),
+                 "entries": [{"threshold": index, "model": picture(texture, f"c{index}")} for index, texture in enumerate(frames)]}
+    if item.get("variants"):
+        model = {"type": "minecraft:select", "property": "minecraft:custom_model_data", "fallback": model,
+                 "cases": [{"when": name, "model": picture(texture, f"v{index}")} for index, (name, texture) in enumerate(item["variants"].items())]}
+    return model
+
+
 def _copy_texture(feature, kind, slot, texture, pack):
     source = feature["dir"] / "assets" / "textures" / f"{texture}.png"
     if not source.exists():
@@ -170,11 +197,31 @@ def _copy_texture(feature, kind, slot, texture, pack):
         shutil.copyfile(meta, target.with_suffix(".png.mcmeta"))
 
 
+def _lit_cube(textures):
+    """A cube that draws at full brightness whatever light it's in. Only a model's own elements can say so, not one that inherits them."""
+    return {"textures": {"particle": textures["particle"], **{side: textures[side] for side in CUBE_FACES}},
+            "elements": [{"from": [0, 0, 0], "to": [16, 16, 16], "light_emission": LIGHT_EMISSION_FULL,
+                          "faces": {side: {"texture": f"#{side}", "cullface": side} for side in CUBE_FACES}}]}
+
+
+def _connected_model(slot, shape):
+    """A small cube in the middle, and an arm for each direction this shape reaches out in."""
+    boxes = [((6, 6, 6), (10, 10, 10))] + [arm for bit, arm in enumerate(CONNECTED_ARMS) if shape >> bit & 1]
+    return {"textures": {"particle": f"gm:block/{slot}", "all": f"gm:block/{slot}"},
+            "elements": [{"from": list(low), "to": list(high), "faces": {side: {"texture": "#all"} for side in CUBE_FACES}} for low, high in boxes]}
+
+
 def _block_model(feature, feature_id, name, block, slot, ledger):
     custom = feature["dir"] / "assets" / "models" / f"{name}.json"
     if custom.exists():
         model = json.loads(custom.read_text(encoding="utf-8"))
         return _resolve_tokens(model, feature_id, ledger)
+    if block.get("emissive"):
+        def side(*names):
+            found = next((name for name in names if name in block.get("faces", {})), None)
+            return f"gm:block/{slot}_{found}" if found else f"gm:block/{slot}"
+        return _lit_cube({"particle": side("side", "front"), "up": side("top", "side"), "down": side("bottom", "top", "side"),
+                          "north": side("front", "side"), "south": side("back", "side"), "east": side("right", "side"), "west": side("left", "side")})
     if block.get("faces"):
         def face(*names):
             found = next((name for name in names if name in block["faces"]), None)
@@ -183,7 +230,7 @@ def _block_model(feature, feature_id, name, block, slot, ledger):
             "particle": face("side", "front"), "up": face("top", "side"), "down": face("bottom", "top", "side"),
             "north": face("front", "side"), "south": face("back", "side"), "east": face("right", "side"), "west": face("left", "side")}}
     # Only tinted_cross takes the biome's colour. On plain cross a tinted plant would stay the grey it's drawn in.
-    parents = {"plant": "minecraft:block/cross", "glow_plant": "minecraft:block/cross", "tinted_plant": "minecraft:block/tinted_cross"}
+    parents = {"plant": "minecraft:block/cross", "glow_plant": "minecraft:block/cross", "tinted_plant": "minecraft:block/tinted_cross", "crop": "minecraft:block/cross"}
     parent = parents.get(block["family"], "minecraft:block/cube_all")
     key = "cross" if "cross" in parent else "all"
     return {"parent": parent, "textures": {key: f"gm:block/{slot}"}}
@@ -209,6 +256,10 @@ def _loot_table(block, name, slot, feature_id, ledger):
     gives one of what's in it, so of several drops, each after the first has a pool of its own, which silk touch has to turn off."""
     itself = {"type": "minecraft:item", "name": f"gm:{slot}"}
     drops = block.get("drops")
+    if drops == "nothing":
+        return {"type": "minecraft:block", "pools": []}
+    if block.get("family") == "crop":
+        return _crop_loot_table(block, slot, feature_id, ledger)
     if drops:
         listed = drops if isinstance(drops, list) else [drops]
         if not all(isinstance(drop, dict) and isinstance(drop.get("item"), str) for drop in listed):
@@ -226,6 +277,20 @@ def _loot_table(block, name, slot, feature_id, ledger):
     else:
         pools = [{"rolls": 1, "entries": [{**itself, "condition": {"type": "minecraft:survives_explosion"}}]}]
     return {"type": "minecraft:block", "pools": pools}
+
+
+def _crop_loot_table(block, slot, feature_id, ledger):
+    """What a crop gives depends on whether it's ripe, and silk touch makes no difference, as with vanilla's. Each thing has a pool of its own, because a pool only gives one."""
+    ripe = {"type": "minecraft:match_block", "blocks": f"gm:{slot}", "state": {"age": str(CROP_STAGES - 1)}}
+    young = {"type": "minecraft:inverted", "term": ripe}
+    def listed(field):
+        drops = block.get(field) or []
+        return drops if isinstance(drops, list) else [drops]
+    bonuses = [{"type": "minecraft:explosion_decay"}]
+    return {"type": "minecraft:block", "pools": [
+        *({"rolls": 1, "condition": ripe, "entries": [_drop_entry(drop, feature_id, ledger, *bonuses)]} for drop in listed("drops")),
+        *({"rolls": 1, "condition": young, "entries": [_drop_entry(drop, feature_id, ledger, *bonuses)]} for drop in listed("young_drops")),
+    ]}
 
 
 def _copy_model(feature, feature_id, name, model_name, config):
@@ -361,6 +426,8 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
     mobs = {}
     sounds_json = {}
     block_models = {}
+    machine_inventories = {}
+    block_settings = {}
 
     for feature_id, feature in features.items():
         manifest = feature["manifest"]
@@ -380,8 +447,22 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
                 block_models[slot] = _copy_model(feature, feature_id, name, block["model"], config)
             _write_json(pack / f"assets/gm/models/block/{slot}.json",
                         _block_model(feature, feature_id, name, block, slot, ledger))
+            if block["family"] == "crop":
+                for stage, texture in enumerate(block.get("stages") or []):
+                    _copy_texture(feature, "block", f"{slot}_{stage}", texture, pack)
+                    _write_json(pack / f"assets/gm/models/block/{slot}_{stage}.json", {"parent": "minecraft:block/cross", "textures": {"cross": f"gm:block/{slot}_{stage}"}})
+                tags.setdefault("maintains_farmland", []).append(f"gm:{slot}")
+            if block["family"] == "connected":
+                for shape in range(1 << len(CONNECTED_ARMS)):
+                    _write_json(pack / f"assets/gm/models/block/{slot}_c{shape}.json", _connected_model(slot, shape))
+            settings = {key: block[key] for key in ("hardness", "growth") if key in block}
+            settings.update({key: _resolve_tokens(block[key], feature_id, ledger) for key in ("on", "connects") if key in block})
+            if settings:
+                block_settings[slot] = settings
             _write_json(datapack / f"data/gm/loot_table/blocks/{slot}.json",
                         _loot_table(block, name, slot, feature_id, ledger))
+            if block.get("inventory"):
+                machine_inventories[slot] = block["inventory"]
             tool = block.get("tool")
             if tool:
                 if tool not in TOOL_TAGS:
@@ -399,7 +480,18 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
             # Handheld is how vanilla's tools sit in the hand.
             parent = "minecraft:item/handheld" if item.get("handheld") else "minecraft:item/generated"
             _write_json(pack / f"assets/gm/models/item/{slot}.json", {"parent": parent, "textures": {"layer0": f"gm:item/{slot}"}})
+            definition = _item_definition(feature, item, slot, parent, pack)
+            if definition:
+                _write_json(pack / f"assets/gm/items/{slot}.json", {"model": definition})
             defaults = {key: item[key] for key in ("components", "places") if key in item}
+            if "use" in item:
+                defaults["components"] = {**defaults.get("components", {}), "minecraft:consumable": {
+                    "consume_seconds": item["use"].get("seconds", 1), "animation": item["use"].get("animation", "none"),
+                    "sound": USE_SOUND, "has_consume_particles": False}}
+                defaults["timed_use"] = True
+            if "tooltip" in item:
+                defaults["components"] = {**defaults.get("components", {}), "minecraft:lore": [
+                    {"text": line, "italic": False, "color": "gray"} for line in item["tooltip"]]}
             if "components" in defaults:
                 defaults["components"] = _wearable(defaults["components"])
             if defaults:
@@ -416,7 +508,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
                     "id": source,
                     "mode": recipe.get("mode"),
                     "inputs": _resolve_tokens(recipe["inputs"], feature_id, ledger),
-                    "output": _resolve_tokens(recipe["output"], feature_id, ledger),
+                    "outputs": _resolve_tokens(recipe.get("outputs") or [recipe["output"]], feature_id, ledger),
                     "needs": [route if "/" in route else f"{feature_id}/{route}"] if route else [],
                 })
                 continue
@@ -457,10 +549,19 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
                 "minY": ore["minY"],
                 "maxY": ore["maxY"],
                 "biomes": ore.get("biomes", []),
+                "touchingAir": bool(ore.get("touchingAir")),
             })
         lang_file = feature["dir"] / "assets" / "lang.json"
         if lang_file.exists():
             lang.update(json.loads(lang_file.read_text(encoding="utf-8")))
+
+    # After every mob is rendered, because the one being given a new look may be in a later feature.
+    for feature_id, feature in features.items():
+        for target, model_name in feature["manifest"].get("reskins", {}).items():
+            slot = ledger.get("mobs", {}).get(target, {}).get("slot")
+            if slot is None:
+                raise BundleError(f"{feature_id}: reskins a mob {target!r}, which no feature declares. Name it as feature/name.")
+            mobs[f"gm:{slot}"]["model"] = _copy_model(feature, feature_id, target, model_name, config)
 
     _link_knowledge(entries, gated, recipe_routes)
     _write_json(pack / "assets/gm/lang/en_us.json", lang)
@@ -479,6 +580,8 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
     _write_json(config / "item_defaults.json", item_defaults)
     _write_json(config / "mobs.json", mobs)
     _write_json(config / "block_models.json", block_models)
+    _write_json(config / "machine_inventories.json", machine_inventories)
+    _write_json(config / "block_settings.json", block_settings)
     _write_json(config / "knowledge.json", {"scope": scope, "entries": entries, "gated": gated, "open": sorted(open_recipes),
                                             "machines": machines, "names": names})
     _write_json(out / "recipes.json", recipe_modes)

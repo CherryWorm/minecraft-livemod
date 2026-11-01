@@ -31,6 +31,7 @@ public final class ItemDefaults {
 	private static final Logger LOGGER = LoggerFactory.getLogger("Conduit");
 	private static final Path FILE = Path.of("config", "conduit", "item_defaults.json");
 	private static final Map<Item, Placement> PLACEMENTS = new HashMap<>();
+	private static final Set<Item> TIMED_USE = new HashSet<>();
 
 	/** @param on what it can be placed on, or empty for anything solid */
 	record Placement(Block block, Set<Block> on) {}
@@ -46,8 +47,14 @@ public final class ItemDefaults {
 		return PLACEMENTS.get(item);
 	}
 
+	/** Whether using this runs for a while and then goes to a module, instead of it being eaten. */
+	static boolean isTimedUse(Item item) {
+		return TIMED_USE.contains(item);
+	}
+
 	private static void reload(MinecraftServer server) {
 		PLACEMENTS.clear();
+		TIMED_USE.clear();
 		BuiltInRegistries.ITEM.forEach(item -> {
 			if (item instanceof SlotItem slot) {
 				slot.setReleaseComponents(null);
@@ -66,6 +73,9 @@ public final class ItemDefaults {
 					JsonObject defaults = entry.getValue().getAsJsonObject();
 					if (defaults.has("components") && item instanceof SlotItem slot) {
 						slot.setReleaseComponents(DataComponentMap.CODEC.parse(ops, defaults.get("components")).getOrThrow());
+					}
+					if (defaults.has("timed_use")) {
+						TIMED_USE.add(item);
 					}
 					if (defaults.has("places")) {
 						PLACEMENTS.put(item, readPlacement(defaults.getAsJsonObject("places")));

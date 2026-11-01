@@ -55,8 +55,13 @@ public final class Codex {
 				pages.add(Filterable.passThrough(page.append(parts.get(index))));
 			}
 		}
+		showBook(player, "Codex", pages);
+	}
+
+	/** Opens a book for a player without any such book existing, which also works for what a module wants read. */
+	public static void showBook(ServerPlayer player, String title, List<Filterable<Component>> pages) {
 		ItemStack book = new ItemStack(Items.WRITTEN_BOOK);
-		book.set(DataComponents.WRITTEN_BOOK_CONTENT, new WrittenBookContent(Filterable.passThrough("Codex"), "", 0, pages, true));
+		book.set(DataComponents.WRITTEN_BOOK_CONTENT, new WrittenBookContent(Filterable.passThrough(title), "", 0, pages, true));
 		int slot = player.getInventory().getSelectedSlot();
 		player.connection.send(new ClientboundSetPlayerInventoryPacket(slot, book));
 		player.connection.send(new ClientboundOpenBookPacket(InteractionHand.MAIN_HAND));

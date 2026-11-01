@@ -16,6 +16,8 @@ import gm.conduit.provenance.Provenance;
 import gm.conduit.retrogen.BiomePatch;
 import gm.conduit.retrogen.OrePatchQueue;
 import gm.conduit.slots.BlockModels;
+import gm.conduit.slots.BlockSettings;
+import gm.conduit.slots.MachineInventories;
 import gm.conduit.slots.ItemDefaults;
 import gm.conduit.slots.NeutralSlots;
 import net.fabricmc.api.ModInitializer;
@@ -42,6 +44,8 @@ public final class Conduit implements ModInitializer {
 		SlotMobs.register();
 		Minds.register();
 		BlockModels.register();
+		MachineInventories.register();
+		BlockSettings.register();
 		LiveAssets.register();
 		PackStatus.register();
 		Knowledge.register();

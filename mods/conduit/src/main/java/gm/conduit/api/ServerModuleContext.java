@@ -1,15 +1,19 @@
 package gm.conduit.api;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.List;
 import java.util.function.Consumer;
@@ -54,8 +58,39 @@ public interface ServerModuleContext {
 	 */
 	void playSound(String name, Level level, BlockPos pos, float volume, float pitch);
 
-	/** Checks what a player put in one of this feature's machines against its recipes, and reports near misses. */
+	/**
+	 * Checks what a player put in a machine against its recipes, and reports near misses. The machine is one of this feature's,
+	 * or "other_feature/name" for another's. For a machine running by itself, like one fed by a hopper, the player is null,
+	 * and then a recipe that has to be learned only works if the whole world shares what's learned and someone knows it.
+	 */
 	MachineAttempt attemptRecipe(Player player, String machine, List<ItemStack> inputs);
+
+	/** Opens a menu made of chest slots, from 1 to 6 rows, which needs nothing on the player's computer. */
+	void openMenu(ServerPlayer player, Component title, int rows, MenuBehavior behavior);
+
+	/** Opens a book for a player to read, with no such item existing. A page holds about 230 characters. */
+	void openBook(ServerPlayer player, String title, List<Component> pages);
+
+	/** Examines a block for a player, teaching whatever any feature teaches for looking closely at it, as if they'd done it by hand. */
+	void examine(ServerPlayer player, BlockState state);
+
+	/** Examines a mob for a player in the same way. */
+	void examine(ServerPlayer player, Entity target);
+
+	/**
+	 * Whether this block is as the world made it. Anything changed since isn't, whether by a player, a module, or the game itself, like
+	 * grass spreading or sand falling. So the answer is safe to go by for leaving someone's building alone, but it can't say who did it.
+	 */
+	boolean isNatural(Level level, BlockPos pos);
+
+	/**
+	 * Tells any module listening for this, as "this_feature/topic". Modules can't share classes, so what's sent is a tag of
+	 * plain values. Nobody listening is fine, and so is a listener that fails: this never finds out.
+	 */
+	void publish(String topic, CompoundTag message);
+
+	/** Hears what another module publishes, or this one, by "other_feature/topic". It only goes on while this module is loaded. */
+	void subscribe(String topic, Consumer<CompoundTag> listener);
 
 	/** Whether a player knows one of this feature's knowledge entries. */
 	boolean knows(Player player, String knowledge);

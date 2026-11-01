@@ -5,6 +5,7 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.BookViewScreen;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
@@ -14,6 +15,7 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.numbers.BlankFormat;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
@@ -133,6 +135,43 @@ public final class KnowledgeTest implements FabricClientGameTest {
 			}
 			case "sneak" -> context.getInput().holdShift();
 			case "unsneak" -> context.getInput().releaseShift();
+			case "inventory" -> {
+				context.getInput().pressKey(options -> options.keyInventory);
+				context.waitFor(client -> client.gui.screen() instanceof AbstractContainerScreen<?>, TICKS_PER_MINUTE);
+			}
+			case "close" -> context.runOnClient(client -> client.gui.setScreen(null));
+			case "hold" -> context.getInput().holdKeyFor(options -> options.keyUse, Integer.parseInt(words[1]));
+			case "click" -> context.runOnClient(client -> client.gameMode.handleContainerInput(client.player.containerMenu.containerId, Integer.parseInt(words[1]),
+					words.length > 2 && words[2].equals("right") ? RIGHT_BUTTON : LEFT_BUTTON, words.length > 2 && words[2].equals("shift") ? ContainerInput.QUICK_MOVE : ContainerInput.PICKUP, client.player));
+			case "closemenu" -> context.runOnClient(client -> client.player.closeContainer());
+			case "menu" -> {
+				String shown = context.computeOnClient(client -> {
+					StringBuilder slots = new StringBuilder();
+					for (int slot = 0; slot < client.player.containerMenu.slots.size() - 36; slot++) {
+						ItemStack stack = client.player.containerMenu.getSlot(slot).getItem();
+						slots.append(slot).append('=').append(stack.isEmpty() ? "empty" : stack.getCount() + "x" + stack.getItem()).append(' ');
+					}
+					return slots + "carried=" + client.player.containerMenu.getCarried().getCount();
+				});
+				LOGGER.info("[M8] menu holds {}", shown);
+			}
+			case "held" -> {
+				String shown = context.computeOnClient(client -> {
+					ItemStack stack = client.player.getMainHandItem();
+					return stack.getCount() + " tooltip " + stack.getTooltipLines(net.minecraft.world.item.Item.TooltipContext.of(client.level), client.player, net.minecraft.world.item.TooltipFlag.NORMAL).stream().map(line -> line.getString()).toList()
+							+ " data " + stack.has(DataComponents.CUSTOM_MODEL_DATA) + " tracker " + stack.has(DataComponents.LODESTONE_TRACKER);
+				});
+				LOGGER.info("[M8] holding {}", shown);
+			}
+			case "blockat" -> {
+				BlockPos pos = new BlockPos(Integer.parseInt(words[1]), Integer.parseInt(words[2]), Integer.parseInt(words[3]));
+				String seen = context.computeOnClient(client -> client.level.getBlockState(pos).toString());
+				LOGGER.info("[M8] the client sees {}", seen);
+			}
+			case "screen" -> {
+				String shown = context.computeOnClient(client -> client.gui.screen() == null ? "none" : client.gui.screen().getClass().getSimpleName());
+				LOGGER.info("[M8] the screen is {}", shown);
+			}
 			default -> LOGGER.warn("[M8] unknown request {}", request);
 		}
 		context.waitTicks(10);

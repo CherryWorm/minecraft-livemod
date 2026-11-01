@@ -38,21 +38,25 @@ def _describe_item(item):
 
 def _block_drops(block):
     drops = block.get("drops") or []
-    return drops if isinstance(drops, list) else [drops]
+    return [] if drops == "nothing" else drops if isinstance(drops, list) else [drops]
 
 
 def _describe_block(block):
     parts = [f'"{block.get("display", "?")}"', str(block.get("family"))]
     if block.get("tool_level"):
         parts.append(f"needs {block['tool_level']} tool")
-    if block.get("drops"):
+    if _block_drops(block):
         parts.append("drops " + ", ".join(f"{drop.get('item')} x{drop.get('count', 1)}" for drop in _block_drops(block)))
     return ", ".join(parts)
 
 
+def _machine_outputs(recipe):
+    return recipe.get("outputs") or [recipe.get("output", {})]
+
+
 def _describe_recipe(recipe):
     if isinstance(recipe.get("machine"), str):
-        made = recipe.get("output", {}).get("item")
+        made = ", ".join(str(output.get("item")) for output in _machine_outputs(recipe))
         used = [slot.get("item") for slot in recipe.get("inputs", [])]
         where = f"at {recipe['machine']}"
     else:
@@ -98,7 +102,7 @@ def _describe_feature(feature_id, manifest, reached):
 
 def _guide_recipe(recipe, say):
     if isinstance(recipe.get("machine"), str):
-        made = say(recipe.get("output", {}).get("item"))
+        made = ", ".join(say(output.get("item")) for output in _machine_outputs(recipe))
         if recipe.get("mode") == "guessable":
             return f"{made}: worked out by experimenting at {say(recipe['machine'])}, which reacts to a near miss"
         how = f"made at {say(recipe['machine'])} from {', '.join(say(slot.get('item')) for slot in recipe.get('inputs', []))}"
@@ -141,7 +145,7 @@ def _guide_feature(manifest, say, not_out):
         lines.append(f"- {block_name(ore.get('block'))}: ore veins, {places(ore)}, in {', '.join(say(block) for block in ore.get('replaces', []))}")
     for name, block in manifest.get("blocks", {}).items():
         facts = [f"needs {block['tool_level']} tool or better"] if block.get("tool_level") else []
-        if block.get("drops"):
+        if _block_drops(block):
             facts.append(f"drops {', '.join(say(drop.get('item')) for drop in _block_drops(block))}")
         if facts:
             lines.append(f"- {block.get('display', name)}: {', '.join(facts)}")

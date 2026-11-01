@@ -85,6 +85,7 @@ Inside the distro:
 | `python3 -m broker.tests.m12_test` | Mobs with minds, on a real client with the real fast model: they answer, remember, gossip and keep to their limits. Uses a little of your plan |
 | `python3 -m broker.tests.m15_test` | What players ask for, on the real agent and models: a server rule changes on the spot, a small ask gets its own builder and reaches the game, a big one goes to the director, and the player hears about each. Uses a little of your plan |
 | `python3 -m broker.tests.m16_test` | What modules can hook into, on a real client: sounds by name, world events, blocks removed, feeding mobs and ruins that vary. Start from a blank world |
+| `python3 -m broker.tests.m17_test` | The larger things the engine can do, on a real client: machine inventories and hoppers, menus and books, crops, connected blocks, items with timed uses and changing pictures, tinted and baby mobs. Start from a blank world |
 | `./scripts/stack.sh --profile agent run --rm -T agent python3 /spikes/dm_voice.py` | The voices on the real model, in character: plain, real answers over `/dm` and in chat, and nothing that isn't out. Uses a tiny bit of your plan |
 | `./spikes/m4_e2e.sh` | The whole agent, from a blank world to shipped features, a tuned number and a mid-game machine. Uses your plan |
 | `python3 scripts/smoketest_join.py` | Login, resource pack and joining, with no game |

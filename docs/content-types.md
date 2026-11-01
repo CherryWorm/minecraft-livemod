@@ -70,6 +70,33 @@ else if (attempt.locked()) { /* it's right, but they haven't learned it yet */ }
 
 Use `known` with a `route` for recipes learned elsewhere, `open` for ones that are always available, and `guessable` for ones meant to be found by experimenting. A failed attempt should cost little, and the machine should react in a way players can see or hear.
 
+A recipe can make several things, with `"outputs": [{"item": "$item:silver_nugget", "count": 1}, {"item": "$item:lead_ingot", "count": 2}]` in place of `output`. `attempt.outputs()` is everything it makes, and `attempt.output()` is the first. `attempt.recipe()` says which recipe it was, and `attempt.consume(inputs)` takes what it uses from those stacks, in the amounts it says, so a machine doesn't need its own table. To use another feature's recipes, name its machine as `"alloy_kiln/alloy_kiln"`.
+
+### A machine's inventory
+
+```json
+"kiln": {"family": "machine", "display": "Kiln", "texture": "kiln", "inventory": {"inputs": 2, "fuel": 1, "outputs": 1}}
+```
+
+This gives a `machine` or `model` block real slots, up to 27 in all, numbered inputs first, then fuel, then outputs. It works like a furnace for everything else in the game: hoppers fill its inputs from above and its fuel from the sides, and take its outputs from below, and what's in it drops when it's broken. Without any fuel slots, the sides fill its inputs too. From a module:
+
+```java
+public void tick(SlotBlockEntity machine) {
+    List<ItemStack> inputs = List.of(machine.getItem(0), machine.getItem(1));
+    MachineAttempt attempt = context.attemptRecipe(null, "kiln", inputs);
+    if (attempt.succeeded() && machine.getItem(3).isEmpty()) {
+        attempt.consume(inputs);
+        machine.setItem(3, attempt.output().copy());
+    }
+}
+
+public boolean accepts(SlotBlockEntity machine, int slot, ItemStack stack) {
+    return slot != 2 || stack.is(Items.COAL);
+}
+```
+
+Pass `null` for the player when nobody's there, as with a machine a hopper keeps fed. A recipe that has to be learned then only works if this world shares what's learned and someone knows it. `accepts` says what can go in each input and fuel slot, and nothing can go in an output. `machine.openMenu(player, title)` shows the inventory on a chest's screen, with inputs and fuel on the left and outputs on the right, usually from a `BlockBehavior.use`.
+
 ## Mobs
 
 ```json
@@ -94,6 +121,8 @@ Use `known` with a `route` for recipes learned elsewhere, `open` for ones that a
 - `sounds` is optional, and the game plays these by itself: `"sounds": {"idle": "$sound:crab_click", "hurt": "$sound:crab_yelp", "death": "minecraft:entity.fox.death"}`. Each is one of this world's from `"sounds"` below, or vanilla's by its name. `idle` plays every so often. With none of its own it's quiet when idle, and gets the game's plain hurt and death sounds.
 
 For anything more, bind code to it: `context.bindMob("rune_crab", new MobBehavior() { ... })`, with `tick(mob)`, `hurt(mob, source)` and `interact(mob, player, hand)`. A model's animations are played with `mob.animator().playAnimation("name")`.
+
+To give a mob from another feature a new look, its own model replaces the old one for every one of them, including those already out there: `"reskins": {"fraying_tears/frayling": "frayling_v2"}`, with `assets/models/frayling_v2.bbmodel` in your feature. Its size stays what the mob's definition says, so keep the same shape, and the same animation names, or it will stand still.
 
 `interact` is how a mob gets fed, tamed or sheared by using something on it. It runs ahead of its mind, so anything but `PASS` is the end of it, and `PASS` carries on to its mind if it has one. It runs once for each hand, and using up the item is up to you:
 
@@ -200,6 +229,10 @@ An item can say what it is, so every stack of it has these from the start, inclu
 - `components` are the game's own item components, and a tool or weapon's numbers here answer to the same tier curve as anywhere else. Prefer this to setting them on a recipe's result, which only covers what's crafted.
 - `places` makes it a seed, or anything like one: using it on the top of a block puts that block above and uses one up. Leave out `on` to allow anything solid.
 - `handheld` holds it the way vanilla holds a tool.
+- `"tooltip": ["Always points north"]` adds fixed lines to its tooltip.
+- `"use": {"seconds": 1, "animation": "brush"}` makes using it take that long, showing that animation, and then `ItemBehavior.finishUsing` runs. It isn't used up unless your module does that. The animations are `none`, `eat`, `drink`, `block`, `bow`, `trident`, `crossbow`, `spyglass`, `toot_horn`, `brush`, `bundle` and `spear`.
+- `"variants": {"gilded": "ledger_gilded"}` gives it other pictures. A stack shows one when it has `"minecraft:custom_model_data": {"strings": ["gilded"]}`, from a recipe's result or a module, and its usual `texture` otherwise.
+- `"compass": ["needle_0", "needle_1", "needle_2", "needle_3"]` makes it turn like a compass, with as many frames as you like up to 64, the first pointing straight ahead and the rest going round clockwise. It points where a stack's `minecraft:lodestone_tracker` says, which a module sets, and spins if there's nothing there or it's in another dimension.
 
 A release that changes these reaches stacks in inventories the next time that player joins.
 
@@ -316,4 +349,4 @@ For anything more, `context.sound("chime")` gives the game's own `SoundEvent`, s
 
 ## What the engine doesn't do yet
 
-Structures larger than a chunk, new dimensions and client rendering beyond the HUD. Armor can only look like vanilla's when worn, and custom tools can't take enchantments at an enchanting table. Build the closest thing that works, and say what you wanted in `host_requests`.
+Structures larger than a chunk, new dimensions, screens beyond chest-style menus and books, and client rendering beyond the HUD. Armor can only look like vanilla's when worn, and custom tools can't take enchantments at an enchanting table. Build the closest thing that works, and say what you wanted in `host_requests`.

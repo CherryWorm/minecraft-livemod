@@ -4,9 +4,12 @@ import eu.pb4.polymer.core.api.item.SimplePolymerItem;
 import gm.conduit.api.ItemBehavior;
 import gm.conduit.knowledge.Knowledge;
 import gm.conduit.modules.ServerModuleHost;
+import net.fabricmc.fabric.api.networking.v1.context.PacketContext;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.core.component.DataComponentMap;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundSource;
@@ -44,10 +47,42 @@ public final class SlotItem extends SimplePolymerItem {
 			return InteractionResult.SUCCESS;
 		}
 		ItemBehavior behavior = ServerModuleHost.instance().itemBehavior(this.slotId);
-		if (behavior == null || level.isClientSide()) {
-			return super.use(level, player, hand);
+		if (behavior != null && !level.isClientSide()) {
+			InteractionResult result = ServerModuleHost.instance().guarded(this.slotId, InteractionResult.PASS, () -> behavior.use(level, player, hand));
+			if (result != InteractionResult.PASS) {
+				return result;
+			}
 		}
-		return ServerModuleHost.instance().guarded(this.slotId, InteractionResult.PASS, () -> behavior.use(level, player, hand));
+		// This is what eats food, or starts a timed use.
+		return super.use(level, player, hand);
+	}
+
+	@Override
+	public ItemStack finishUsingItem(ItemStack stack, Level level, LivingEntity user) {
+		if (!ItemDefaults.isTimedUse(this)) {
+			return super.finishUsingItem(stack, level, user);
+		}
+		ItemBehavior behavior = ServerModuleHost.instance().itemBehavior(this.slotId);
+		if (behavior != null && level instanceof ServerLevel) {
+			ServerModuleHost.instance().guarded(this.slotId, () -> behavior.finishUsing(stack, level, user));
+		}
+		// To a client it's like food, so it has just taken one away, and the server has nothing new to tell it unless it's asked to.
+		if (user instanceof ServerPlayer player) {
+			player.inventoryMenu.sendAllDataToRemote();
+		}
+		return stack;
+	}
+
+	/** What decides how it's drawn, which a client has to be told, as it's only ever told what it needs to know. */
+	@Override
+	public void modifyBasePolymerItemStack(ItemStack out, ItemStack stack, PacketContext context, HolderLookup.Provider lookup) {
+		super.modifyBasePolymerItemStack(out, stack, context, lookup);
+		if (stack.has(DataComponents.CUSTOM_MODEL_DATA)) {
+			out.set(DataComponents.CUSTOM_MODEL_DATA, stack.get(DataComponents.CUSTOM_MODEL_DATA));
+		}
+		if (stack.has(DataComponents.LODESTONE_TRACKER)) {
+			out.set(DataComponents.LODESTONE_TRACKER, stack.get(DataComponents.LODESTONE_TRACKER));
+		}
 	}
 
 	@Override

@@ -22,6 +22,9 @@ FORBIDDEN = [
     r"Couldn't parse data file",
     r"Couldn't load tag",
     r"Failed to load",
+    # What says which file it was, when something in a data pack stops the server starting.
+    r"Errors in (registry|element)",
+    r"Unknown registry key",
     r"server module .* failed to load",
     r"server module .* threw an error",
     r"Encountered an unexpected exception",
@@ -154,7 +157,13 @@ def run_gate(tier, jars, content, patches):
         if patches:
             before = snapshot_regions()
         runtime.apply_content("shadow", content)
-        boot = start()
+        try:
+            boot = start()
+        except TimeoutError:
+            # A loot table the game can't read stops it starting at all, and it would go round and round trying, so what it said is all there is to go on.
+            problems = scan_logs(runtime.logs_since("shadow", mark))
+            runtime.stack("stop", "shadow", check=False)
+            _fail("The server wouldn't start with this release:\n" + "\n".join(problems[:12]))
         timings["boot"] = round(boot, 1)
         if boot > MAX_BOOT_SECONDS:
             _fail(f"The server took {boot:.0f}s to boot, over the {MAX_BOOT_SECONDS}s limit, which is what "

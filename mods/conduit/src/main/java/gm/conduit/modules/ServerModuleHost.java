@@ -10,24 +10,34 @@ import gm.conduit.api.MobBehavior;
 import gm.conduit.api.ServerModule;
 import gm.conduit.api.ServerModuleContext;
 import gm.conduit.api.WorldEvents;
+import gm.conduit.api.MenuBehavior;
+import gm.conduit.knowledge.Codex;
 import gm.conduit.knowledge.Knowledge;
+import gm.conduit.provenance.Provenance;
+import gm.conduit.slots.ButtonMenu;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.network.Filterable;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.SimpleMenuProvider;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -202,6 +212,7 @@ public final class ServerModuleHost {
 		if (module == null) {
 			return;
 		}
+		module.closeMenus();
 		guard(module, module.module::disable);
 		this.ownerBySlot.entrySet().removeIf(entry -> {
 			if (entry.getValue() == module) {
@@ -264,6 +275,8 @@ public final class ServerModuleHost {
 		private final ServerModule module;
 		private final List<Consumer<MinecraftServer>> ticks = new ArrayList<>();
 		private final List<WorldEvents> events = new ArrayList<>();
+		private final List<ButtonMenu> menus = new ArrayList<>();
+		private final Map<String, List<Consumer<CompoundTag>>> subscriptions = new HashMap<>();
 		private int failures;
 
 		LoadedModule(String moduleId, byte[] jar, ServerModule module) {
@@ -362,7 +375,63 @@ public final class ServerModuleHost {
 
 		@Override
 		public MachineAttempt attemptRecipe(Player player, String machine, List<ItemStack> inputs) {
-			return Knowledge.instance().attempt(player, this.moduleId + "/" + machine, inputs);
+			return Knowledge.instance().attempt(player, machine.contains("/") ? machine : this.moduleId + "/" + machine, inputs);
+		}
+
+		@Override
+		public void openMenu(ServerPlayer player, Component title, int rows, MenuBehavior behavior) {
+			if (rows < 1 || rows > 6) {
+				throw new IllegalArgumentException("A menu has from 1 to 6 rows, not " + rows);
+			}
+			player.openMenu(new SimpleMenuProvider((id, inventory, who) -> {
+				ButtonMenu menu = new ButtonMenu(id, inventory, player, rows, behavior, action -> guard(this, action));
+				this.menus.removeIf(open -> open.player().containerMenu != open);
+				this.menus.add(menu);
+				return menu;
+			}, title));
+		}
+
+		void closeMenus() {
+			for (ButtonMenu menu : List.copyOf(this.menus)) {
+				if (menu.player().containerMenu == menu) {
+					menu.close();
+				}
+			}
+		}
+
+		@Override
+		public void examine(ServerPlayer player, BlockState state) {
+			Knowledge.instance().examineFor(player, BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
+		}
+
+		@Override
+		public void examine(ServerPlayer player, Entity target) {
+			Knowledge.instance().examineFor(player, BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()).toString());
+		}
+
+		@Override
+		public boolean isNatural(Level level, BlockPos pos) {
+			return !Provenance.isTouched(level.getChunk(pos), pos);
+		}
+
+		@Override
+		public void publish(String topic, CompoundTag message) {
+			String full = this.moduleId + "/" + topic;
+			for (LoadedModule module : List.copyOf(ServerModuleHost.this.modules.values())) {
+				for (Consumer<CompoundTag> listener : module.subscriptions.getOrDefault(full, List.of())) {
+					guard(module, () -> listener.accept(message.copy()));
+				}
+			}
+		}
+
+		@Override
+		public void subscribe(String topic, Consumer<CompoundTag> listener) {
+			this.subscriptions.computeIfAbsent(topic, key -> new ArrayList<>()).add(listener);
+		}
+
+		@Override
+		public void openBook(ServerPlayer player, String title, List<Component> pages) {
+			Codex.showBook(player, title, pages.stream().map(Filterable::passThrough).toList());
 		}
 
 		@Override

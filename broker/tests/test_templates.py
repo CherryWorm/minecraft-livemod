@@ -29,7 +29,8 @@ POOL = {"families": {"stone": {"first": 1000, "count": 150}, "ore": {"first": 12
                      "metal": {"first": 1500, "count": 50}, "wood": {"first": 1600, "count": 60}, "soil": {"first": 1700, "count": 40},
                      "glow": {"first": 1800, "count": 40}, "machine": {"first": 1900, "count": 80}, "cutout": {"first": 2000, "count": 40},
                      "plant": {"first": 2100, "count": 5}, "glow_plant": {"first": 2110, "count": 2}, "tinted_plant": {"first": 2150, "count": 12},
-                     "model": {"first": 2300, "count": 200}},
+                     "model": {"first": 2300, "count": 200}, "glow_ore": {"first": 2500, "count": 20}, "crop": {"first": 2200, "count": 7},
+                     "connected": {"first": 2600, "count": 2}},
         "item_count": 1200, "mobs": {"monster": 240, "creature": 480}}
 DATA_FORMAT = 88
 TIERS = balance.TIERS

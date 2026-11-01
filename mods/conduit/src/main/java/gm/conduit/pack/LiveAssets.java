@@ -25,6 +25,9 @@ public final class LiveAssets {
 				builder.addData("assets/gm/models/block/" + id + ".json", bytes(PLACEHOLDER_MODEL));
 				builder.addData("assets/gm/items/" + id + ".json", itemDefinition("gm:block/" + id));
 			}
+			for (String model : NeutralSlots.stateModels()) {
+				builder.addData("assets/gm/models/block/" + model + ".json", bytes(PLACEHOLDER_MODEL));
+			}
 			for (String id : NeutralSlots.itemIds()) {
 				builder.addData("assets/gm/models/item/" + id + ".json", bytes(PLACEHOLDER_ITEM_MODEL));
 				builder.addData("assets/gm/items/" + id + ".json", itemDefinition("gm:item/" + id));

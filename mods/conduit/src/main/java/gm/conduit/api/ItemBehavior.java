@@ -27,6 +27,9 @@ public interface ItemBehavior {
 		return InteractionResult.PASS;
 	}
 
+	/** A timed use has run its full length, for an item with a {@code use} in its feature. It isn't used up, unless you do that here. */
+	default void finishUsing(ItemStack stack, Level level, LivingEntity user) {}
+
 	/** This item has just broken a block. For one broken by anything else, see {@link WorldEvents#blockBroken}. */
 	default void mineBlock(ItemStack stack, Level level, BlockState state, BlockPos pos, LivingEntity miner) {}
 }

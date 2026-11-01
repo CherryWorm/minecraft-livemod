@@ -105,6 +105,9 @@ A family fixes what can't change on a live block. `stone`, `ore`, `deep_ore`, `m
 | `glow_plant` | The same, giving light at level 10. Only 2 exist |
 | `tinted_plant` | The same, tinted by biome |
 | `model` | Drawn by a 3D model with moving parts instead of a texture. See below |
+| `glow_ore` | A deep ore that gives off a little light, level 4, so it can be spotted across a cave. Only 20 exist |
+| `crop` | One crop with all four growth stages in one block. See below. Only 7 exist |
+| `connected` | A thin line that grows arms toward its neighbours, like a cable. See below. Only 2 exist |
 
 Families are limited, and a name stays assigned to its slot forever, so don't create blocks casually. A block's family can never change once it's been released.
 
@@ -122,6 +125,37 @@ A `model` block is any shape you can model, with moving parts, for machines that
 ```
 
 An animation called `idle` plays by itself. Start and stop others from a module with `machine.play("stamp")` and `machine.stop("stamp")`. Every moving part is an entity for players' computers to draw, so this suits things that matter. Use a cube for anything players will place by the hundred.
+
+To show a value on it, like a gauge, make one animation that sweeps from empty to full and hold it at the right point with `machine.show("fill", 0.75)`. Call it whenever the value changes. It stays there, even through a restart, until `machine.stop("fill")`.
+
+### Crops
+
+```json
+"weald_wheat": {"family": "crop", "display": "Weald Wheat", "texture": "wheat_ripe",
+                "stages": ["wheat_0", "wheat_1", "wheat_2", "wheat_ripe"],
+                "drops": [{"item": "weald_grain", "count": [1, 3]}, {"item": "weald_seeds", "count": [1, 2]}],
+                "young_drops": {"item": "weald_seeds"},
+                "growth": 0.2}
+```
+
+`stages` is four textures, from just planted to ripe. It grows by itself in enough light, one stage at a time, and `growth` is how likely it is each time the game picks it, which is 0.2 if you leave it out, or about 5 minutes a stage. Bone meal grows it a stage. `drops` is what it gives when ripe, and `young_drops` is what it gives before then, which is nothing if you leave it out. Silk touch makes no difference.
+
+Plant it with an item that has `"places": {"block": "$block:weald_wheat", "on": ["minecraft:farmland"]}`, and that item is then a source of the block. It stands on farmland, and keeps it wet, unless it says `"on": [...]` for what else it can stand on. It goes if what's under it does. A crop's stages are a little like a plant's, so don't spend them on something that isn't really a crop: there are only 7.
+
+### Connected blocks
+
+```json
+"charge_cable": {"family": "connected", "display": "Charge Cable", "texture": "cable", "connects": ["minecraft:hopper", "$block:battery"]}
+```
+
+It's a small cube with an arm toward each neighbour that's the same block, any machine or `model` block, or anything in `connects`, and that keeps up by itself as things around it change. Players can place these by the hundred, because it's an ordinary block, unlike a `model` block. To everyone it's half a block high and solid, whichever way its arms go. Its texture is used as it comes for the cube and all the arms, so a plain or lightly patterned one looks best.
+
+### More about a block
+
+- **`"hardness": 0`** sets how long it takes to break, from 0, which is at once, to 5, which is an iron block. Leave it out for what its family says. Unlike a family, this can change later. The right tool is still what its family says.
+- **`"drops": "nothing"`** means it never drops anything, not even with silk touch.
+- **`"emissive": true`** draws a cube at full brightness even in the dark, so it seems to glow, without giving off any light. For light as well, use the `glow` or `glow_ore` family. Dark pixels stay dark, so paint it with that in mind.
+- **`"from_module": true`** says a module hands this out, or places it. It then counts as something players can get, which no check can see for itself, so it's on you that the module really does.
 
 ## Names
 
@@ -187,15 +221,17 @@ Every recipe needs a `mode`:
 Two checks look at all recipes in all features together:
 
 - **Nothing from nothing.** No set of recipes may leave a player with more of something and less of nothing, for example an ingot that makes 9 nuggets when 8 nuggets make an ingot. This includes loops through vanilla's own storage recipes, like iron block to ingots. A loop that costs something else each time is a conversion and is allowed.
-- **Everything can be had.** Every block and item needs a source: an ore or plant, a block or mob that drops it, a ruin's chest or walls, or a recipe whose inputs can all be had. Vanilla items and `#minecraft:` tags count as available. An ore with its own `drops` never reaches anyone's inventory, so it can't be a recipe input. A server module handing something out doesn't count as a source, because no check can see that, so give it a recipe as well or mark it `retired` if nothing should make it.
+- **Everything can be had.** Every block and item needs a source: an ore or plant, a block or mob that drops it, a ruin's chest or walls, or a recipe whose inputs can all be had. Vanilla items and `#minecraft:` tags count as available. An ore with its own `drops` never reaches anyone's inventory, so it can't be a recipe input. An item with `places` is a source of the block it places. A server module handing something out doesn't count as a source unless the thing says `"from_module": true`, because no check can see that for itself.
 
 ## Ores
 
-Each entry adds veins to the world, in chunks old and new. Its `id` must never be reused or changed, because chunks remember which ids they've already received. To change an ore's distribution later, add a new entry with a new id. `veinSize` can be at most 16.
+Each entry adds veins to the world, in chunks old and new. Its `id` must never be reused or changed, because chunks remember which ids they've already received. To change an ore's distribution later, add a new entry with a new id. `veinSize` can be at most 16, and can be a range, like `[4, 8]`, for veins of any size between those.
+
+`"touchingAir": true` only forms it where it can be seen, on a cliff or a cave wall, so it can be spotted from the surface. That leaves out most of each vein, so it comes out much rarer than its yield says. It can't form in places players have been, because there veins stay hidden.
 
 Ore only replaces natural blocks. In places players have been, veins are hidden fully inside rock, so nothing appears next to a base.
 
-An ore's yield must suit the tier it feeds. Yield is `veinsPerChunk` times `veinSize`, times the share of `minY` to `maxY` that's inside rock (Y -64 to 64), times the average of its drop `count`. All of a block's entries add up.
+An ore's yield must suit the tier it feeds. Yield is `veinsPerChunk` times `veinSize`, or its average if it's a range, times the share of `minY` to `maxY` that's inside rock (Y -64 to 64), times the average of its drop `count`. All of a block's entries add up. If it drops several things, each is measured by itself.
 
 | Tier | Vanilla ore | Yield per chunk | Allowed |
 |---|---|---|---|
@@ -246,6 +282,51 @@ What each behaviour can do is in `/reference/conduit-api/`, and all of it is opt
 - `MachineBehavior.removed(machine)` runs just before a machine goes, while `machine.data()` is still there, so it's where a machine drops what it holds. A command replacing it doesn't count, in the same way a chest's contents don't drop then.
 - `MobBehavior.interact(mob, player, hand)` is a player using something on a mob. See "Mobs" in `docs/content-types.md`.
 - `ItemBehavior.useOnEntity(stack, player, target, hand)` is this item used on a mob, if the mob itself had nothing to do with it. `ItemBehavior.mineBlock(stack, level, state, pos, miner)` is this item having just broken a block, which vanilla doesn't report for a player in creative mode.
+- `ItemBehavior.finishUsing(stack, level, user)` is a timed use running its full length. See "What an item is" in `docs/content-types.md`.
+- `mob.setTint(0xFF8800)` colours one mob's model, and `mob.makeBaby(600)` makes one half the size until it grows up that many seconds later, or for good with 0. Both last through a restart. A module can spawn one with `context.mob("name").create(...)` and call these on it as a `SlotMob`. A tint multiplies the model's colours, so paint a mob that's meant to be tinted in light greys.
+- `context.isNatural(level, pos)` says whether a block is as the world made it, which is how to leave anyone's building alone. Anything changed since doesn't count, whoever or whatever changed it, so grass spreading isn't natural either.
+- `context.examine(player, state)` or `context.examine(player, entity)` examines something for a player, so a tool can teach what any feature teaches for looking closely at it.
+
+### Menus and books
+
+A module can open a menu made of chest slots, or a book, and neither needs anything on a player's computer:
+
+```java
+context.openMenu(player, Component.literal("Survey"), 3, new MenuBehavior() {
+    @Override
+    public void draw(MenuView menu) {
+        menu.set(13, new ItemStack(Items.COMPASS));
+    }
+
+    @Override
+    public void clicked(MenuView menu, int slot, boolean rightClick, boolean shift) {
+        if (slot == 13) {
+            menu.close();
+        }
+    }
+});
+
+context.openBook(player, "Field Notes", List.of(Component.literal("The first page.")));
+```
+
+A menu has from 1 to 6 rows of 9. Each slot is a button: what's in it is only a picture, which can't be taken, and `draw` runs again after every click. Give the items names with `DataComponents.CUSTOM_NAME` so they say what they do. A menu closes by itself if your module is unloaded, and `closed(menu)` tells you when it does for any reason. For several pages, call `openMenu` again with the next one.
+
+A book page holds about 230 characters. It isn't a real item, so it can't be dropped or copied, and the player's hand doesn't change.
+
+### Talking to other features
+
+Modules can't share classes, but one can tell any others that care that something happened:
+
+```java
+CompoundTag message = new CompoundTag();
+message.putInt("depth", pos.getY());
+context.publish("sampled", message);
+
+// In any other feature, or this one:
+context.subscribe("core_drill/sampled", message -> { /* ... */ });
+```
+
+It goes to whoever is listening right then, and nobody listening is fine, so it's the way to let others react to your feature without your feature knowing about them. It's also the way to pass something on for another feature to record, as long as that one listens for it. Say what you publish in your feature's `summary`, so other builders can find it. A module can't switch another off, or change what another does.
 
 ### Things that happen in the world
 

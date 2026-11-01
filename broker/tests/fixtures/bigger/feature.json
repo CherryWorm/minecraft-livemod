@@ -1,0 +1,46 @@
+{
+  "id": "bigger",
+  "phase": 1,
+  "summary": "Test fixture for the larger things the engine can do: machine inventories and menus, crops, connected blocks, items with timed uses and changing pictures, and mobs with a tint or a baby's size.",
+  "blocks": {
+    "big_kiln": {"family": "machine", "display": "Big Kiln", "texture": "big_block", "retired": true, "inventory": {"inputs": 2, "fuel": 1, "outputs": 2}},
+    "big_gauge": {"family": "model", "display": "Big Gauge", "texture": "big_block", "model": "big_gauge", "retired": true},
+    "big_crop": {"family": "crop", "display": "Big Crop", "texture": "big_stage_3", "stages": ["big_stage_0", "big_stage_1", "big_stage_2", "big_stage_3"], "retired": true, "growth": 1.0,
+                 "drops": [{"item": "big_fruit", "count": [2, 2]}, {"item": "big_seed"}], "young_drops": {"item": "big_seed"}},
+    "big_cable": {"family": "connected", "display": "Big Cable", "texture": "big_block", "retired": true, "connects": ["minecraft:hopper"]},
+    "big_glow": {"family": "glow_ore", "display": "Big Glow", "texture": "big_block", "tool": "pickaxe", "retired": true},
+    "big_bright": {"family": "soil", "display": "Big Bright", "texture": "big_flat", "emissive": true, "retired": true},
+    "big_dull": {"family": "soil", "display": "Big Dull", "texture": "big_flat", "retired": true},
+    "big_soft": {"family": "stone", "display": "Big Soft", "texture": "big_block", "hardness": 0, "drops": "nothing", "from_module": true},
+    "big_button": {"family": "soil", "display": "Big Button", "texture": "big_block", "retired": true}
+  },
+  "items": {
+    "big_seed": {"display": "Big Seed", "texture": "big_item", "places": {"block": "$block:big_crop", "on": ["minecraft:farmland"]}, "retired": true},
+    "big_fruit": {"display": "Big Fruit", "texture": "big_item", "retired": true},
+    "big_in": {"display": "Big In", "texture": "big_item", "retired": true},
+    "big_out_a": {"display": "Big Out A", "texture": "big_item", "retired": true},
+    "big_out_b": {"display": "Big Out B", "texture": "big_item", "retired": true},
+    "big_tool": {"display": "Big Tool", "texture": "big_item", "tooltip": ["Points somewhere"], "use": {"seconds": 1, "animation": "brush"}, "from_module": true},
+    "big_art": {"display": "Big Art", "texture": "big_plain", "variants": {"gilded": "big_gilded"}, "retired": true},
+    "big_needle": {"display": "Big Needle", "texture": "big_item", "compass": ["big_needle_0", "big_needle_1", "big_needle_2", "big_needle_3"], "retired": true},
+    "big_book": {"display": "Big Book", "texture": "big_item", "retired": true},
+    "big_paint": {"display": "Big Paint", "texture": "big_item", "retired": true},
+    "big_shrink": {"display": "Big Shrink", "texture": "big_item", "retired": true},
+    "big_lens": {"display": "Big Lens", "texture": "big_item", "retired": true}
+  },
+  "mobs": {
+    "big_mob": {"category": "creature", "display": "Big Mob", "model": "big_mob", "behaviour": "passive", "health": 8, "damage": 0, "speed": 0.2, "width": 0.8, "height": 0.8}
+  },
+  "knowledge": {
+    "big_lore": {"title": "Big Lore", "text": "What a lens showed you.", "routes": [{"type": "examine", "id": "minecraft:smooth_stone"}]}
+  },
+  "ores": [
+    {"id": "big_glow_v1", "block": "big_glow", "replaces": ["minecraft:stone", "minecraft:andesite", "minecraft:granite", "minecraft:diorite", "minecraft:deepslate"],
+     "veinsPerChunk": 10, "veinSize": [4, 8], "minY": 0, "maxY": 120, "touchingAir": true}
+  ],
+  "recipes": {
+    "big_melt": {"mode": "open", "machine": "big_kiln",
+                 "inputs": [{"item": "$item:big_in", "count": 3}, {"item": "minecraft:iron_ingot", "count": 1}],
+                 "outputs": [{"item": "$item:big_out_a", "count": 2}, {"item": "$item:big_out_b", "count": 1}]}
+  }
+}

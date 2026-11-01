@@ -14,6 +14,7 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
@@ -22,6 +23,8 @@ import org.jspecify.annotations.Nullable;
 
 /** A blank block. Its behaviour comes from whichever module has bound this slot, if any. */
 public class SlotBlock extends Block implements PolymerTexturedBlock {
+	private static final int CORRECT_TOOL_DIVISOR = 30;
+	private static final int WRONG_TOOL_DIVISOR = 100;
 	private static BlockState emptyState;
 
 	private final BlockState polymerState;
@@ -66,6 +69,16 @@ public class SlotBlock extends Block implements PolymerTexturedBlock {
 		}
 		return ServerModuleHost.instance().guarded(this.slotId, InteractionResult.PASS,
 				() -> behavior.use(state, level, pos, player, hit));
+	}
+
+	/** A family's hardness is fixed for good, so one that says otherwise is worked out here, the same way the game does it. */
+	@Override
+	protected float getDestroyProgress(BlockState state, Player player, BlockGetter level, BlockPos pos) {
+		Float hardness = BlockSettings.of(this.slotId).hardness();
+		if (hardness == null) {
+			return super.getDestroyProgress(state, player, level, pos);
+		}
+		return hardness <= 0 ? 1.0F : player.getDestroySpeed(state) / hardness / (player.hasCorrectToolForDrops(state) ? CORRECT_TOOL_DIVISOR : WRONG_TOOL_DIVISOR);
 	}
 
 	@Override

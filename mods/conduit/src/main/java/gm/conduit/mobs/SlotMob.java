@@ -45,6 +45,8 @@ import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
 import net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
 
 import java.util.UUID;
 
@@ -71,6 +73,10 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 	private static final int BUBBLE_MIN_TICKS = 60;
 	private static final int BUBBLE_TICKS_PER_LETTER = 2;
 	private static final int MOVE_WAIT_TICKS = 80;
+	/** What a model is drawn with when nothing's tinting it, which is white. */
+	private static final int NO_TINT = 0xFFFFFF;
+	private static final float BABY_SIZE = LivingEntity.DEFAULT_BABY_SCALE;
+	private static final int TICKS_PER_SECOND = 20;
 
 	private LivingEntityHolder<SlotMob> holder;
 	private MobDefinition applied;
@@ -87,6 +93,9 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 	private int bubbleUntil;
 	/** When to choose a fight move by itself, if no decision has arrived by then. */
 	private int moveDeadline;
+	private int tint = NO_TINT;
+	/** How long until it's grown, in ticks. It's only a baby while this isn't 0, and if it's below 0 it stays one. */
+	private int growsUpIn;
 
 	public SlotMob(EntityType<? extends PathfinderMob> type, Level level) {
 		super(type, level);
@@ -123,6 +132,7 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 		if (model != null) {
 			this.holder = new LivingEntityHolder<>(this, model);
 			EntityAttachment.ofTicking(this.holder, this);
+			applyLook();
 		}
 		this.goalSelector.removeAllGoals(goal -> true);
 		this.targetSelector.removeAllGoals(goal -> true);
@@ -180,11 +190,78 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 		} else if (this.tickCount % 2 == 0) {
 			updateAnimation();
 		}
+		growUp();
 		tickMind();
 		MobBehavior behavior = ServerModuleHost.instance().mobBehavior(slotId());
 		if (behavior != null) {
 			ServerModuleHost.instance().guarded(slotId(), () -> behavior.tick(this));
 		}
+	}
+
+	/** Colours this one's model, for a mob whose kinds shouldn't each need an entry of their own. Keep it in its own saved data if it has to be chosen again. */
+	public void setTint(int rgb) {
+		this.tint = rgb;
+		applyLook();
+	}
+
+	public int tint() {
+		return this.tint;
+	}
+
+	/** Makes this one a baby, half the size, which grows up by itself after this many seconds. With 0 or less it stays one. */
+	public void makeBaby(int growsUpInSeconds) {
+		this.growsUpIn = growsUpInSeconds > 0 ? growsUpInSeconds * TICKS_PER_SECOND : -1;
+		applySize();
+	}
+
+	@Override
+	public boolean isBaby() {
+		return this.growsUpIn != 0;
+	}
+
+	@Override
+	public void setBaby(boolean baby) {
+		if (baby != isBaby()) {
+			if (baby) {
+				makeBaby(0);
+			} else {
+				this.growsUpIn = 0;
+				applySize();
+			}
+		}
+	}
+
+	private void growUp() {
+		if (this.growsUpIn > 0 && --this.growsUpIn == 0) {
+			applySize();
+		}
+	}
+
+	/** Its scale is the one thing its hitbox and its model both go by, and it's saved with it. */
+	private void applySize() {
+		getAttribute(Attributes.SCALE).setBaseValue(isBaby() ? BABY_SIZE : 1.0F);
+		refreshDimensions();
+	}
+
+	private void applyLook() {
+		if (this.holder != null) {
+			this.holder.setColor(this.tint);
+		}
+	}
+
+	@Override
+	protected void addAdditionalSaveData(ValueOutput output) {
+		super.addAdditionalSaveData(output);
+		output.putInt("tint", this.tint);
+		output.putInt("grows_up_in", this.growsUpIn);
+	}
+
+	@Override
+	protected void readAdditionalSaveData(ValueInput input) {
+		super.readAdditionalSaveData(input);
+		this.tint = input.getIntOr("tint", NO_TINT);
+		this.growsUpIn = input.getIntOr("grows_up_in", 0);
+		applyLook();
 	}
 
 	private void updateAnimation() {

@@ -37,9 +37,27 @@ public record KnowledgePlan(
 
 	public record MachineInput(String item, int count) {}
 
-	public record MachineRecipe(String id, String mode, List<MachineInput> inputs, String outputItem, int outputCount, List<String> needs) {
+	public record MachineRecipe(String id, String mode, List<MachineInput> inputs, List<MachineInput> outputs, List<String> needs) {
+		/** What the agent's told a player found, which only needs to be one thing. */
+		public String outputItem() {
+			return this.outputs.getFirst().item();
+		}
+
+		/** The first of what it makes, for anything that only has room to show one. */
 		public ItemStack output() {
-			return new ItemStack(BuiltInRegistries.ITEM.getValue(Identifier.parse(this.outputItem)), this.outputCount);
+			return stack(this.outputs.getFirst());
+		}
+
+		public List<ItemStack> outputStacks() {
+			return this.outputs.stream().map(MachineRecipe::stack).toList();
+		}
+
+		public List<ItemStack> inputStacks() {
+			return this.inputs.stream().map(MachineRecipe::stack).toList();
+		}
+
+		private static ItemStack stack(MachineInput what) {
+			return new ItemStack(BuiltInRegistries.ITEM.getValue(Identifier.parse(what.item())), what.count());
 		}
 	}
 
@@ -67,6 +85,10 @@ public record KnowledgePlan(
 			LOGGER.error("Can't read {}", FILE, error);
 			return EMPTY;
 		}
+	}
+
+	private static MachineInput machineStack(JsonObject json) {
+		return new MachineInput(json.get("item").getAsString(), json.get("count").getAsInt());
 	}
 
 	private static KnowledgePlan parse(JsonObject json) {
@@ -100,15 +122,17 @@ public record KnowledgePlan(
 			item.getValue().getAsJsonArray().forEach(element -> {
 				JsonObject recipe = element.getAsJsonObject();
 				List<MachineInput> inputs = new ArrayList<>();
-				recipe.getAsJsonArray("inputs").forEach(input -> {
-					JsonObject object = input.getAsJsonObject();
-					inputs.add(new MachineInput(object.get("item").getAsString(), object.get("count").getAsInt()));
-				});
+				recipe.getAsJsonArray("inputs").forEach(input -> inputs.add(machineStack(input.getAsJsonObject())));
 				List<String> needs = new ArrayList<>();
 				recipe.getAsJsonArray("needs").forEach(need -> needs.add(need.getAsString()));
-				JsonObject output = recipe.getAsJsonObject("output");
-				recipes.add(new MachineRecipe(recipe.get("id").getAsString(), recipe.get("mode").getAsString(), inputs,
-						output.get("item").getAsString(), output.get("count").getAsInt(), needs));
+				// A release from before machines could make several things only has the one.
+				List<MachineInput> outputs = new ArrayList<>();
+				if (recipe.has("outputs")) {
+					recipe.getAsJsonArray("outputs").forEach(output -> outputs.add(machineStack(output.getAsJsonObject())));
+				} else {
+					outputs.add(machineStack(recipe.getAsJsonObject("output")));
+				}
+				recipes.add(new MachineRecipe(recipe.get("id").getAsString(), recipe.get("mode").getAsString(), inputs, outputs, needs));
 			});
 			machines.put(item.getKey(), recipes);
 		}

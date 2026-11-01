@@ -28,12 +28,22 @@ MIND_VOICES = {"words", "cries", "silent"}
 MAX_CHARACTER = 800
 MAX_STASH = 8
 MOB_SOUNDS = {"idle", "hurt", "death"}
+INVENTORY_KINDS = {"inputs", "fuel", "outputs"}
+MACHINE_FAMILIES = {"machine", "model"}
+MOST_MACHINE_SLOTS = 27
+MOST_HARDNESS = 5
+CROP_STAGES = 4
+NOT_CUBES = {"plant", "glow_plant", "tinted_plant", "crop", "connected", "model", "cutout"}
+MOST_USE_SECONDS = 60
+USE_ANIMATIONS = {"none", "eat", "drink", "block", "bow", "trident", "crossbow", "spyglass", "toot_horn", "brush", "bundle", "spear"}
+MIN_COMPASS_FRAMES = 2
+MAX_COMPASS_FRAMES = 64
 BLOCK_WITH_STATE = re.compile(r"[^\[\]\s]+(\[[a-z0-9_]+=[a-z0-9_]+(,[a-z0-9_]+=[a-z0-9_]+)*\])?")
 # The vanilla blocks whose block entity takes a loot table. An ender chest looks like one, but it's the player's own.
 LOOT_CONTAINERS = re.compile(r"minecraft:(chest|trapped_chest|barrel|dispenser|dropper|hopper|crafter|([a-z]+_)?shulker_box|([a-z]+_)*copper_chest)")
 # Words that would give content away if they appeared in a path players can see.
-SAFE_PATH = re.compile(r"^assets/(gm/(textures/(block/s\d{4}(_(top|bottom|front|back|left|right|side))?|item/i\d{4})\.png(\.mcmeta)?"
-                       r"|models/(block/s\d{4}|item/i\d{4})\.json|lang/en_us\.json|sounds/[0-9a-f]+\.ogg|sounds\.json))$")
+SAFE_PATH = re.compile(r"^assets/(gm/(textures/(block/s\d{4}(_(top|bottom|front|back|left|right|side|\d))?|item/i\d{4}(_[cv]\d+)?)\.png(\.mcmeta)?"
+                       r"|models/(block/s\d{4}(_c?\d+)?|item/i\d{4}(_[cv]\d+)?)\.json|items/i\d{4}\.json|lang/en_us\.json|sounds/[0-9a-f]+\.ogg|sounds\.json))$")
 
 
 def _fail(message):
@@ -268,6 +278,77 @@ def check_block_drops(features):
                 _fail(f"Block {feature_id}/{name} has an empty list of drops. Leave it out, and it drops itself.")
 
 
+def check_block_kinds(features):
+    """What each kind of block needs is easy to get wrong, and most of it would just quietly look or act wrong."""
+    for feature_id, feature in features.items():
+        for name, block in feature["manifest"].get("blocks", {}).items():
+            label = f"Block {feature_id}/{name}"
+            family = block.get("family")
+            if "hardness" in block and not (isinstance(block["hardness"], (int, float)) and not isinstance(block["hardness"], bool) and 0 <= block["hardness"] <= MOST_HARDNESS):
+                _fail(f"{label} has hardness {block['hardness']!r}. It's from 0, which breaks at once, up to {MOST_HARDNESS}. For anything harder, use a family that is.")
+            if family == "crop":
+                if not isinstance(block.get("stages"), list) or len(block["stages"]) != CROP_STAGES:
+                    _fail(f"{label} is a crop, so it needs \"stages\": a list of {CROP_STAGES} textures, from just planted to ripe.")
+                if "growth" in block and not _is_share(block["growth"]):
+                    _fail(f"{label} has growth {block['growth']!r}. It's how likely each random tick is to grow it a stage, above 0 and up to 1.")
+            elif "stages" in block or "growth" in block or "young_drops" in block:
+                _fail(f"{label} has stages, growth or young_drops, which only a crop can have.")
+            if "connects" in block and family != "connected":
+                _fail(f"{label} has connects, which only a connected block can have.")
+            if block.get("emissive") and family in NOT_CUBES:
+                _fail(f"{label} is emissive, but only a plain cube can be, and a {family} block isn't one.")
+            if block.get("drops") == "nothing" and family == "crop":
+                _fail(f"{label} is a crop that drops nothing, so nobody could ever harvest it.")
+
+
+def check_items(features):
+    for feature_id, feature in features.items():
+        for name, item in feature["manifest"].get("items", {}).items():
+            label = f"Item {feature_id}/{name}"
+            use = item.get("use")
+            if use is not None:
+                if not isinstance(use, dict) or not isinstance(use.get("seconds"), (int, float)) or isinstance(use.get("seconds"), bool) or not 0 < use["seconds"] <= MOST_USE_SECONDS:
+                    _fail(f"{label} has use {use!r}. It needs seconds, above 0 and up to {MOST_USE_SECONDS}, and can have an animation.")
+                if use.get("animation", "none") not in USE_ANIMATIONS:
+                    _fail(f"{label} has use animation {use.get('animation')!r}. Use one of {sorted(USE_ANIMATIONS)}.")
+                if "minecraft:consumable" in (item.get("components") or {}):
+                    _fail(f"{label} has both a use and minecraft:consumable. It's either something timed that goes to a module, or something eaten.")
+            tooltip = item.get("tooltip")
+            if tooltip is not None and not (isinstance(tooltip, list) and all(isinstance(line, str) for line in tooltip)):
+                _fail(f"{label} has tooltip {tooltip!r}. It's a list of lines of text.")
+            compass = item.get("compass")
+            if compass is not None and not (isinstance(compass, list) and MIN_COMPASS_FRAMES <= len(compass) <= MAX_COMPASS_FRAMES and all(isinstance(frame, str) for frame in compass)):
+                _fail(f"{label} has compass {compass!r}. It's a list of {MIN_COMPASS_FRAMES} to {MAX_COMPASS_FRAMES} textures, the first pointing straight ahead and the rest going round clockwise.")
+            variants = item.get("variants")
+            if variants is not None and not (isinstance(variants, dict) and variants and all(isinstance(texture, str) for texture in variants.values())):
+                _fail(f"{label} has variants {variants!r}. It's names and the texture for each, like {{\"gilded\": \"ledger_gilded\"}}.")
+
+
+def check_machines(features):
+    """A machine with no slots to take from, or a recipe that says what it makes in two ways, would quietly do less than it looks like."""
+    for feature_id, feature in features.items():
+        for name, block in feature["manifest"].get("blocks", {}).items():
+            inventory = block.get("inventory")
+            if inventory is None:
+                continue
+            label = f"Block {feature_id}/{name}"
+            if block.get("family") not in MACHINE_FAMILIES:
+                _fail(f"{label} has an inventory, which only a machine or model block can have.")
+            if not isinstance(inventory, dict) or not set(inventory) <= INVENTORY_KINDS or not all(isinstance(count, int) and not isinstance(count, bool) and count >= 0 for count in inventory.values()):
+                _fail(f"{label} has inventory {inventory!r}. It's whole numbers of slots, like {{\"inputs\": 2, \"fuel\": 1, \"outputs\": 1}}.")
+            if not 0 < sum(inventory.values()) <= MOST_MACHINE_SLOTS:
+                _fail(f"{label} has {sum(inventory.values())} slots in its inventory. It can have from 1 to {MOST_MACHINE_SLOTS}.")
+        for name, recipe in feature["manifest"].get("recipes", {}).items():
+            if not isinstance(recipe.get("machine"), str):
+                continue
+            label = f"Recipe {feature_id}/{name}"
+            if ("output" in recipe) == ("outputs" in recipe):
+                _fail(f"{label} needs either output, for one thing, or outputs, for several, and not both.")
+            made = recipe.get("outputs", [recipe.get("output")])
+            if not isinstance(made, list) or not made or not all(isinstance(output, dict) and isinstance(output.get("item"), str) and isinstance(output.get("count"), int) for output in made):
+                _fail(f"{label} has outputs {made!r}. Each is like {{\"item\": \"$item:name\", \"count\": 1}}.")
+
+
 def check_mob_sounds(features):
     """A sound the pack doesn't have plays nothing, and a kind of sound nothing asks for never plays, and neither says so."""
     sounds = {f"{feature_id}/{name}" for feature_id, feature in features.items() for name in feature["manifest"].get("sounds", [])}
@@ -306,6 +387,7 @@ def check_model_costs(features):
         drawn = [(name, mob.get("model", name), MAX_BONES_ROAMING if mob.get("spawn") else MAX_BONES_ONE_OFF)
                  for name, mob in feature["manifest"].get("mobs", {}).items()]
         drawn += [(name, block["model"], MAX_BONES_BLOCK) for name, block in feature["manifest"].get("blocks", {}).items() if block.get("model")]
+        drawn += [(target, model, MAX_BONES_ROAMING) for target, model in feature["manifest"].get("reskins", {}).items()]
         for name, model, limit in drawn:
             path = models / f"{model}.bbmodel"
             if not path.exists():
@@ -374,6 +456,9 @@ def run(features, old_ledger, new_ledger, pool, content):
     check_no_tags_in_patches(features)
     check_ruins(features)
     check_block_drops(features)
+    check_block_kinds(features)
+    check_items(features)
+    check_machines(features)
     check_mob_sounds(features)
     check_model_costs(features)
     check_minds(features)

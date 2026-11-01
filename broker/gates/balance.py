@@ -195,7 +195,7 @@ def _read_recipes(features):
         for name, recipe in feature["manifest"].get("recipes", {}).items():
             # A named machine's recipe has its inputs and output at the top level, not in Minecraft's own json.
             is_machine = isinstance(recipe.get("machine"), str)
-            body = {"inputs": recipe.get("inputs", []), "results": [recipe.get("output")]} if is_machine else recipe.get("json", {})
+            body = {"inputs": recipe.get("inputs", []), "results": recipe.get("outputs") or [recipe.get("output")]} if is_machine else recipe.get("json", {})
             recipes.append({"source": f"{feature_id}/{name}", "tier": recipe.get("tier"),
                             "inputs": _inputs(body, feature_id), "outputs": _outputs(body, feature_id)})
     return recipes
@@ -400,9 +400,8 @@ def _breaking_changes(features):
     breaking = {node: _yields(node, things) for node in things if any(_is_vanilla(what) for what, _ in _yields(node, things))}
     for node, yields in breaking.items():
         yield f"breaking {node.split(':', 1)[1]}", {node: -1, **dict(yields)}
-    for node, thing in things.items():
-        places = thing.get("places")
-        block = _node(str(places.get("block")), node.split(":")[1].split("/")[0]) if isinstance(places, dict) else None
+    for node in things:
+        block = _planted(node, things)
         if block in breaking:
             yield f"planting {node.split(':', 1)[1]}", {node: -1, block: 1}
 
@@ -496,9 +495,13 @@ def part_block(part):
 
 
 def drops_of(thing):
-    """What a block or mob says it drops, which for a block can be one thing or a list of several."""
-    drops = thing.get("drops") or []
-    return drops if isinstance(drops, list) else [drops]
+    """What a block or mob says it drops, which for a block can be one thing or a list of several, or nothing at all. A crop can also drop something before it's ripe."""
+    found = []
+    for field in ("drops", "young_drops"):
+        drops = thing.get(field) or []
+        if drops != "nothing":
+            found += drops if isinstance(drops, list) else [drops]
+    return found
 
 
 def _natural_sources(features):
@@ -523,6 +526,8 @@ def _yields(node, things):
     """What breaking a block gives, with how many of each on average: itself, unless it says otherwise. Silk touch can still
     get an ore itself, as in vanilla, but that's too late in the game for a recipe to rely on, so it doesn't count here."""
     feature_id = node.split(":")[1].split("/")[0]
+    if things.get(node, {}).get("drops") == "nothing":
+        return []
     found = []
     for drop in drops_of(things.get(node, {})):
         count = drop.get("count")
@@ -533,6 +538,12 @@ def _yields(node, things):
 
 def _drops_of(node, things):
     return {what for what, _ in _yields(node, things)}
+
+
+def _planted(node, things):
+    """The block an item puts in the world, like a seed's plant, or None."""
+    places = things.get(node, {}).get("places")
+    return _node(str(places.get("block")), node.split(":")[1].split("/")[0]) if isinstance(places, dict) else None
 
 
 def _check_vanilla_drops(features):
@@ -553,7 +564,9 @@ def _check_obtainable(features, recipes):
                     problems.append(f"Recipe {recipe['source']} uses {node}, which no feature declares. "
                                     "Refer to content with $item:name or $block:name.")
     placed, handed_out = _natural_sources(features)
-    holdable = handed_out.union(*(_drops_of(node, things) for node in placed))
+    # A module handing something out can't be seen from here, so a thing has to say so, and that's on whoever says it.
+    from_modules = {node for node, thing in things.items() if thing.get("from_module")}
+    holdable = (handed_out | from_modules).union(*(_drops_of(node, things) for node in placed))
     # Every recipe mode counts the same. Known recipes get their routes checked elsewhere, and guessable ones can
     # be found by trying, so all that matters here is whether their inputs exist.
     while True:
@@ -562,6 +575,7 @@ def _check_obtainable(features, recipes):
             if all(any(_is_vanilla(node) or node in holdable for node in alternatives) for alternatives, _ in recipe["inputs"]):
                 reachable.update(node for node, _, _ in recipe["outputs"])
         reachable.update(*(_drops_of(node, things) for node in holdable if node.startswith("block:")))
+        reachable.update(_planted(node, things) for node in holdable if _planted(node, things))
         if reachable == holdable:
             break
         holdable = reachable
@@ -619,12 +633,14 @@ def check_ores(features, recipes):
     for feature_id, feature in features.items():
         for ore in feature["manifest"].get("ores", []):
             label = f"{feature_id}/{ore.get('id')}"
-            numbers = [ore.get(field) for field in ("veinsPerChunk", "veinSize", "minY", "maxY")]
+            size = ore.get("veinSize")
+            # A range counts as its average, because that's what it gives over a whole world.
+            numbers = [ore.get("veinsPerChunk"), sum(size) / 2 if isinstance(size, list) and len(size) == 2 and all(map(_is_number, size)) else size, ore.get("minY"), ore.get("maxY")]
             if not all(_is_number(number) and not math.isnan(number) for number in numbers):
                 problems.append(f"Ore {label} needs numbers for veinsPerChunk, veinSize, minY and maxY.")
                 continue
             # The server reads these as whole numbers, and one that isn't loses every ore patch in the release.
-            if not all(float(number).is_integer() for number in numbers):
+            if not all(float(number).is_integer() for number in [numbers[0], *(size if isinstance(size, list) else [size]), *numbers[2:]]):
                 problems.append(f"Ore {label} needs whole numbers for veinsPerChunk, veinSize, minY and maxY. For something rarer than one "
                                 "vein a chunk, make the veins smaller or limit it to a narrow range of heights.")
                 continue
