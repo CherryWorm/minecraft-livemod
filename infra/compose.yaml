@@ -127,6 +127,8 @@ services:
       JAVA_MEMORY: ${SHADOW_MEMORY:-6G}
       WHITE_LIST: "false"
       LEVEL_SEED: ${LEVEL_SEED:-}
+      # Nobody stays on it, and a gate can wait on it for minutes with land still to finish. It's only up for a gate.
+      PAUSE_WHEN_EMPTY: "0"
       PACK_PUBLIC_URL: ${SHADOW_PACK_URL:-http://localhost:${SHADOW_PACK_PORT:-25568}/}
     volumes:
       - ${SHADOW_FOLDER:-${RUNTIME_DIR}}/shadow:/data

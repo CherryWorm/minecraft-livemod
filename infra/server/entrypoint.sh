@@ -23,6 +23,7 @@ rcon_password=$(cat /run/secrets/rcon)
 sed -e "s|@WHITE_LIST@|${WHITE_LIST:-true}|g" \
     -e "s|@LEVEL_SEED@|${LEVEL_SEED:-}|g" \
     -e "s|@VIEW_DISTANCE@|${VIEW_DISTANCE:-10}|g" \
+    -e "s|@PAUSE_WHEN_EMPTY@|${PAUSE_WHEN_EMPTY:-60}|g" \
     -e "s|@RCON_PASSWORD@|${rcon_password}|g" \
     /opt/mc/server.properties >server.properties
 sed -e "s|@PACK_PUBLIC_URL@|${PACK_PUBLIC_URL}|g" \
