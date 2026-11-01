@@ -11,7 +11,7 @@ LATER = "later"
 DONE = "done"
 DECLINED = "declined"
 NEEDS_OWNER = "needs_owner"  # Only a person can change the engine, so the director passes these on instead of pretending.
-ASK_AGAIN = "ask_again"  # Was waiting on the owner, who has since changed the engine, so the director looks at it afresh.
+ASK_AGAIN = "ask_again"  # Something's changed since it was decided, like the owner changing the engine, so the director looks at it afresh.
 # How anything that belongs to the world is shown to players before it's out. A fixed list, so a name can't slip in.
 CATEGORIES = ["mob", "boss fight", "character", "gear", "tool", "upgrade", "machine", "biome", "structure", "story", "food", "item", "building block", "world event"]
 STAGE_WORDS = {"early": "early game", "mid": "mid game", "end": "late game"}
@@ -89,7 +89,7 @@ class Requests:
         self.statuses.pop(str(number), None)
 
     def decided(self):
-        """What's been said so far about what, so that the same thing gets the same answer. Who asked doesn't come into it."""
+        """What's been said so far about what, and why, so that an earlier answer can be judged and not only repeated. Who asked doesn't come into it."""
         return [{"wanted": entry["wants"], "decided": self.status(entry["number"]),
                  **{key: value for key, value in self.statuses[str(entry["number"])].items() if key != "status" and value}}
                 for entry in self.all() if self.status(entry["number"]) not in (None, ASK_AGAIN)]

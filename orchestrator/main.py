@@ -30,6 +30,7 @@ WATCH_SECONDS = 5 * 60
 FEATURE_ID = workshop.FEATURE_ID
 DIRECTION_RESEARCH = 6
 DIRECTOR_RESEARCH = 3
+DIRECTOR_TURNS = 60  # Running out loses every decision it made, and it's 30 minutes before it's asked again. A plan over 47 requests took 36, because world_index no longer fits in one read.
 DIRECTOR_REST_SECONDS = 30 * 60
 FEEDBACK_PLAN_SECONDS = 10 * 60  # How long new requests can wait for the director, however much is being built.
 REQUEST_FEATURES_PER_PLAN = 2  # However many people ask, most of what gets built comes from the world's own plan.
@@ -63,7 +64,7 @@ DIRECTOR_SCHEMA = {
             "id": {"type": "string"}, "node": {"type": "string"}, "spec": {"type": "string"}, "category": {"type": "string", "enum": feedback.CATEGORIES},
             "answers": {"type": "array", "items": {"type": "integer"}}}, "required": ["id", "node", "spec", "category"]}},
         "decisions": {"type": "array", "items": {"type": "object", "properties": {
-            "number": {"type": "integer"}, "outcome": {"type": "string", "enum": [feedback.LATER, feedback.DECLINED, feedback.NEEDS_OWNER, "already_there"]}, "why": {"type": "string"}},
+            "number": {"type": "integer"}, "outcome": {"type": "string", "enum": [feedback.LATER, feedback.DECLINED, feedback.NEEDS_OWNER, "already_there"]}, "why": {"type": "string"}, "harm": {"type": "string"}},
             "required": ["number", "outcome", "why"]}},
         "new_nodes": {"type": "array", "items": NODE_SCHEMA},
     },
@@ -71,7 +72,7 @@ DIRECTOR_SCHEMA = {
 }
 
 SORTER_SCHEMA = {"type": "object", "properties": {"decisions": {"type": "array", "items": {"type": "object", "properties": {
-    "numbers": {"type": "array", "items": {"type": "integer"}}, "action": {"type": "string", "enum": ["changed", "small", "declined", "plan"]},
+    "numbers": {"type": "array", "items": {"type": "integer"}}, "action": {"type": "string", "enum": ["changed", "small", "plan"]},
     "id": {"type": "string"}, "node": {"type": "string"}, "spec": {"type": "string"}, "title": {"type": "string"}, "why": {"type": "string"}}, "required": ["numbers", "action"]}}}, "required": ["decisions"]}
 SORTER_TOOLS = ["mcp__world__world_index", "mcp__world__tune", "mcp__world__set_rule"]
 
@@ -443,7 +444,7 @@ class Agent:
     async def sort_requests(self):
         """The director's fast look at anything new, on a faster model but with the same rules and the same record of what
         it's decided. A number or a server rule changes on the spot, a small job gets its own small builder, and anything
-        that needs the whole picture waits for the next time it plans."""
+        that needs the whole picture, which includes every no, waits for the next time it plans."""
         fresh = self.requests.unanswered_after(self.state["sorted_up_to"])
         if not fresh or not self.state["direction_chosen"]:
             return
@@ -469,10 +470,6 @@ class Agent:
                 for number in numbers:
                     self.requests.mark(number, feedback.DONE, why=decision.get("why", ""))
                     news.append((known[number], feedback.DONE, decision.get("why", "")))
-            elif decision.get("action") == "declined" and decision.get("why"):
-                for number in numbers:
-                    self.requests.mark(number, feedback.DECLINED, why=decision["why"])
-                    news.append((known[number], feedback.DECLINED, decision["why"]))
             elif decision.get("action") == "small" and self.can_build(decision):
                 self.queue.insert(0, {"id": decision["id"], "node": decision["node"], "spec": decision["spec"], "title": decision.get("title"), "answers": numbers, "small": True})
                 for number in numbers:
@@ -554,13 +551,13 @@ class Agent:
         unfinished = "\n".join(unfinished_file.read_text(encoding="utf-8").splitlines()[-10:]) if unfinished_file.exists() else "(none)"
         prompt = (f"Player requests:\n{body}\n\n{self.waiting()} features are waiting to be built, and {self.governor.builders_allowed()} can be built at once.\n\n"
                   f"Being built or waiting to be built, so don't ask for these again:\n{self.work_list()}\n\n"
-                  f"What you've already decided, so be consistent with it and don't build anything twice:\n{self.decided_so_far()}\n\n"
+                  f"What you've already decided, so nothing gets built twice. It's a record and not a rule, so check any earlier reason against what's being asked now:\n{self.decided_so_far()}\n\n"
                   f"What players have found and learned:\n{llm.untrusted('progress', progress)}\n\n"
                   f"What each player privately said they wanted, never to be quoted or attributed:\n{briefs}\n\n"
                   f"Features that couldn't be finished, and why. Ask for these differently, or not at all:\n{unfinished}\n\n"
                   "Read bible/theme.md, bible/stages.yaml and bible/progression.json, look at world_index, then choose the next features.")
         result = await llm.ask(self.governor, "director", prompt, schema=DIRECTOR_SCHEMA, tools=["Read", "Glob", "Grep"],
-                               allowed_tools=["Read", "Glob", "Grep", research.TOOL_NAME, "mcp__world__world_index"], cwd=str(workshop.REPO), max_turns=14,
+                               allowed_tools=["Read", "Glob", "Grep", research.TOOL_NAME, "mcp__world__world_index"], cwd=str(workshop.REPO), max_turns=DIRECTOR_TURNS,
                                mcp_servers={"web": self.research.server(DIRECTOR_RESEARCH), "world": self.workshop.world_server()})
         if result.is_error or not isinstance(result.structured, dict):
             return []
@@ -571,6 +568,10 @@ class Agent:
             number, outcome = decision.get("number"), decision.get("outcome")
             if number not in undecided or outcome not in (feedback.LATER, feedback.DECLINED, feedback.NEEDS_OWNER, "already_there"):
                 continue
+            # A no has to say what it would damage. Without that it doesn't count, and the request comes back next time.
+            if outcome == feedback.DECLINED and not decision.get("harm"):
+                print(f"request {number} was turned down with no harm named, so it comes back", flush=True)
+                continue
             before = self.requests.status(number)
             # Someone looking at it again and coming to the same answer isn't news to the owner or the player.
             still_needs_owner = outcome == feedback.NEEDS_OWNER and before == feedback.ASK_AGAIN
@@ -579,7 +580,8 @@ class Agent:
             # It'll keep coming back as later, and they only need to hear that once.
             if not still_needs_owner and not (outcome == feedback.LATER and before == feedback.LATER):
                 news.append((undecided[number], outcome, decision.get("why", "")))
-            self.requests.mark(number, feedback.DONE if outcome == "already_there" else outcome, why=decision.get("why", ""))
+            # Kept beside the verdict, so the next look at it can judge the reasoning and not only the answer.
+            self.requests.mark(number, feedback.DONE if outcome == "already_there" else outcome, why=decision.get("why", ""), harm=decision.get("harm", ""))
         taken = {feature["id"] for feature in [*self.queue, *self.building.values()]}
         features = []
         from_requests = 0

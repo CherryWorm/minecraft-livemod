@@ -114,28 +114,15 @@ class Sorting(Base):
         self.assertEqual((self.status(1), self.status(2)), (feedback.BUILDING, feedback.BUILDING))
         self.assertEqual(len(self.told()), 1, "one message for both")
 
-    async def test_a_request_it_refuses_gets_a_reason_and_goes_no_further(self):
+    async def test_it_cant_turn_anything_down(self):
+        actions = main.SORTER_SCHEMA["properties"]["decisions"]["items"]["properties"]["action"]["enum"]
+        self.assertNotIn(feedback.DECLINED, actions)
         self.asked("faster boats")
-        seen = []
-
-        async def respond(governor, name, prompt, **options):
-            if name == "director_quick":
-                return result({"decisions": [{"numbers": [1], "action": "declined", "why": "Boats stay as they are."}]})
-            seen.append(prompt)
-            return result({"reply": "the news"})
-        self.ask.side_effect = respond
-        await self.agent.sort_requests()
-        self.assertEqual(self.status(1), feedback.DECLINED)
-        self.assertEqual(self.agent.queue, [])
-        self.assertEqual(self.agent.requests.undecided(), [], "the director doesn't see it")
-        self.assertIn("Boats stay as they are.", seen[0])
-        self.assertEqual(self.told(), ["§dKeeper§r: the news"])
-
-    async def test_a_refusal_with_no_reason_goes_to_the_director(self):
-        self.asked("faster boats")
-        self.answers("director_quick", {"decisions": [{"numbers": [1], "action": "declined"}]})
+        self.answers("director_quick", {"decisions": [{"numbers": [1], "action": "declined", "why": "Boats stay as they are."}]})
         await self.agent.sort_requests()
         self.assertIsNone(self.status(1))
+        self.assertEqual(self.told(), [], "nobody hears a no from here")
+        self.assertEqual([entry["number"] for entry in self.agent.requests.undecided()], [1], "the director decides it")
 
     async def test_a_small_job_with_a_bad_id_or_node_goes_to_the_director(self):
         self.asked("one", "two")
@@ -243,7 +230,7 @@ class Directing(Base):
 
         async def respond(governor, name, prompt, **options):
             if name == "director":
-                return result({"features": [], "decisions": [{"number": 1, "outcome": "declined", "why": "Too much."}, {"number": 2, "outcome": "already_there", "why": "Vanilla."},
+                return result({"features": [], "decisions": [{"number": 1, "outcome": "declined", "why": "Too much.", "harm": "It would flatten every base."}, {"number": 2, "outcome": "already_there", "why": "Vanilla."},
                                                              {"number": 3, "outcome": "later", "why": "After the kiln."}]})
             seen.append(prompt)
             return result({"reply": "the news"})
@@ -254,6 +241,29 @@ class Directing(Base):
         for word in ("Too much.", "Vanilla.", "After the kiln."):
             self.assertIn(word, seen[0])
         self.assertEqual([entry["number"] for entry in self.agent.requests.undecided()], [3], "later comes back, and the others don't")
+
+    async def test_a_no_that_names_no_harm_doesnt_count(self):
+        self.asked("a crafting screen")
+        self.plan_answer(decisions=[{"number": 1, "outcome": "declined", "why": "It never crafts."}])
+        await self.agent.next_features()
+        self.assertIsNone(self.status(1))
+        self.assertEqual(self.told(), [], "nobody hears it")
+        self.assertEqual([entry["number"] for entry in self.agent.requests.undecided()], [1], "it comes back")
+
+    async def test_the_harm_stays_with_the_decision_and_players_never_see_it(self):
+        self.asked("a nuke")
+        seen = []
+
+        async def respond(governor, name, prompt, **options):
+            if name == "director":
+                return result({"features": [], "decisions": [{"number": 1, "outcome": "declined", "why": "Too much.", "harm": "It would flatten every base."}]})
+            seen.append(prompt)
+            return result({"reply": "the news"})
+        self.ask.side_effect = respond
+        await self.agent.next_features()
+        self.assertIn("It would flatten every base.", self.agent.decided_so_far())
+        self.assertNotIn("flatten", seen[0])
+        self.assertNotIn("flatten", json.dumps(self.agent.requests.of_player("Dana")))
 
     async def test_something_only_the_owner_can_fix_really_reaches_them(self):
         self.asked("the codex text is unreadable")
@@ -284,7 +294,7 @@ class Directing(Base):
 
     async def test_once_the_engine_changes_the_director_looks_again(self):
         self.asked("inventory tweaks", "faster boats")
-        self.plan_answer(decisions=[{"number": 1, "outcome": "needs_owner", "why": "It's in the engine."}, {"number": 2, "outcome": "declined", "why": "Boats stay as they are."}])
+        self.plan_answer(decisions=[{"number": 1, "outcome": "needs_owner", "why": "It's in the engine."}, {"number": 2, "outcome": "declined", "why": "Boats stay as they are.", "harm": "Every boat in the world would change."}])
         await self.agent.next_features()
         self.engine_updated()
         self.agent.sort_wanted.clear()
