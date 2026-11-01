@@ -5,6 +5,7 @@ import gm.conduit.bridge.Board;
 import gm.conduit.bridge.Bridge;
 import gm.conduit.knowledge.Codex;
 import gm.conduit.knowledge.Knowledge;
+import gm.conduit.knowledge.KnownRecipes;
 import gm.conduit.mobs.Minds;
 import gm.conduit.mobs.SlotMobs;
 import gm.conduit.modules.ModulePush;
@@ -44,6 +45,7 @@ public final class Conduit implements ModInitializer {
 		LiveAssets.register();
 		PackStatus.register();
 		Knowledge.register();
+		KnownRecipes.register();
 		Codex.register();
 		OrePatchQueue.register();
 		BiomePatch.registerPlacements();

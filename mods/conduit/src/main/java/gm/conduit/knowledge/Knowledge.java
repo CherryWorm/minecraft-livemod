@@ -140,7 +140,7 @@ public final class Knowledge {
 		return parsed == null ? Optional.empty() : BuiltInRegistries.ITEM.getOptional(parsed);
 	}
 
-	private Optional<RecipeHolder<?>> recipe(Identifier id) {
+	Optional<RecipeHolder<?>> recipe(Identifier id) {
 		ResourceKey<Recipe<?>> key = ResourceKey.create(Registries.RECIPE, id);
 		return this.server.getRecipeManager().byKey(key);
 	}
@@ -322,6 +322,19 @@ public final class Knowledge {
 	public String nameOf(ItemStack stack) {
 		String name = this.plan.names().get(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
 		return name != null ? name : stack.getHoverName().getString();
+	}
+
+	KnowledgePlan plan() {
+		return this.plan;
+	}
+
+	/** Whether a recipe viewer can show this one yet. One that's there to be worked out stays hidden until it has been. */
+	boolean mayShow(Player player, KnowledgePlan.MachineRecipe recipe) {
+		return switch (recipe.mode()) {
+			case "open" -> true;
+			case "known" -> recipe.needs().stream().anyMatch(entry -> knows(player, entry));
+			default -> this.ledger != null && this.ledger.found(scopeKey(player)).contains("machine:" + recipe.id());
+		};
 	}
 
 	public List<KnowledgePlan.Entry> knownEntries(Player player) {
