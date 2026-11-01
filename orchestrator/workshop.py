@@ -118,7 +118,30 @@ ART_NOTE = ("Claude Opus makes all of this world's art, so you don't: textures, 
 
 
 def _git(*args, cwd=REPO):
-    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+    """Only this may move main, which it says with a variable only git itself gets to see. See MAIN_GUARD."""
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True, env={**os.environ, "LIVINGMOD_MOVES_MAIN": "1"}).stdout.strip()
+
+
+# Worktrees share their repository's branches, so a builder's shell can move main from its own tree. One did, to put its work
+# on main past review and the gates, and every release after that failed. Git asks this before it changes any branch.
+MAIN_GUARD = """#!/bin/sh
+[ "$1" = prepared ] || exit 0
+[ -n "$LIVINGMOD_MOVES_MAIN" ] && exit 0
+while read -r old new ref; do
+  if [ "$ref" = refs/heads/main ]; then
+    echo "main only moves when a feature is released. Stay on your own branch: finishing your work is what gets it released." >&2
+    exit 1
+  fi
+done
+exit 0
+"""
+
+
+def guard_main():
+    hook = REPO / ".git/hooks/reference-transaction"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text(MAIN_GUARD, encoding="utf-8")
+    hook.chmod(0o755)
 
 
 def setup_repo():
@@ -130,6 +153,7 @@ def setup_repo():
         _git("config", "user.name", "Living Mod agent")
         _git("config", "user.email", "agent@localhost")
         _git("commit", "-q", "--allow-empty", "-m", "Start of this world")
+    guard_main()
     (REPO / ".gitignore").write_text("__pycache__/\n*.pyc\n", encoding="utf-8")
     for name in ("docs", "assetkit"):
         target = REPO / name

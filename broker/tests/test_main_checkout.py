@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from orchestrator import wording, workshop, world_index
+from orchestrator import llm, wording, workshop, world_index
 
 FEATURES = "mods/genesis/features"
 
@@ -96,6 +96,81 @@ class Checkout(unittest.TestCase):
     def test_file_tools_cant_write_there(self):
         self.assertIn("Write(//workspace/repo/**)", workshop.BUILDER_DENIED)
         self.assertIn("Edit(//workspace/repo/**)", workshop.BUILDER_DENIED)
+
+
+class Guard(unittest.TestCase):
+    """With real git, because what matters is what it refuses."""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.root = pathlib.Path(folder.name)
+        self.repo = self.root / "repo"
+        self.repo.mkdir()
+        git("init", "-q", "-b", "main", cwd=self.repo)
+        git("config", "user.name", "Test", cwd=self.repo)
+        git("config", "user.email", "test@localhost", cwd=self.repo)
+        (self.repo / "bible").mkdir()
+        (self.repo / "bible/theme.md").write_text("a theme", encoding="utf-8")
+        git("add", "-A", cwd=self.repo)
+        git("commit", "-q", "-m", "Start", cwd=self.repo)
+        self.tree = self.root / "tree"
+        git("worktree", "add", "-q", "-b", "feature/demo", str(self.tree), "main", cwd=self.repo)
+        (self.tree / "mine.txt").write_text("a builder's work", encoding="utf-8")
+        git("add", "-A", cwd=self.tree)
+        git("commit", "-q", "-m", "work in progress", cwd=self.tree)
+        for target, name, value in ((workshop, "REPO", self.repo), (workshop._git, "__kwdefaults__", {"cwd": self.repo})):
+            patcher = mock.patch.object(target, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        workshop.guard_main()
+        self.start = git("rev-parse", "main", cwd=self.repo)
+
+    def refused(self, *args, cwd):
+        with self.assertRaises(subprocess.CalledProcessError) as caught:
+            git(*args, cwd=cwd)
+        self.assertEqual(git("rev-parse", "main", cwd=self.repo), self.start, args)
+        return caught.exception.stderr
+
+    def test_a_builder_cant_move_main_from_its_own_tree(self):
+        self.assertIn("main only moves when a feature is released", self.refused("update-ref", "refs/heads/main", "feature/demo", cwd=self.tree))
+        self.refused("branch", "-f", "main", "feature/demo", cwd=self.tree)
+
+    def test_nor_from_the_main_checkout(self):
+        (self.repo / "stray.txt").write_text("x", encoding="utf-8")
+        git("add", "stray.txt", cwd=self.repo)
+        self.refused("commit", "-q", "-m", "straight onto main", cwd=self.repo)
+        self.refused("merge", "-q", "--no-ff", "-m", "merging myself", "feature/demo", cwd=self.repo)
+
+    def test_nor_by_going_backwards(self):
+        workshop._git("commit", "-q", "--allow-empty", "-m", "Later")
+        self.start = git("rev-parse", "main", cwd=self.repo)
+        self.refused("reset", "-q", "--hard", "HEAD~1", cwd=self.repo)
+
+    def test_a_builder_can_still_commit_to_its_own_branch(self):
+        (self.tree / "more.txt").write_text("more", encoding="utf-8")
+        git("add", "-A", cwd=self.tree)
+        git("commit", "-q", "-m", "more work", cwd=self.tree)
+        self.assertEqual(git("rev-parse", "main", cwd=self.repo), self.start)
+
+    def test_and_merge_main_into_it(self):
+        workshop._git("commit", "-q", "--allow-empty", "-m", "Released something")
+        git("merge", "-q", "--no-edit", "main", cwd=self.tree)
+
+    def test_the_agent_can_still_release_and_commit_its_own_files(self):
+        workshop._git("merge", "-q", "--no-ff", "-m", "Released demo", "feature/demo")
+        self.assertTrue((self.repo / "mine.txt").exists())
+        (self.repo / "bible/theme.md").write_text("a better theme", encoding="utf-8")
+        workshop.commit_files("A better theme", "bible")
+        self.assertEqual(git("log", "-1", "--format=%s", "main", cwd=self.repo), "A better theme")
+
+    def test_new_builders_get_their_own_branch_as_usual(self):
+        other = self.root / "other"
+        git("worktree", "add", "-q", "-B", "feature/other", str(other), "main", cwd=self.repo)
+        self.assertEqual(git("rev-parse", "HEAD", cwd=other), self.start)
+
+    def test_the_prompt_tells_them(self):
+        self.assertIn("Never move or commit to `main`", llm.prompt_text("builder"))
 
 
 class OneBadFile(unittest.TestCase):
