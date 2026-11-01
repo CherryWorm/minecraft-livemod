@@ -341,6 +341,37 @@ class TestRuns(Case):
             self.assertEqual([lane for name, lane in self.ran if name == "b"], [""], "it should have got the first lane back")
 
 
+class LookingOverLanes(Case):
+    def setUp(self):
+        super().setUp()
+        for lane in ("gates-1", "gates-2", "gates-3"):
+            (self.root / "lanes" / lane).mkdir(parents=True)
+        patcher = mock.patch.object(runtime, "RUNTIME", self.root)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.commands = []
+
+    def look(self, up):
+        def fake_run(command, **kwargs):
+            self.commands.append((command, kwargs.get("env")))
+            return subprocess.CompletedProcess(command, 0, "true\n" if command[0] == "docker" and any(lane in command[-1] for lane in up) else "false\n")
+
+        with mock.patch.object(daemon, "GATE_LANES", 3), mock.patch.object(runtime, "run", fake_run):
+            daemon.look_over_lanes()
+
+    def test_a_lane_thats_up_is_noted_so_it_doesnt_need_room_for_a_new_server(self):
+        self.look({"gates-1"})
+        self.assertEqual(daemon.lanes_used, {"gates-1"})
+
+    def test_spare_lanes_are_stopped_and_only_their_own_services(self):
+        self.look(set())
+        stopped = [(command, env) for command, env in self.commands if "stop" in command]
+        self.assertEqual(len(stopped), 1)
+        command, env = stopped[0]
+        self.assertEqual(command[command.index("stop") + 1:], ["shadow", "shadow-proxy", "shadow-pack"])
+        self.assertEqual(env["COMPOSE_PROJECT_NAME"], f"{runtime.PROJECT}-gates-3")
+
+
 class TestServerFolders(unittest.TestCase):
     """Each lane's test server has to be separate from every other's, and it has to be impossible for one to reach the live one."""
 

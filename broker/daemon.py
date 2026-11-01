@@ -351,13 +351,16 @@ def retry_suspects():
             job.thread.join()
 
 
-def stop_spare_lanes():
-    """A test server stays up between jobs so the next one is quicker, so one in a lane that's been taken away would only be using memory.
-    The services are named, because this should only ever stop these three."""
+def look_over_lanes():
+    """A test server stays up between jobs so the next one is quicker, and that outlives the broker. One that's up is already using its memory,
+    so starting a job there needs less room. One in a lane that's been taken away would only be using memory, so it's stopped. The
+    services are named, because this should only ever stop these three."""
     for folder in (runtime.RUNTIME / "lanes").glob("gates-*"):
+        env = runtime.shadow_env(folder.name)
         if int(folder.name.removeprefix("gates-")) >= GATE_LANES:
-            runtime.run(["./scripts/stack.sh", "--profile", "shadow", "--profile", "lanes", "stop", "shadow", "shadow-proxy", "shadow-pack"],
-                        env=runtime.shadow_env(folder.name), check=False)
+            runtime.run(["./scripts/stack.sh", "--profile", "shadow", "--profile", "lanes", "stop", "shadow", "shadow-proxy", "shadow-pack"], env=env, check=False)
+        elif "true" in runtime.run(["docker", "inspect", "-f", "{{.State.Running}}", f"{env['COMPOSE_PROJECT_NAME']}-shadow-1"], check=False).stdout:
+            lanes_used.add(folder.name)
 
 
 def main():
@@ -370,7 +373,7 @@ def main():
     DRAINING.unlink(missing_ok=True)
     # If memory does run out, the system should stop this, and what it's running, rather than the live server. See started_again.
     pathlib.Path("/proc/self/oom_score_adj").write_text("500", encoding="utf-8")
-    stop_spare_lanes()
+    look_over_lanes()
     print("broker waiting for requests", flush=True)
     retry_suspects()
     running = {}
