@@ -3,6 +3,7 @@ package gm.conduit.retrogen;
 import com.google.gson.Gson;
 import com.google.gson.JsonParseException;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import gm.conduit.dimensions.Dimensions;
 import net.minecraft.commands.arguments.blocks.BlockStateParser;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
@@ -10,6 +11,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
@@ -35,9 +37,10 @@ import java.util.stream.Collectors;
  * @param maxSlope how far the ground may rise and fall under one that follows the terrain
  * @param spacing how many chunks apart two of these always are, or 0 if that doesn't matter
  * @param highGround how many blocks above the chunks around it, on average, its chunk has to stand, or 0 if that doesn't matter
+ * @param dimension which one it turns up in
  */
 public record RuinPatch(String id, List<List<Part>> layouts, Set<Block> on, Set<Block> replaces, float chance, int minY, int maxY,
-		boolean underground, Set<ResourceKey<Biome>> biomes, String loot, boolean followTerrain, int maxSlope, int spacing, int highGround) {
+		boolean underground, Set<ResourceKey<Biome>> biomes, String loot, boolean followTerrain, int maxSlope, int spacing, int highGround, ResourceKey<Level> dimension) {
 	private static final Path FILE = Path.of("config", "conduit", "ruin_patches.json");
 	private static final int CHUNK_SIDE = 16;
 	private static final int DEFAULT_MAX_SLOPE = 8;
@@ -51,7 +54,7 @@ public record RuinPatch(String id, List<List<Part>> layouts, Set<Block> on, Set<
 	private record PartDefinition(int x, int y, int z, String block, Float chance, String loot) {}
 
 	private record Definition(String id, List<PartDefinition> parts, List<List<PartDefinition>> layouts, List<String> on, List<String> replaces,
-			Float chance, int minY, int maxY, boolean underground, List<String> biomes, String loot, boolean followTerrain, Integer maxSlope, int spacing, int highGround) {}
+			Float chance, int minY, int maxY, boolean underground, List<String> biomes, String loot, boolean followTerrain, Integer maxSlope, int spacing, int highGround, String dimension) {}
 
 	static List<RuinPatch> load() {
 		if (!Files.exists(FILE)) {
@@ -114,7 +117,8 @@ public record RuinPatch(String id, List<List<Part>> layouts, Set<Block> on, Set<
 				definition.followTerrain(),
 				definition.maxSlope() != null ? definition.maxSlope() : DEFAULT_MAX_SLOPE,
 				definition.spacing(),
-				definition.highGround());
+				definition.highGround(),
+				Dimensions.levelKey(definition.dimension()));
 	}
 
 	private static Part part(PartDefinition part) {

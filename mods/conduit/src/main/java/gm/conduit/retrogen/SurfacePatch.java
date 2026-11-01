@@ -2,10 +2,12 @@ package gm.conduit.retrogen;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonParseException;
+import gm.conduit.dimensions.Dimensions;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.Block;
 
@@ -23,11 +25,12 @@ import java.util.stream.Collectors;
  * @param perChunk how many to try for in a chunk, on average. Below 1 means some chunks get none
  * @param underground true for cave floors, false for the open surface
  * @param biomes where it grows, or empty for anywhere
+ * @param dimension which one it grows in
  */
-public record SurfacePatch(String id, Block block, Set<Block> on, float perChunk, int minY, int maxY, boolean underground, Set<ResourceKey<Biome>> biomes) {
+public record SurfacePatch(String id, Block block, Set<Block> on, float perChunk, int minY, int maxY, boolean underground, Set<ResourceKey<Biome>> biomes, ResourceKey<Level> dimension) {
 	private static final Path FILE = Path.of("config", "conduit", "surface_patches.json");
 
-	private record Definition(String id, String block, List<String> on, float perChunk, int minY, int maxY, boolean underground, List<String> biomes) {}
+	private record Definition(String id, String block, List<String> on, float perChunk, int minY, int maxY, boolean underground, List<String> biomes, String dimension) {}
 
 	static List<SurfacePatch> load() {
 		if (!Files.exists(FILE)) {
@@ -51,7 +54,8 @@ public record SurfacePatch(String id, Block block, Set<Block> on, float perChunk
 				definition.minY(),
 				definition.maxY(),
 				definition.underground(),
-				biomes.stream().map(id -> ResourceKey.create(Registries.BIOME, Identifier.parse(id))).collect(Collectors.toUnmodifiableSet()));
+				biomes.stream().map(id -> ResourceKey.create(Registries.BIOME, Identifier.parse(id))).collect(Collectors.toUnmodifiableSet()),
+				Dimensions.levelKey(definition.dimension()));
 	}
 
 	private static Block block(String id) {

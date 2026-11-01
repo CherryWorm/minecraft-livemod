@@ -239,8 +239,8 @@ def reload_content(server):
     rcon(server, "conduit", "module", "reload")
 
 
-def vanilla_biome(name):
-    """A biome's definition, read from the game's own jar, so new biomes start from what's really there."""
+def _vanilla_data(folder_in_jar, kind, name):
+    """A definition read from the game's own jar, so what's made from it starts from what's really there."""
     import zipfile
 
     path = name.split(":", 1)[-1]
@@ -248,7 +248,15 @@ def vanilla_biome(name):
         for jar in (RUNTIME / folder).glob("versions/*/server-*.jar"):
             with zipfile.ZipFile(jar) as archive:
                 try:
-                    return json.loads(archive.read(f"data/minecraft/worldgen/biome/{path}.json"))
+                    return json.loads(archive.read(f"data/minecraft/{folder_in_jar}/{path}.json"))
                 except KeyError as error:
-                    raise ValueError(f"There's no vanilla biome called {name}") from error
+                    raise ValueError(f"There's no vanilla {kind} called {name}") from error
     raise RuntimeError("No server jar found. Start prod once first.")
+
+
+def vanilla_biome(name):
+    return _vanilla_data("worldgen/biome", "biome", name)
+
+
+def vanilla_dimension_type(name):
+    return _vanilla_data("dimension_type", "dimension type", name)

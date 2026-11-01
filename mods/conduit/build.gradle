@@ -3,4 +3,7 @@ dependencies {
 	implementation "eu.pb4:polymer-bundled:${project.polymer_version}"
 	implementation "maven.modrinth:blockbench-import-library:${project.bil_version}"
 	implementation "maven.modrinth:biolith:${project.biolith_version}"
+	// Opens dimensions while the server runs. Only this needs it, so it goes inside this jar, and a new one needs no change to the server image.
+	implementation "xyz.nucleoid:fantasy:${project.fantasy_version}"
+	include "xyz.nucleoid:fantasy:${project.fantasy_version}"
 }

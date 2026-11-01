@@ -4,6 +4,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.world.Container;
@@ -110,4 +111,16 @@ public interface ServerModuleContext {
 
 	/** Teaches a player one of this feature's knowledge entries, for discoveries a module detects itself. */
 	void teach(ServerPlayer player, String knowledge);
+
+	/** One of this feature's "dimensions", or "other_feature/name", to look at or change, or to send someone to a place of your own choosing. */
+	ServerLevel dimension(String name);
+
+	/**
+	 * Sends a player to a dimension, at its spawn or the nearest safe ground to it, and remembers where they came from. In a dimension
+	 * with nothing to stand on, it makes a small platform. To use that, or for a door of your own, this is all a portal has to call.
+	 */
+	void enterDimension(ServerPlayer player, String name);
+
+	/** Sends a player back to where they entered a dimension from, or to wherever they'd respawn if that isn't known. Does nothing for someone who isn't in one. */
+	void leaveDimension(ServerPlayer player);
 }

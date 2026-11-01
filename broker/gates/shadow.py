@@ -39,6 +39,8 @@ FORBIDDEN = [
     # Nothing else checks an item's components against the game's own format before this.
     r"Can't read the defaults for",
     r"Can't read config",
+    # A dimension's generator is only ever checked against the game's own format here.
+    r"Can't open dimension",
 ]
 FORBIDDEN_RE = re.compile("|".join(FORBIDDEN))
 MIXINS_IN_PLACE = re.compile(r"feature mixins in place: \d+ from (\d+) features")

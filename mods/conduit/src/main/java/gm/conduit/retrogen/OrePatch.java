@@ -3,10 +3,12 @@ package gm.conduit.retrogen;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParseException;
+import gm.conduit.dimensions.Dimensions;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.Block;
 
@@ -25,11 +27,13 @@ import java.util.stream.Collectors;
  * @param smallestVein the fewest, which is the same as veinSize unless it's a range
  * @param biomes where it forms, or empty for anywhere
  * @param touchingAir only forms where it can be seen, on a cliff or a cave wall
+ * @param dimension which one it forms in
  */
-public record OrePatch(String id, Block ore, Set<Block> replaces, int veinsPerChunk, int veinSize, int smallestVein, int minY, int maxY, Set<ResourceKey<Biome>> biomes, boolean touchingAir) {
+public record OrePatch(String id, Block ore, Set<Block> replaces, int veinsPerChunk, int veinSize, int smallestVein, int minY, int maxY, Set<ResourceKey<Biome>> biomes, boolean touchingAir,
+		ResourceKey<Level> dimension) {
 	private static final Path FILE = Path.of("config", "conduit", "ore_patches.json");
 
-	private record Definition(String id, String block, List<String> replaces, int veinsPerChunk, JsonElement veinSize, int minY, int maxY, List<String> biomes, boolean touchingAir) {}
+	private record Definition(String id, String block, List<String> replaces, int veinsPerChunk, JsonElement veinSize, int minY, int maxY, List<String> biomes, boolean touchingAir, String dimension) {}
 
 	public static List<OrePatch> load() {
 		if (!Files.exists(FILE)) {
@@ -58,7 +62,8 @@ public record OrePatch(String id, Block ore, Set<Block> replaces, int veinsPerCh
 				definition.minY(),
 				definition.maxY(),
 				biomes.stream().map(id -> ResourceKey.create(Registries.BIOME, Identifier.parse(id))).collect(Collectors.toUnmodifiableSet()),
-				definition.touchingAir());
+				definition.touchingAir(),
+				Dimensions.levelKey(definition.dimension()));
 	}
 
 	private static Block block(String id) {

@@ -20,6 +20,7 @@
 		"fabric-api": "*",
 		"polymer-blocks": "*",
 		"bil": "*",
-		"biolith": "*"
+		"biolith": "*",
+		"fantasy": "*"
 	}
 }

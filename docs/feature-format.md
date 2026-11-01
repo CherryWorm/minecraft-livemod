@@ -1,6 +1,6 @@
 # Feature bundle format
 
-Knowledge, machine recipes, mobs, plants, ruins, biomes and sounds are in `docs/content-types.md`.
+Knowledge, machine recipes, mobs, plants, ruins, biomes, dimensions and sounds are in `docs/content-types.md`.
 
 Each feature is one folder, `mods/genesis/features/<id>/`, where `<id>` is lowercase letters, digits and underscores.
 

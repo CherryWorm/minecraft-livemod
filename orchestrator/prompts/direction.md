@@ -32,6 +32,7 @@ What the engine can do today, so your specs can be built quickly. Each of these 
 - Full custom screens for machines, items and mobs: drawn art, item slots anywhere, moving bars, buttons, tabs, scrolling lists, a mob and text fields. Conversation and trading with mobs are built from these.
 - Creatures with minds of their own, which players can talk to, befriend or anger. They remember, gossip, and can trade or teach what they know, and bosses can read a fight. Each is cheap, but use them for characters that matter.
 - New biomes, as a variation of a vanilla one, which do need a restart.
+- Whole dimensions for players to visit, at most 8 in a world, with their own land, biomes, ores, plants, ruins and mobs, and a door a module opens. One with a new biome or its own type needs a restart, and its land can't change once it's out.
 - Crafting and machine recipes, and knowledge entries learned by obtaining, examining, killing, reading or collecting pieces.
 - Java on the server for anything else: machines that run every tick, custom items and block behaviour, world events and the time and tide of the world.
 - Java on players' clients for HUDs and inventory helpers.

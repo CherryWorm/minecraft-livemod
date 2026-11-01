@@ -2,8 +2,11 @@ package gm.conduit.mobs;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import gm.conduit.dimensions.Dimensions;
 import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.sounds.SoundEvent;
+import net.minecraft.world.level.Level;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -20,8 +23,11 @@ import java.util.Map;
 public record MobDefinition(String model, String behaviour, double health, double damage, double speed, double followRange,
 		double armor, float width, float height, Spawn spawn, Mind mind, String display, Map<String, SoundEvent> sounds) {
 
-	/** @param light dark, bright or any */
-	public record Spawn(int weight, String light, List<String> biomes, int minY, int maxY, int cap, boolean underground) {}
+	/**
+	 * @param light dark, bright or any
+	 * @param dimension which one it appears in
+	 */
+	public record Spawn(int weight, String light, List<String> biomes, int minY, int maxY, int cap, boolean underground, ResourceKey<Level> dimension) {}
 
 	static MobDefinition parse(JsonObject json) {
 		Spawn spawn = null;
@@ -34,7 +40,8 @@ public record MobDefinition(String model, String behaviour, double health, doubl
 			}
 			spawn = new Spawn(raw.get("weight").getAsInt(), raw.get("light").getAsString(), biomes,
 					raw.get("minY").getAsInt(), raw.get("maxY").getAsInt(), raw.get("cap").getAsInt(),
-					raw.has("underground") && raw.get("underground").getAsBoolean());
+					raw.has("underground") && raw.get("underground").getAsBoolean(),
+					Dimensions.levelKey(raw.has("dimension") ? raw.get("dimension").getAsString() : null));
 		}
 		Map<String, SoundEvent> sounds = new HashMap<>();
 		if (json.has("sounds")) {

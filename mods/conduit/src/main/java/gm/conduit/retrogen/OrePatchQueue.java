@@ -62,14 +62,16 @@ public final class OrePatchQueue {
 	private List<SurfacePatch> surfacePatches = List.of();
 	private List<BiomePatch> biomePatches = List.of();
 	private List<RuinPatch> ruinPatches = List.of();
-	private final Deque<ChunkPos> queue = new ArrayDeque<>();
-	private final Set<Long> queued = new HashSet<>();
+	private final Deque<Waiting> queue = new ArrayDeque<>();
+	private final Set<Waiting> queued = new HashSet<>();
 	private final long budgetNanos = readBudgetMicros() * 1_000;
 	private final long[] tickNanos = new long[STATUS_INTERVAL_TICKS];
 	private int tickIndex;
 	private long chunksPatched;
 	private long oresPlaced;
 	private long ruinsPlaced;
+
+	private record Waiting(ServerLevel level, ChunkPos pos) {}
 
 	private OrePatchQueue() {}
 
@@ -103,7 +105,7 @@ public final class OrePatchQueue {
 		int total = patches.size() + INSTANCE.surfacePatches.size() + INSTANCE.biomePatches.size() + INSTANCE.ruinPatches.size();
 		if (total > 0) {
 			LOGGER.info("retrogen: {} patches active", total);
-			INSTANCE.scanLoadedChunks(server.overworld());
+			server.getAllLevels().forEach(INSTANCE::scanLoadedChunks);
 		}
 		return total;
 	}
@@ -113,26 +115,29 @@ public final class OrePatchQueue {
 	}
 
 	private void onLoad(ServerLevel level, LevelChunk chunk) {
-		if (level.dimension() != Level.OVERWORLD || !hasOutstanding(chunk)) {
+		if (!hasOutstanding(level, chunk)) {
 			return;
 		}
-		if (this.queued.add(chunk.getPos().pack())) {
-			this.queue.addLast(chunk.getPos());
+		Waiting waiting = new Waiting(level, chunk.getPos());
+		if (this.queued.add(waiting)) {
+			this.queue.addLast(waiting);
 		}
 	}
 
 	private void onUnload(ServerLevel level, LevelChunk chunk) {
-		if (level.dimension() == Level.OVERWORLD && this.queued.remove(chunk.getPos().pack())) {
-			this.queue.remove(chunk.getPos());
+		Waiting waiting = new Waiting(level, chunk.getPos());
+		if (this.queued.remove(waiting)) {
+			this.queue.remove(waiting);
 		}
 	}
 
-	private boolean hasOutstanding(LevelChunk chunk) {
+	private boolean hasOutstanding(ServerLevel level, LevelChunk chunk) {
+		ResourceKey<Level> here = level.dimension();
 		Set<String> applied = Provenance.appliedPatches(chunk);
-		return this.patches.stream().anyMatch(patch -> !applied.contains(patch.id()))
-				|| this.surfacePatches.stream().anyMatch(patch -> !applied.contains(patch.id()))
-				|| this.biomePatches.stream().anyMatch(patch -> !applied.contains(patch.id()))
-				|| this.ruinPatches.stream().anyMatch(patch -> !applied.contains(patch.id()));
+		return this.patches.stream().anyMatch(patch -> patch.dimension().equals(here) && !applied.contains(patch.id()))
+				|| this.surfacePatches.stream().anyMatch(patch -> patch.dimension().equals(here) && !applied.contains(patch.id()))
+				|| here.equals(Level.OVERWORLD) && this.biomePatches.stream().anyMatch(patch -> !applied.contains(patch.id()))
+				|| this.ruinPatches.stream().anyMatch(patch -> patch.dimension().equals(here) && !applied.contains(patch.id()));
 	}
 
 	private void tick(MinecraftServer server) {
@@ -140,11 +145,12 @@ public final class OrePatchQueue {
 			return;
 		}
 		long started = System.nanoTime();
-		ServerLevel level = server.overworld();
 		int attempts = this.queue.size();
 		while (attempts-- > 0 && System.nanoTime() - started < this.budgetNanos) {
-			ChunkPos pos = this.queue.pollFirst();
-			this.queued.remove(pos.pack());
+			Waiting waiting = this.queue.pollFirst();
+			this.queued.remove(waiting);
+			ServerLevel level = waiting.level();
+			ChunkPos pos = waiting.pos();
 			LevelChunk chunk = level.getChunkSource().getChunkNow(pos.x(), pos.z());
 			if (chunk == null) {
 				continue;
@@ -153,8 +159,8 @@ public final class OrePatchQueue {
 				apply(level, chunk);
 			} else {
 				// Checked again later: the hidden-ore rule needs to see into the next chunk.
-				this.queued.add(pos.pack());
-				this.queue.addLast(pos);
+				this.queued.add(waiting);
+				this.queue.addLast(waiting);
 			}
 		}
 		recordTick(System.nanoTime() - started);
@@ -185,25 +191,28 @@ public final class OrePatchQueue {
 	private void apply(ServerLevel level, LevelChunk chunk) {
 		Set<String> applied = new HashSet<>(Provenance.appliedPatches(chunk));
 		boolean visited = chunk.getInhabitedTime() > 0 || Provenance.hasAnyTouched(chunk);
+		ResourceKey<Level> here = level.dimension();
 		for (OrePatch patch : this.patches) {
-			if (applied.add(patch.id())) {
+			if (patch.dimension().equals(here) && applied.add(patch.id())) {
 				placeVeins(level, chunk, patch, visited);
 			}
 		}
 		// Nothing should spring up where someone has built, or it looks like the world is rearranging their base.
 		boolean built = Provenance.hasAnyTouched(chunk);
 		for (SurfacePatch patch : this.surfacePatches) {
-			if (applied.add(patch.id()) && !built) {
+			if (patch.dimension().equals(here) && applied.add(patch.id()) && !built) {
 				growPlants(level, chunk, patch);
 			}
 		}
-		for (BiomePatch patch : this.biomePatches) {
-			if (applied.add(patch.id()) && patch.sibling()) {
-				spreadBiome(level, chunk, patch);
+		if (here.equals(Level.OVERWORLD)) {
+			for (BiomePatch patch : this.biomePatches) {
+				if (applied.add(patch.id()) && patch.sibling()) {
+					spreadBiome(level, chunk, patch);
+				}
 			}
 		}
 		for (RuinPatch patch : this.ruinPatches) {
-			if (applied.add(patch.id()) && !visited) {
+			if (patch.dimension().equals(here) && applied.add(patch.id()) && !visited) {
 				placeRuin(level, chunk, patch);
 			}
 		}

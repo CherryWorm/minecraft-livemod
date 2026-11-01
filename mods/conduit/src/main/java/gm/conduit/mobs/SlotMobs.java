@@ -27,7 +27,6 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.MobCategory;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
@@ -144,7 +143,7 @@ public final class SlotMobs {
 		List<Map.Entry<EntityType<?>, MobDefinition>> candidates = new ArrayList<>();
 		int total = 0;
 		for (Map.Entry<EntityType<?>, MobDefinition> entry : DEFINITIONS.entrySet()) {
-			if (entry.getValue().spawn() != null) {
+			if (entry.getValue().spawn() != null && entry.getValue().spawn().dimension().equals(level.dimension())) {
 				candidates.add(entry);
 				total += entry.getValue().spawn().weight();
 			}
@@ -164,9 +163,6 @@ public final class SlotMobs {
 
 	private static void spawnNear(ServerLevel level, ServerPlayer player, EntityType<?> type, MobDefinition.Spawn spawn, RandomSource random) {
 		if (type.getCategory() == MobCategory.MONSTER && level.getDifficulty() == Difficulty.PEACEFUL) {
-			return;
-		}
-		if (level.dimension() != Level.OVERWORLD) {
 			return;
 		}
 		AABB area = player.getBoundingBox().inflate(CROWD_RADIUS);

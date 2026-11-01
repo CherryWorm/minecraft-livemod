@@ -68,7 +68,7 @@ def compile_content(source, mods, content):
     new_ledger = bundles.assign_slots(features, json.loads(json.dumps(old_ledger)), pool)
     if content.exists():
         shutil.rmtree(content)
-    bundles.render(features, new_ledger, content, runtime.data_format(), runtime.vanilla_biome, discovery_scope(source), progression_nodes(source))
+    bundles.render(features, new_ledger, content, runtime.data_format(), runtime.vanilla_biome, discovery_scope(source), progression_nodes(source), runtime.vanilla_dimension_type)
     return features, pool, old_ledger, new_ledger
 
 
@@ -185,8 +185,9 @@ def choose_tier(content, jars):
     old_jars = sorted(path.name + ":" + bundles.hashlib.sha256(path.read_bytes()).hexdigest()
                       for path in (current / "jars").glob("*.jar")) if current.exists() else []
     new_jars = sorted(path.name + ":" + bundles.hashlib.sha256(path.read_bytes()).hexdigest() for path in jars)
-    worldgen = bundles.tree_hash(content / "datapack/data/gm/worldgen") != bundles.tree_hash(old_content / "datapack/data/gm/worldgen")
-    if old_jars != new_jars or worldgen or not current.exists():
+    # The game only reads these when it starts. A dimension that needs neither opens with no restart.
+    registries = changed("datapack/data/gm/worldgen") or changed("datapack/data/gm/dimension_type")
+    if old_jars != new_jars or registries or not current.exists():
         return "T3"
     # Only the jars count in modules/. The last release's signatures sit beside its jars and this one has none
     # yet, so comparing whole folders would make every check look like a change.

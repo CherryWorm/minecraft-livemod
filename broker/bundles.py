@@ -13,7 +13,7 @@ import shutil
 from broker import guide
 from orchestrator import others
 
-TOKEN = re.compile(r"\$(block|item|mob|sound):([a-z0-9_]+(?:/[a-z0-9_]+)?)")
+TOKEN = re.compile(r"\$(block|item|mob|sound|biome|dimension):([a-z0-9_]+(?:/[a-z0-9_]+)?)")
 
 TOOL_TAGS = {"pickaxe": "pickaxe", "axe": "axe", "shovel": "shovel", "hoe": "hoe"}
 LEVEL_TAGS = {"stone": "needs_stone_tool", "iron": "needs_iron_tool", "diamond": "needs_diamond_tool"}
@@ -36,6 +36,10 @@ CHEST_ROW = 9
 PANEL_IMAGE_FIELDS = ("image", "hover_image", "disabled_image", "portrait")
 LOOKS_ONLY_ATTRIBUTES = ("minecraft:visual/", "minecraft:audio/")
 BLOCK_FACES = {"top", "bottom", "front", "back", "left", "right", "side"}
+# Everything a dimension type can say. The game ignores a field it doesn't know without saying so, so this has to catch those.
+DIMENSION_TYPE_FIELDS = {"ambient_light", "attributes", "cardinal_light", "coordinate_scale", "default_clock", "has_ceiling", "has_ender_dragon_fight", "has_fixed_time",
+                         "has_skylight", "height", "infiniburn", "logical_height", "min_y", "monster_spawn_block_light_limit", "monster_spawn_light_level", "skybox", "timelines"}
+DEFAULT_DIMENSION_TYPE = "minecraft:overworld"
 
 
 class BundleError(Exception):
@@ -86,7 +90,7 @@ def load_features(features_dir):
 
 
 def empty_ledger():
-    return {"blocks": {}, "items": {}, "mobs": {}, "patches": []}
+    return {"blocks": {}, "items": {}, "mobs": {}, "dimensions": {}, "patches": []}
 
 
 def assign_slots(features, ledger, pool):
@@ -124,6 +128,8 @@ def assign_slots(features, ledger, pool):
             next_item += 1
         for name, mob in feature["manifest"].get("mobs", {}).items():
             _assign_mob(ledger, pool, f"{feature_id}/{name}", mob.get("category"))
+        for name, dimension in feature["manifest"].get("dimensions", {}).items():
+            _assign_dimension(ledger, f"{feature_id}/{name}", dimension)
     return ledger
 
 
@@ -145,8 +151,25 @@ def _assign_mob(ledger, pool, key, category):
     table[key] = {"slot": "e%04d" % (offset + index + 1), "category": category, "index": index}
 
 
+def _assign_dimension(ledger, key, dimension):
+    """Remembers what its land is made from as well, because land already made wouldn't match land made from anything else."""
+    table = ledger.setdefault("dimensions", {})
+    terrain = hashlib.sha256(json.dumps([dimension.get("type"), dimension.get("generator")], sort_keys=True).encode()).hexdigest()[:16]
+    existing = table.get(key)
+    if existing:
+        if existing["terrain"] != terrain:
+            raise BundleError(f"{key}: a dimension's type and generator can't change once it's out, because land that's already been made "
+                              "wouldn't match what's made next to it. Add a new dimension instead.")
+        return
+    table[key] = {"slot": "d%04d" % (len(table) + 1), "terrain": terrain}
+
+
 def _sound_id(feature_id, name):
     return hashlib.sha256(f"{feature_id}/{name}".encode()).hexdigest()[:16]
+
+
+def _biome_id(feature_id, name):
+    return "b" + hashlib.sha256(f"{feature_id}/{name}".encode()).hexdigest()[:10]
 
 
 def _resolver(feature_id, ledger):
@@ -155,7 +178,9 @@ def _resolver(feature_id, ledger):
         key = name if "/" in name else f"{feature_id}/{name}"
         if kind == "sound":
             return f"gm:{_sound_id(*key.split('/'))}"
-        table = {"block": ledger["blocks"], "item": ledger["items"], "mob": ledger.get("mobs", {})}[kind]
+        if kind == "biome":
+            return f"gm:{_biome_id(*key.split('/'))}"
+        table = {"block": ledger["blocks"], "item": ledger["items"], "mob": ledger.get("mobs", {}), "dimension": ledger.get("dimensions", {})}[kind]
         if key not in table:
             raise BundleError(f"{feature_id}: refers to unknown {kind} {key!r}")
         return f"gm:{table[key]['slot']}"
@@ -351,6 +376,8 @@ def _render_mob(feature, feature_id, name, mob, ledger, pack_lang, datapack, con
         })
     fields = ("behaviour", "health", "damage", "speed", "width", "height", "followRange", "armor", "spawn", "display")
     definition = {"model": model, **{field: mob[field] for field in fields if field in mob}}
+    if "spawn" in definition:
+        definition["spawn"] = _resolve_tokens(definition["spawn"], feature_id, ledger)
     if mob.get("mind"):
         definition["mind"] = _render_mind(mob["mind"], feature_id, ledger)
     if mob.get("sounds"):
@@ -385,9 +412,27 @@ def _render_biome(feature_id, name, biome, vanilla_biome, datapack):
         if merged.setdefault("attributes", {}).get(key) != value:
             merged["attributes"][key] = value
             climate_changed = climate_changed or not key.startswith(LOOKS_ONLY_ATTRIBUTES)
-    hashed = "b" + hashlib.sha256(f"{feature_id}/{name}".encode()).hexdigest()[:10]
+    hashed = _biome_id(feature_id, name)
     _write_json(datapack / f"data/gm/worldgen/biome/{hashed}.json", merged)
     return {"id": f"biome_{hashed}", "from": base, "to": f"gm:{hashed}", "proportion": biome.get("proportion", 0.2), "sibling": not climate_changed}
+
+
+def _render_dimension(feature_id, name, dimension, ledger, vanilla_type, datapack):
+    """A dimension as the server opens it. Its own type starts from a vanilla one, so builders only state what's different, and it
+    goes in the data pack, as that's the one part of a dimension the game has to know about when it starts."""
+    slot = ledger["dimensions"][f"{feature_id}/{name}"]["slot"]
+    kind = dimension.get("type", DEFAULT_DIMENSION_TYPE)
+    if isinstance(kind, dict):
+        changes = {key: value for key, value in kind.items() if key != "base"}
+        unknown = set(changes) - DIMENSION_TYPE_FIELDS
+        if unknown:
+            raise BundleError(f"{feature_id}/{name}: a dimension's type has nothing called {', '.join(sorted(unknown))}. It can set {', '.join(sorted(DIMENSION_TYPE_FIELDS))}.")
+        merged = json.loads(json.dumps(vanilla_type(kind["base"])))
+        merged.setdefault("attributes", {}).update(changes.pop("attributes", {}))
+        merged.update(changes)
+        _write_json(datapack / f"data/gm/dimension_type/{slot}.json", merged)
+        kind = f"gm:{slot}"
+    return slot, {"type": kind, "generator": _resolve_tokens(dimension["generator"], feature_id, ledger), "spawn": dimension.get("spawn", {"x": 0, "z": 0})}
 
 
 def _render_ruin(feature_id, name, ruin, ledger, datapack):
@@ -544,7 +589,7 @@ def _write_book(features, ledger, entries, machines, names, nodes, pack):
         _write_json(pack / path, contents)
 
 
-def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared", nodes=None):
+def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared", nodes=None, vanilla_type=None):
     """Writes pack/, datapack/ and config/ under out. Returns nothing: out is the release's content."""
     pack = out / "pack"
     datapack = out / "datapack"
@@ -558,6 +603,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
     surface_patches = []
     biome_patches = []
     ruin_patches = []
+    dimensions = {}
     item_defaults = {}
     bindings = {}
     recipe_modes = {}
@@ -678,9 +724,16 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
             names[f"gm:{slot}"] = mob["display"]
             mobs[f"gm:{slot}"] = definition
         for plant in manifest.get("plants", []):
-            surface_patches.append({**plant, "block": _resolve_tokens(f"$block:{plant['block']}", feature_id, ledger)})
+            surface_patches.append({**_resolve_tokens(plant, feature_id, ledger), "block": _resolve_tokens(f"$block:{plant['block']}", feature_id, ledger)})
         for name, biome in manifest.get("biomes", {}).items():
-            biome_patches.append(_render_biome(feature_id, name, biome, vanilla_biome, datapack))
+            patch = _render_biome(feature_id, name, biome, vanilla_biome, datapack)
+            # One made for a dimension of its own has no business turning up across the overworld.
+            if biome.get("spread", True):
+                biome_patches.append(patch)
+        for name, dimension in manifest.get("dimensions", {}).items():
+            slot, rendered = _render_dimension(feature_id, name, dimension, ledger, vanilla_type, datapack)
+            bindings[f"dimension:{feature_id}/{name}"] = slot
+            dimensions[f"gm:{slot}"] = rendered
         for name, ruin in manifest.get("ruins", {}).items():
             ruin_patches.append(_render_ruin(feature_id, name, ruin, ledger, datapack))
         _copy_sounds(feature, feature_id, pack, sounds_json)
@@ -697,8 +750,9 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
                 "veinSize": ore["veinSize"],
                 "minY": ore["minY"],
                 "maxY": ore["maxY"],
-                "biomes": ore.get("biomes", []),
+                "biomes": _resolve_tokens(ore.get("biomes", []), feature_id, ledger),
                 "touchingAir": bool(ore.get("touchingAir")),
+                **({"dimension": _resolve_tokens(ore["dimension"], feature_id, ledger)} if "dimension" in ore else {}),
             })
         lang_file = feature["dir"] / "assets" / "lang.json"
         if lang_file.exists():
@@ -726,6 +780,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
     _write_json(config / "surface_patches.json", surface_patches)
     _write_json(config / "biome_patches.json", biome_patches)
     _write_json(config / "ruin_patches.json", ruin_patches)
+    _write_json(config / "dimensions.json", dimensions)
     _write_json(config / "bindings.json", bindings)
     _write_json(config / "item_defaults.json", item_defaults)
     _write_json(config / "mobs.json", mobs)

@@ -7,7 +7,7 @@ import re
 from orchestrator import others, progression as graph
 
 STAGE_ORDER = {stage: index for index, stage in enumerate(graph.STAGES)}
-REFERENCE = re.compile(r"\$(?:block|item|mob):(?:(\w+)/)?(\w+)")
+REFERENCE = re.compile(r"\$(?:block|item|mob|dimension|biome):(?:(\w+)/)?(\w+)")
 INDEX_DESCRIPTION = 200  # Enough to tell what something is, and the rest comes from its entry.
 ENTRY_LIMIT = 12000
 PLANS = re.compile(r"\b(later|future|upcoming|eventually|not yet|next stage|coming)\b", re.I)
@@ -91,6 +91,8 @@ def _describe_feature(feature_id, manifest, reached):
         lines.append(f"- ruin {feature_id}/{name}")
     for name in manifest.get("biomes", {}):
         lines.append(f"- biome {feature_id}/{name}")
+    for name, dimension in manifest.get("dimensions", {}).items():
+        lines.append(f"- $dimension:{feature_id}/{name}: \"{dimension.get('display')}\", a dimension of its own")
     for name, recipe in manifest.get("recipes", {}).items():
         lines.append(f"- recipe {name}: {_describe_recipe(recipe)}")
     for name, entry in manifest.get("knowledge", {}).items():
@@ -138,6 +140,8 @@ def _guide_feature(manifest, say, not_out):
 
     def places(thing):
         where = [f"Y {thing['minY']} to {thing['maxY']}"] if "minY" in thing else []
+        if thing.get("dimension"):
+            where.append(f"in {say(thing['dimension'])}")
         if thing.get("underground"):
             where.append("underground")
         if thing.get("biomes"):
@@ -169,6 +173,8 @@ def _guide_feature(manifest, say, not_out):
         lines.append(f"- site {name.replace('_', ' ')}: {side}, {places({**ruin, 'underground': False})}{chance}{holds}")
     for name in manifest.get("biomes", {}):
         lines.append(f"- biome {name.replace('_', ' ')}")
+    for name, dimension in manifest.get("dimensions", {}).items():
+        lines.append(f"- {dimension.get('display', name)}: a dimension of its own")
     for recipe in manifest.get("recipes", {}).values():
         lines.append(f"- recipe for {_guide_recipe(recipe, say)}")
     for name, entry in manifest.get("knowledge", {}).items():
@@ -184,7 +190,7 @@ def _readable(features_dir):
     manifests = {path.parent.name: json.loads(path.read_text(encoding="utf-8")) for path in sorted(features_dir.glob("*/feature.json"))}
     others.apply_additions(manifests)
     names = {(feature_id, name): thing["display"] for feature_id, manifest in manifests.items()
-             for table in ("blocks", "items", "mobs") for name, thing in manifest.get(table, {}).items() if thing.get("display")}
+             for table in ("blocks", "items", "mobs", "dimensions") for name, thing in manifest.get(table, {}).items() if thing.get("display")}
 
     def saying(feature_id):
         def say(value):
@@ -198,7 +204,7 @@ def _readable(features_dir):
 
 
 def _shown_names(manifest):
-    shown = [thing["display"] for table in ("blocks", "items", "mobs") for thing in manifest.get(table, {}).values() if thing.get("display")]
+    shown = [thing["display"] for table in ("blocks", "items", "mobs", "dimensions") for thing in manifest.get(table, {}).values() if thing.get("display")]
     return shown + [name.replace("_", " ") for table in ("biomes", "ruins") for name in manifest.get(table, {})]
 
 

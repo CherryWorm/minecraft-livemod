@@ -23,7 +23,7 @@ MIXIN_SOURCE_REFUSALS[re.compile(r"require\s*=\s*0\b")] = "lets an injection fin
 RESERVE = 0.2
 RECIPE_MODES = {"open", "known", "guessable"}
 ROUTE_TYPES = {"obtain", "examine", "kill", "read", "fragments"}
-LEDGER_TABLES = ("blocks", "items", "mobs")
+LEDGER_TABLES = ("blocks", "items", "mobs", "dimensions")
 OLD_LOOT_FIELDS = {"functions", "function", "conditions"}
 MACHINE_RECIPE_TYPES = {"gm:machine"}
 # Starting values, to be tuned once real players' computers have shown what they can draw.
@@ -31,6 +31,10 @@ MAX_BONES_ROAMING = 16
 MAX_BONES_ONE_OFF = 48
 MAX_BONES_BLOCK = 16
 MAX_MODEL_CUBES = 3000
+# Each one open costs the server a little all the time, whether or not anyone's in it.
+MOST_DIMENSIONS = 8
+DIMENSION_GENERATORS = {"minecraft:noise", "minecraft:flat"}
+VANILLA_DIMENSION_TYPES = {"minecraft:overworld", "minecraft:overworld_caves", "minecraft:the_nether", "minecraft:the_end"}
 MIND_ACTIONS = {"follow", "flee", "stay", "wander", "lead", "give", "teach", "attack"}
 MIND_VOICES = {"words", "cries", "silent"}
 MAX_CHARACTER = 800
@@ -344,6 +348,32 @@ def check_ruins(features):
                     _fail(f"{label} wants high ground and is underground. Only something on the surface can stand above what's around it.")
                 if not isinstance(ruin["highGround"], int) or isinstance(ruin["highGround"], bool) or ruin["highGround"] < 1:
                     _fail(f"{label} has highGround {ruin['highGround']!r}. It's a whole number of blocks, at least 1.")
+
+
+def check_dimensions(features):
+    biomes = {f"{feature_id}/{name}" for feature_id, feature in features.items() for name in feature["manifest"].get("biomes", {})}
+    total = 0
+    for feature_id, feature in features.items():
+        for name, dimension in feature["manifest"].get("dimensions", {}).items():
+            total += 1
+            key = f"{feature_id}/{name}"
+            if not dimension.get("display"):
+                _fail(f"{key}: a dimension needs a \"display\", which is what players call it.")
+            generator = dimension.get("generator")
+            if not isinstance(generator, dict) or generator.get("type") not in DIMENSION_GENERATORS:
+                _fail(f"{key}: a dimension's \"generator\" has a \"type\" of {' or '.join(sorted(DIMENSION_GENERATORS))}, not {generator.get('type') if isinstance(generator, dict) else generator!r}.")
+            for biome in re.findall(r"\$biome:([a-z0-9_/]+)", json.dumps(generator)):
+                if (biome if "/" in biome else f"{feature_id}/{biome}") not in biomes:
+                    _fail(f"{key}: its generator uses the biome {biome!r}, which no feature declares.")
+            kind = dimension.get("type", "minecraft:overworld")
+            base = kind.get("base") if isinstance(kind, dict) else kind
+            if base not in VANILLA_DIMENSION_TYPES:
+                _fail(f"{key}: a dimension's \"type\" is one of {', '.join(sorted(VANILLA_DIMENSION_TYPES))}, or changes to one of them with {{\"base\": ...}}, not {kind!r}.")
+            spawn = dimension.get("spawn", {"x": 0, "z": 0})
+            if not (isinstance(spawn, dict) and isinstance(spawn.get("x"), int) and isinstance(spawn.get("z"), int)):
+                _fail(f"{key}: \"spawn\" is where players arrive, like {{\"x\": 0, \"z\": 0}}, not {spawn!r}.")
+    if total > MOST_DIMENSIONS:
+        _fail(f"{total} dimensions would be open, and the limit is {MOST_DIMENSIONS}, because each one costs the server something all the time. Use a biome or an area of one that exists.")
 
 
 def check_block_drops(features):
@@ -758,6 +788,7 @@ def run(features, old_ledger, new_ledger, pool, content):
     check_loot_format(features)
     check_no_tags_in_patches(features)
     check_ruins(features)
+    check_dimensions(features)
     check_block_drops(features)
     check_block_kinds(features)
     check_items(features)

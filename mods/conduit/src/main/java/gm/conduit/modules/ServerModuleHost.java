@@ -14,6 +14,7 @@ import gm.conduit.api.MenuBehavior;
 import gm.conduit.api.PanelBehavior;
 import gm.conduit.panels.PanelDefinition;
 import gm.conduit.panels.PanelMenu;
+import gm.conduit.dimensions.Dimensions;
 import gm.conduit.knowledge.Codex;
 import gm.conduit.knowledge.Knowledge;
 import gm.conduit.provenance.Provenance;
@@ -480,6 +481,30 @@ public final class ServerModuleHost {
 		@Override
 		public void teach(ServerPlayer player, String knowledge) {
 			Knowledge.instance().learn(player, this.moduleId + "/" + knowledge);
+		}
+
+		@Override
+		public ServerLevel dimension(String name) {
+			return Dimensions.level(ServerModuleHost.this.server, dimensionSlot(name));
+		}
+
+		@Override
+		public void enterDimension(ServerPlayer player, String name) {
+			Dimensions.enter(player, dimensionSlot(name));
+		}
+
+		@Override
+		public void leaveDimension(ServerPlayer player) {
+			Dimensions.leave(player);
+		}
+
+		private String dimensionSlot(String name) {
+			String key = "dimension:" + (name.contains("/") ? name : this.moduleId + "/" + name);
+			String slot = ServerModuleHost.this.slotsByName.get(key);
+			if (slot == null) {
+				throw new IllegalArgumentException("No dimension is called " + name + ". It has to be in \"dimensions\" in feature.json");
+			}
+			return slot;
 		}
 	}
 }

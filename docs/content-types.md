@@ -345,6 +345,48 @@ Needs a restart, which players are held through, so these go out in batches.
 
 It starts as an exact copy of `base`, and replaces `proportion` of it. If you change only `effects` and the `minecraft:visual/` or `minecraft:audio/` attributes, it's a sibling and spreads into land that already exists, because it's safe there. If you change `temperature`, `downfall`, `has_precipitation`, `features`, `carvers` or any other attribute, such as `minecraft:gameplay/natural_mob_spawns`, it only appears in land generated from then on, because changing those in existing land could freeze water or break a mob farm.
 
+A biome made for a dimension of your own says `"spread": false`, and then it never turns up in the overworld.
+
+## Dimensions
+
+A whole other place for players to visit, with land of its own. It opens with no restart, unless it brings a new biome or its own type, which need one like any biome does. At most 8 can be open across the world, so give one a real reason to exist. Players get there through something a module does, such as an item or a block in a doorway.
+
+```json
+"dimensions": {
+  "hollow": {
+    "display": "The Hollow",
+    "type": {"base": "minecraft:the_nether", "ambient_light": 0.3, "attributes": {"minecraft:visual/fog_color": "#203040"}},
+    "generator": {"type": "minecraft:noise", "settings": "minecraft:caves", "biome_source": {"type": "minecraft:fixed", "biome": "$biome:hollow_floor"}},
+    "spawn": {"x": 0, "z": 0}
+  }
+}
+```
+
+`display` is what players call it. `spawn` is where people arrive, or the nearest safe ground to it, and it's 0, 0 if you leave it out.
+
+`type` is what kind of place it is: `minecraft:overworld`, the default, `minecraft:overworld_caves`, `minecraft:the_nether` or `minecraft:the_end`. To change anything about one, name it as `base` and set what's different: `ambient_light`, `attributes`, `has_ceiling`, `has_skylight`, `has_fixed_time`, `height`, `logical_height`, `min_y`, `coordinate_scale`, `cardinal_light`, `skybox`, `default_clock`, `timelines`, `infiniburn`, `has_ender_dragon_fight` and the `monster_spawn_` limits. `min_y` and `height` must both divide by 16. Its `attributes` are added to the base's.
+
+`generator` is the game's own format, of type `minecraft:noise` or `minecraft:flat`:
+
+- Land like vanilla's: `{"type": "minecraft:noise", "settings": "minecraft:overworld", "biome_source": {"type": "minecraft:multi_noise", "preset": "minecraft:overworld"}}`. `settings` can also be `minecraft:nether`, `minecraft:end`, `minecraft:caves`, `minecraft:floating_islands`, `minecraft:amplified` or `minecraft:large_biomes`.
+- One biome throughout: `"biome_source": {"type": "minecraft:fixed", "biome": "$biome:hollow_floor"}`, or `"minecraft:plains"` for a vanilla one. The game's `minecraft:checkerboard` and `minecraft:multi_noise` with your own `biomes` list work too.
+- Flat: `{"type": "minecraft:flat", "settings": {"biome": "minecraft:plains", "structure_overrides": [], "layers": [{"block": "minecraft:stone", "height": 60}, {"block": "minecraft:grass_block", "height": 1}]}}`. Layers count up from the bottom of the world.
+- Nothing at all: the same with `"layers": []`, and the biome `minecraft:the_void`. Anyone arriving gets a small stone platform to stand on, and everything else there is up to you.
+
+**The land can't change once it's out.** Land already made wouldn't match what's made next to it, so changing `type` or `generator` later is refused, and you'd add a new dimension instead. `display` and `spawn` can change. A dimension can't be removed either, only marked `"retired": true`, like a block.
+
+**What's in it.** Ores, plants and ruins go in by adding `"dimension": "$dimension:hollow"`, and a mob's `spawn` takes the same. Those without one stay in the overworld, and those with one are only there. Mobs that belong there also have to spawn on what's there, so check `minY` and `maxY` against the land, and remember a type's `min_y` changes what they mean.
+
+**Going there.** From a module:
+
+```java
+context.enterDimension(player, "hollow");  // To its spawn. It remembers where they came from.
+context.leaveDimension(player);            // Back there, or to where they'd respawn if that isn't known.
+ServerLevel level = context.dimension("hollow");  // To look at it or change it, or to send someone to a place of your own with player.teleportTo.
+```
+
+Anyone who dies there respawns as usual, which is normally back in the overworld, so a dangerous place needs a way back to it. If a release that added a dimension is rolled back, the world and the land there are kept, it just doesn't open until it's released again, and anyone who was in it is brought back when they next join.
+
 ## Sounds
 
 List names in `"sounds": ["chime"]`, with `assets/sounds/chime.ogg` from `assetkit/sounds.py`. Refer to one as `$sound:chime` in data.
@@ -399,4 +441,4 @@ A machine, an item or a mob can have a screen of its own, with drawn art, item s
 
 ## What the engine doesn't do yet
 
-Structures larger than a chunk, and new dimensions. A panel can only draw vanilla's mobs moving, so one of this world's is a picture there. A screen effect covers the whole screen, so there's no drawing a shader on one thing in the world. Armor can only look like vanilla's when worn, and custom tools can't take enchantments at an enchanting table. Build the closest thing that works, and say what you wanted in `host_requests`.
+Structures larger than a chunk. A panel can only draw vanilla's mobs moving, so one of this world's is a picture there. A screen effect covers the whole screen, so there's no drawing a shader on one thing in the world. Armor can only look like vanilla's when worn, and custom tools can't take enchantments at an enchanting table. Build the closest thing that works, and say what you wanted in `host_requests`.
