@@ -279,6 +279,8 @@ def main():
             rcon(*command)
         rcon("tp", PLAYER, x, y, z, 0, 0)
         time.sleep(1)
+        # Creative's own inventory has other things where the hotbar is, so a tooltip there wouldn't be one of ours.
+        rcon("gamemode", "survival", PLAYER)
         check_english(client)
         report("the client changes language", set_language(client, "de_de") == "de_de")
         check_german(client)
