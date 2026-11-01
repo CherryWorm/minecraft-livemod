@@ -20,22 +20,31 @@ subprojects {
 		implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 	}
 
-	processResources {
-		def version = project.version
-		inputs.property "version", version
+	// Only for our own mods. Expanding a file runs what's in it as Groovy, so anything that came from a feature would run here in the build.
+	if (!project.name.startsWith('feature-')) {
+		processResources {
+			def version = project.version
+			inputs.property "version", version
 
-		filesMatching("fabric.mod.json") {
-			expand "version": version
+			filesMatching("fabric.mod.json") {
+				expand "version": version
+			}
 		}
 	}
 
 	// Feature modules are loaded at runtime by the host, so they only compile against its API.
 	if (project.name.startsWith('feature-')) {
+		def onServer = !project.name.endsWith('-client')
 		dependencies {
-			compileOnly project(project.name.endsWith('-server') ? ':conduit' : ':companion')
-			if (project.name.endsWith('-server')) {
+			compileOnly project(onServer ? ':conduit' : ':companion')
+			if (onServer) {
 				compileOnly "eu.pb4:polymer-bundled:${project.polymer_version}"
 				compileOnly "maven.modrinth:blockbench-import-library:${project.bil_version}"
+			}
+			// A feature's mixins are in the game's own class loader, so its server module can use what they share.
+			def itsMixins = project.name.replaceAll(/-server$/, '-mixins')
+			if (project.name.endsWith('-server') && findProject(":${itsMixins}") != null) {
+				compileOnly project(":${itsMixins}")
 			}
 		}
 	}

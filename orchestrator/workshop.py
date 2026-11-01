@@ -92,7 +92,8 @@ SUBAGENTS = {
         description="Writes a feature's Java modules. Give it the behaviour needed and the names in feature.json.",
         prompt=("You write Java modules for a Minecraft 26.3 mod. Read docs/feature-format.md and /reference for the API. Many "
                 "Minecraft APIs were renamed recently, so check real signatures with the java_api tool. Keep tick work small, and "
-                "use no files, network or threads. Keep state where the docs say, so it survives the module being swapped."),
+                "use no files, network or threads. Keep state where the docs say, so it survives the module being swapped. "
+                "Write a mixin only if the builder asks for one, following the Mixins section of the docs."),
         tools=["Read", "Write", "Edit", "Glob", "Grep", "mcp__broker__java_api", research.TOOL_NAME],
         model=llm.WORKER["model"],
         effort=llm.WORKER["effort"],
@@ -333,6 +334,8 @@ def _verdict(answer, passed):
     if answer.get("result") not in passed:
         return f"Failed at {answer.get('gate')}: {answer.get('reason')}"
     notes = answer.get("advice") or []
+    notes = [*notes, *(f"{feature_id}'s mixins are left out of every release until they change, because {why}."
+                       for feature_id, why in (answer.get("withheld_mixins") or {}).items())]
     return "All checks passed." + ("\n\nWorth another look, though these won't stop it:\n- " + "\n- ".join(notes) if notes else "")
 
 
@@ -375,10 +378,11 @@ def _tools_for(feature_id, tree, node, ask=None):
         notes = "".join(f"\n- {note}" for note in result["notes"])
         return _text(f"Read {result['path']} to see it.{notes}")
 
-    @tool("java_api", "Shows the real public methods and fields of a Minecraft or Fabric class. Pass the full class name.",
-          {"class_name": str})
+    @tool("java_api", "Shows the real public methods and fields of a Minecraft or Fabric class. Pass the full class name. For writing a mixin, private: true "
+                      "adds what's private, and code: \"methodName\" shows one method's bytecode, which is what an injection point has to match.",
+          {"type": "object", "properties": {"class_name": {"type": "string"}, "private": {"type": "boolean"}, "code": {"type": "string"}}, "required": ["class_name"]})
     async def java_api(args):
-        answer = await ask("javap", class_name=args["class_name"])
+        answer = await ask("javap", class_name=args["class_name"], private=args.get("private", False), code=args.get("code", ""))
         return _text(answer.get("output") or answer.get("reason", "Not found."))
 
     made = [_template_tool(name, function, folder) for name, function in templates.TEMPLATES.items()]

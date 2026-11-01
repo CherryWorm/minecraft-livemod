@@ -19,6 +19,31 @@ def finding(verdict=bugs.CONFIRMED, findings="The kiln burns coal twice.", **ext
     return llm.Result("", {"verdict": verdict, "findings": findings, **extra}, "", 0.0, False, "", 0.0)
 
 
+class CrashedMixins(unittest.IsolatedAsyncioTestCase):
+    async def test_one_is_reported_once_and_a_new_crash_again(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = pathlib.Path(folder) / "crashed_mixins.json"
+            agent = mock.Mock()
+            agent.state = {}
+            desk = bugs.BugDesk(agent)
+            desk.report = mock.AsyncMock()
+            with mock.patch.object(bugs, "CRASHED_MIXINS", path):
+                await desk.report_crashed_mixins()
+                desk.report.assert_not_called()
+                entry = {"at": "2026-11-01T18:00:00Z", "reason": "the server crashed", "crash": "at handler$zzz$mixin_boats$go"}
+                path.write_text(json.dumps({"boats": entry}), encoding="utf-8")
+                await desk.report_crashed_mixins()
+                await desk.report_crashed_mixins()
+                desk.report.assert_awaited_once()
+                who, text = desk.report.await_args.args
+                self.assertEqual(who, bugs.CRASH_REPORTER)
+                self.assertIn("boats", text)
+                self.assertIn("mixin_boats", text)
+                path.write_text(json.dumps({"boats": {**entry, "at": "2026-11-01T19:00:00Z"}}), encoding="utf-8")
+                await desk.report_crashed_mixins()
+                self.assertEqual(desk.report.await_count, 2)
+
+
 class Base(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory()

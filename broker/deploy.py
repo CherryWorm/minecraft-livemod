@@ -1,11 +1,19 @@
 """Puts a release on the live server, watches it, and rolls back on its own if it goes wrong."""
+import hashlib
 import json
 import shutil
 import time
 
 from broker import runtime, sign
-from broker.gates import shadow
+from broker.gates import mixins, shadow
 
+CRASHED_MIXINS = runtime.BROKER / "crashed_mixins.json"
+CRASHED_MIXINS_FOR_AGENT = runtime.RUNTIME / "agent-workspace" / "reports" / "crashed_mixins.json"
+MIXIN_WATCH = runtime.BROKER / "mixin_watch.json"
+MOST_CRASH_CHARACTERS = 4000
+# A crash with no sign of any mixin may well be nothing to do with them, but one that keeps happening has to stop somehow.
+CRASHES_BEFORE_ALL_MIXINS_GO = 3
+CRASH_WINDOW_SECONDS = 600
 HEALTH_SECONDS = {"T1": 10, "T2": 15, "T3": 40}
 SAFE_WAIT_SECONDS = 60
 BACKUPS_KEPT = 10
@@ -161,4 +169,107 @@ def rollback(state, reason):
         except (sign.SigningError, OSError) as error:
             print(f"couldn't sign client modules for the rollback, so companions may refuse them: {error}", flush=True)
         runtime.apply_content("prod", folder / "content")
+    else:
+        # With no earlier release to go back to, the most this can do is take out what can stop a server from starting.
+        for jar in (runtime.RELEASES / "current").glob(f"{mixins.JAR_PREFIX}*.jar"):
+            jar.unlink()
     _restart_prod()
+
+
+def crashed_mixins():
+    """The mixins that have brought the live server down. These exact jars don't come back, and a changed one is a new try."""
+    return json.loads(CRASHED_MIXINS.read_text(encoding="utf-8")) if CRASHED_MIXINS.exists() else {}
+
+
+def _new_crash_reports(watch):
+    """Crash reports not looked at yet, as (name, text). Reads nothing on the first look, because old ones were dealt with long ago."""
+    reports = sorted((runtime.RUNTIME / "prod" / "crash-reports").glob("crash-*.txt"))
+    seen = watch.get("seen")
+    if seen is None:
+        watch["seen"] = [path.name for path in reports]
+        return []
+    return [(path.name, path.read_text(encoding="utf-8", errors="replace")) for path in reports if path.name not in seen]
+
+
+def _blamed(installed, text):
+    """Which of these mixins a crash report points at, going by where the code was running. An exception's message could say anything."""
+    frames = [line for line in text.splitlines() if line.lstrip().startswith("at ")]
+    return sorted(feature_id for feature_id in installed if any(mark in frame for mark in mixins.crash_marks(feature_id) for frame in frames))
+
+
+def _restarts_since(watch):
+    """How many times Docker has started the live server again by itself since the last look. A server can stop with no crash report, by
+    failing before there's any game to write one, or by being told to. Restarting it by hand starts the count again from nothing."""
+    state = runtime.inspect_state("prod")
+    now = state["RestartCount"] if state else watch.get("restarts", 0)
+    since = max(0, now - watch.get("restarts", 0))
+    watch["restarts"] = now
+    return since
+
+
+def _what_happened(text):
+    """The part of a crash report that says what went wrong and where. What comes after it lists who's on and much else, and this goes to the agent."""
+    return text.split("A detailed walkthrough", 1)[0][:MOST_CRASH_CHARACTERS]
+
+
+def remove_mixins(state, feature_ids, reason, crash=""):
+    """Takes mixins out of the release that's live and goes back through rollback, which puts it back without them. Only the mixin
+    goes, because nothing else about what players have is at fault: its feature's blocks, items and modules stay."""
+    current = runtime.HISTORY / state["current"]
+    crashed = crashed_mixins()
+    for feature_id in feature_ids:
+        jar = current / "jars" / mixins.jar_name(feature_id)
+        if jar.exists():
+            crashed[feature_id] = {"sha256": hashlib.sha256(jar.read_bytes()).hexdigest(), "reason": reason[:400], "at": runtime.utc_now(), "crash": crash}
+            jar.unlink()
+    # Two copies: the broker only trusts its own, and the agent is told by the other, which is a bug to fix like any other.
+    for path in (CRASHED_MIXINS, CRASHED_MIXINS_FOR_AGENT):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(crashed, indent=1) + "\n", encoding="utf-8")
+    runtime.record_timeline({"release": state["current"], "stage": "mixin_removed", "features": feature_ids, "reason": reason[:400]})
+    rollback(state, reason)
+
+
+def check_for_mixin_crashes():
+    """A release's health check only lasts a moment, and a mixin can be fine until someone first sits in a boat. Its code is part
+    of the game's by then, so nothing can catch it the way the module host catches a module, and the server would go down again
+    each time, perhaps every time it starts. So this keeps watching crash reports for as long as there are mixins on the server.
+    Returns the features whose mixins it took out."""
+    first_look = not MIXIN_WATCH.exists()
+    watch = json.loads(MIXIN_WATCH.read_text(encoding="utf-8")) if not first_look else {}
+    new = _new_crash_reports(watch)
+    counted = watch.get("restarts")
+    restarts = _restarts_since(watch)
+    if first_look:
+        restarts = 0
+    removed = []
+    if new or restarts:
+        # A release might be under way, and it deals with a crash of its own. Then it's clear which release this crash belongs to.
+        with runtime.world_lock():
+            state = runtime.load_state()
+            installed = sorted(filter(None, map(mixins.feature_of, (runtime.HISTORY / str(state.get("current")) / "jars").glob("*.jar"))))
+            blamed = sorted({feature_id for _, text in new for feature_id in _blamed(installed, text)})
+            reason = f"the server crashed, and {new[-1][0] if new else 'its log'} points to the mixins of {', '.join(blamed)}"
+            now = time.time()
+            recent = [at for at in watch.get("recent", []) if now - at < CRASH_WINDOW_SECONDS]
+            if installed and not blamed:
+                # Most crashes are a report and a restart, which is one crash.
+                recent.extend(now for _ in range(max(len(new), restarts)))
+                if len(recent) >= CRASHES_BEFORE_ALL_MIXINS_GO:
+                    blamed = installed
+                    reason = f"the server has stopped {len(recent)} times in {CRASH_WINDOW_SECONDS // 60} minutes with mixins on it, though no report points to one"
+            watch["seen"] = [*watch["seen"], *(name for name, _ in new)]
+            watch["recent"] = [] if blamed else recent
+            # Written first, so that if this is what brings the broker down, it isn't done all over again.
+            _save_watch(watch)
+            if blamed:
+                remove_mixins(state, blamed, reason, _what_happened(new[-1][1]) if new else "")
+                removed = blamed
+    elif first_look or watch["restarts"] != counted:
+        _save_watch(watch)
+    return removed
+
+
+def _save_watch(watch):
+    MIXIN_WATCH.parent.mkdir(parents=True, exist_ok=True)
+    MIXIN_WATCH.write_text(json.dumps(watch) + "\n", encoding="utf-8")

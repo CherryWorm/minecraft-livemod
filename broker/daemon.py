@@ -20,7 +20,7 @@ import time
 
 from PIL import Image, ImageStat
 
-from broker import far, reference_textures, runtime
+from broker import deploy, far, reference_textures, runtime
 
 WORKSPACE = runtime.RUNTIME / "agent-workspace"
 REQUESTS = WORKSPACE / "requests"
@@ -47,6 +47,8 @@ NEW_LANE_GB = int(runtime.ENV.get("SHADOW_MEMORY", "6G").removesuffix("G")) + 1
 KEEP_FREE_GB = 4
 SETTLING_SECONDS = 60  # A job has reached its full size by about now. Until then what it's going to use isn't in the system's figures yet.
 POLL_SECONDS = 0.25
+MIXIN_WATCH_SECONDS = 5
+MOST_JAVAP_CHARACTERS = 12000
 # Written by scripts/update-engine.sh. Nothing new starts while it's here, so what's running can finish before the broker stops.
 DRAINING = runtime.BROKER / "draining"
 MOST_DRAINING_SECONDS = 1500  # Longer than any job can run, so that a script that died can't leave the broker idle for good.
@@ -107,17 +109,34 @@ def promote(commit, release_id, *flags, lane=""):
     return report
 
 
-def javap(class_name):
+def javap(class_name, private=False, code=""):
+    """Public members by default. A mixin needs to see the rest, and code shows what's inside one method, which is what it patches."""
     if not all(part.replace("$", "").isidentifier() for part in class_name.split(".")):
         return {"reason": "That isn't a class name."}
+    if code and not code.replace("$", "").replace("<", "").replace(">", "").isidentifier():
+        return {"reason": "That isn't a method name."}
+    flags = "-p -c" if code else "-p" if private else "-public"
     result = runtime.run(
         ["./scripts/stack.sh", "run", "--rm", "-T", "builder", "bash", "-c",
          f"CP=$(find /cache/gradle/caches/modules-2/files-2.1/net.fabricmc.fabric-api -name '*.jar' | tr '\\n' ':'); "
-         f"javap -public -cp \"{CACHE_JAR}:$CP\" '{class_name}'"],
+         f"javap {flags} -cp \"{CACHE_JAR}:$CP\" '{class_name}'"],
         check=False, timeout=60,
     )
     lines = [line for line in result.stdout.splitlines() if "Container " not in line]
-    return {"output": "\n".join(lines)[:12000]}
+    return {"output": "\n".join(_one_method(lines, code, class_name) if code else lines)[:MOST_JAVAP_CHARACTERS]}
+
+
+def _one_method(lines, name, class_name):
+    """javap prints a class's methods one after another, each with a blank line after it, and everything inside it indented further.
+    A constructor is printed under the class's name, and a static initialiser as static {}."""
+    heading = {"<init>": f" {class_name}(", "<clinit>": "static {}"}.get(name, f" {name}(")
+    kept, inside = [], False
+    for line in lines:
+        if line.startswith("  ") and not line.startswith("    "):
+            inside = heading in line
+        if inside:
+            kept.append(line)
+    return kept or [f"There's no method called {name} in that class."]
 
 
 def type_into_proxy(command):
@@ -190,7 +209,7 @@ def handle(request, lane=""):
     if kind == "release":
         return promote(request["commit"], release_id, f"--why={request.get('why', '')}", lane=lane)
     if kind == "javap":
-        return javap(request["class_name"])
+        return javap(request["class_name"], bool(request.get("private")), str(request.get("code") or ""))
     if kind == "server_errors":
         return server_errors(request.get("contains", ""))
     return {"result": "blocked", "gate": "broker", "reason": f"Unknown request {kind}"}
@@ -394,6 +413,16 @@ def look_over_lanes():
             lanes_used.add(folder.name)
 
 
+def watch_mixins():
+    """Beside everything else, because a live server that keeps crashing shouldn't have to wait for someone's test run to end."""
+    while True:
+        time.sleep(MIXIN_WATCH_SECONDS)
+        try:
+            deploy.check_for_mixin_crashes()
+        except Exception as error:  # noqa: BLE001 - this has to keep watching whatever goes wrong with one look
+            print(f"mixin watch: {type(error).__name__}: {error}", flush=True)
+
+
 def main():
     for folder in (REQUESTS, RESPONSES, REPORTS_FOR_AGENT):
         folder.mkdir(parents=True, exist_ok=True)
@@ -405,6 +434,7 @@ def main():
     # If memory does run out, the system should stop this, and what it's running, rather than the live server. See started_again.
     pathlib.Path("/proc/self/oom_score_adj").write_text("500", encoding="utf-8")
     look_over_lanes()
+    threading.Thread(target=watch_mixins, daemon=True).start()
     print("broker waiting for requests", flush=True)
     retry_suspects()
     running = {}

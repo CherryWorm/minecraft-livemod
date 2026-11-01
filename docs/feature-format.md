@@ -18,6 +18,9 @@ Each feature is one folder, `mods/genesis/features/<id>/`, where `<id>` is lower
   client/                      optional Java module, on players' clients
     src/main/java/...
     src/main/resources/module.properties
+  mixins/                      optional patches to the game's own code, on the server, only when no hook will do. See Mixins
+    src/main/java/gm/feature/<id>/mixin/...
+    src/main/java/gm/feature/<id>/shared/...
 ```
 
 ## feature.json
@@ -292,7 +295,7 @@ Modules are checked in their compiled form. A module's jar may hold only its cla
 
 All of a module's classes must be in the package `gm.feature.<id>`, under the feature's own id. Module classes load through the game's own classes first, so a class with any other name might not be the one that runs.
 
-These are refused on both sides: files, network, processes, reflection, class loading, threads, native code, `sun.*`, `jdk.*` and `Unsafe`. `Class` only offers `getName`, `getSimpleName`, `getTypeName`, `isInstance`, `isAssignableFrom`, `cast`, `isEnum`, `isRecord`, `isArray` and `isInterface`. Lambdas, string concatenation, records and pattern switches all work, but nothing from `java.lang.invoke` may be called directly.
+These are refused on both sides: files, network, processes, reflection, class loading, threads, native code, `sun.*`, `jdk.*` and `Unsafe`, along with the libraries on the classpath that do those things for you, like `oshi`, Commons IO, `java.beans`, and Guava's `io` and `reflect`, and the packets that send a player's game to another address. `Class` only offers `getName`, `getSimpleName`, `getTypeName`, `isInstance`, `isAssignableFrom`, `cast`, `isEnum`, `isRecord`, `isArray` and `isInterface`. Lambdas, string concatenation, records and pattern switches all work, but nothing from `java.lang.invoke` may be called directly.
 
 If a feature really needs something refused, say so in your report and quote the name from the failure message exactly. The owner can approve an exception for that one feature.
 
@@ -474,6 +477,49 @@ These fire for everything, vanilla's and every feature's, so check what it was f
 A module that keeps throwing errors is switched off automatically.
 
 Beyond the rules in Module code, a server module can use most of Minecraft, but of the module host only `gm.conduit.api`. Keep state in the game's own storage.
+
+## Mixins
+
+A mixin patches the game's own code on the server, which is how to change something no hook reaches. It's the last resort. It only takes effect at a restart, for everyone, and its code becomes part of the game's, so if it throws an exception the whole server goes down, where a module would just be switched off. Look for a hook first: world events, behaviours, and everything a server module can call. If you need one that doesn't exist, ask for it in `host_requests`.
+
+Say why in `feature.json`, naming the hook you looked for:
+
+```json
+"mixins": {"why": "WorldEvents has nothing for a boat's movement, and ItemBehavior only hears about a boat being placed."}
+```
+
+Mixins go in `mixins/src/main/java/gm/feature/<id>/mixin/`, at most 4 for a feature and 12 features in a world. Nothing else goes in that package, and there are no resources, because what the game needs to know about them is written for you. Use the `java_api` tool with `private: true` to see a class's private members, and `code: "methodName"` for the bytecode an injection point has to match.
+
+```java
+package gm.feature.quick_boats.mixin;
+
+@Mixin(AbstractBoat.class)
+abstract class AbstractBoatMixin {
+    // A boat with no one in it keeps going for longer. Vanilla slows one on water by this much each tick.
+    @ModifyConstant(method = "floatBoat", constant = @Constant(floatValue = 0.9F))
+    private float quick_boats$glide(float friction) {
+        return QuickBoats.isQuick((AbstractBoat) (Object) this) ? 0.99F : friction;
+    }
+}
+```
+
+Put your own names on anything you add, as above with `quick_boats$`, because other mixins are patching the same classes. Each injection has to find what it's looking for, and if it doesn't, the release stops. The server makes every mixin apply as it starts, so a mistake shows up in testing rather than when someone first gets in a boat.
+
+**Things a mixin can't do on a server.** A player's own game works out what they themselves do, so a mixin here doesn't change how a boat they're steering handles, how they walk or how they fly. Only what the server works out itself changes: an empty boat, a mob's boat, damage, drops, mobs, blocks, and anything else that gets decided on the server. Test what you actually change.
+
+**Sharing with your server module.** A mixin can't see your module's classes, because modules come and go while the game runs. Classes in `gm.feature.<id>.shared`, in the same `mixins` folder, can be seen from both sides. That's where a mixin finds out what your module wants: the module can set a static field in `enable`, and it should clear that in `disable`. These classes live as long as the server does. A module can't have classes of its own in `mixin` or `shared`.
+
+**What it can use.** The rules in Module code apply, along with these:
+- The target must be in `net.minecraft`. These can't be patched, because they're what keeps the world and the release system safe: commands, the server's main class and console, crash reports, networking and login, the player and whitelist lists, chunks and how they're saved, anything in saved data's format, registries, and the classes that hold the game's blocks, items, mob types and block entity types. Nothing in `gm.conduit` or any other mod can be patched at all.
+- Annotations: `@Mixin`, `@Shadow`, `@Unique`, `@Final`, `@Mutable`, `@Accessor`, `@Invoker`, `@Inject`, `@At`, `@Slice`, `@Desc`, `@Redirect`, `@ModifyArg`, `@ModifyArgs`, `@ModifyVariable`, `@ModifyConstant`, `@Constant`, `@Coerce`, and from MixinExtras `@ModifyExpressionValue`, `@ModifyReturnValue`, `@ModifyReceiver`, `@WrapOperation`, `@WrapMethod`, `@WrapWithCondition`, `@Local`, `@Share`, `@Expression` and `@Definition`.
+- Refused: `@Overwrite`, which undoes other patches to that method, so use `@Inject` at `HEAD` with `cancellable = true` or `@WrapMethod` instead. Also `@Pseudo`, `@Group`, `@Debug`, `require = 0`, `constraints`, a mixin's `priority`, an injector's `order`, `locals` other than `CAPTURE_FAILHARD`, and `unsafe` on `@At`. `@At` only takes the game's own injection points, and its `target` is written out in full as `Lowner;name(arguments)result`. A selector can't be a pattern. Nothing in a mixin can target `<clinit>` or `createBlockStateDefinition`, or register anything: use slots.
+- `@Redirect`, `@ModifyArg` and the like can't name anything in the Module code list as their target, like a call to `java.nio.file.Files`, and they can't go round a call to a chunk. Every `@At` that matches a call or a field has to say which one, owner included.
+- Its code can use the game, `gm.conduit.api`, `java.lang`, `java.util`, `java.io`, `java.nio`, `java.math`, `java.time`, `java.text`, Fabric's API, Polymer, and these libraries: Guava's `collect` and `base`, Gson, fastutil, JOML, SLF4J, `com.mojang.serialization`, `com.mojang.math`, `com.mojang.datafixers.util`, and `io.netty.buffer`. It can't run commands, register anything, write straight to a chunk's sections, stop the server or touch crash reports. If it needs a block changed, use the level's own `setBlock`.
+- A feature's folders hold only source and assets. There can't be a `build.gradle` or anything else that changes how it's built, and no links.
+
+**When a mixin goes.** The world has to load without it, because it can go at any moment: by a rollback, by crashing, or by being removed. Testing tries exactly that, booting what the mixin's world saved on a server without it. So anything you add to what an entity or block saves has to be something a game without your mixin will just ignore, like an extra key, and it'll be lost if the mixin goes.
+
+**When a mixin crashes.** If the server goes down and its crash report points to your mixin, that mixin is taken out of the live release, and the rest of your feature stays. The same mixin won't go out again until it's changed. Handle anything that could fail, and keep what it does small, because it may run far more often than a tick.
 
 ## Client modules
 

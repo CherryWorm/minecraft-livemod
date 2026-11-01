@@ -13,6 +13,10 @@ from claude_agent_sdk import create_sdk_mcp_server, tool
 from orchestrator import llm, progression, voice, workshop
 
 STATE = pathlib.Path("/workspace/state")
+CRASHED_MIXINS = pathlib.Path("/workspace/reports/crashed_mixins.json")
+# Who a crashed mixin is reported by. It's no player's name, so there's nobody to tell, and what it would say to them just waits.
+CRASH_REPORTER = "the server"
+CRASH_CHECK_SECONDS = 30
 LOG = "bugs.jsonl"
 INVESTIGATING = "investigating"
 FIXING = "fixing"
@@ -90,6 +94,27 @@ class BugDesk:
         self._log(number, "reported", player=player, text=text)
         await self.agent.tell(player, LABEL + "§7Thanks. I'm looking into that now, ahead of everything else, and I'll tell you what I find.")
         self._start(number)
+
+    async def report_crashed_mixins(self):
+        """A mixin that brings the live server down is taken out by the broker, and then it's a bug like any other, though no player's going to report it."""
+        if not CRASHED_MIXINS.exists():
+            return
+        told = self.agent.state.setdefault("crashed_mixins_told", [])
+        for feature_id, entry in json.loads(CRASHED_MIXINS.read_text(encoding="utf-8")).items():
+            key = f"{feature_id} {entry['at']}"
+            if key not in told:
+                told.append(key)
+                self.agent.save()
+                await self.report(CRASH_REPORTER, f"The mixins of {feature_id} crashed the live server, so they've been taken out and that feature is running without them until they change. "
+                                                  f"Find what's wrong with them in its mixins folder, and whether it can fail like this anywhere else. {entry['reason']}. {entry.get('crash', '')}")
+
+    async def watch_for_crashed_mixins(self):
+        while True:
+            try:
+                await self.report_crashed_mixins()
+            except (OSError, ValueError, KeyError) as error:
+                print(f"couldn't read what crashed: {error}", flush=True)
+            await asyncio.sleep(CRASH_CHECK_SECONDS)
 
     def resume(self):
         """Whatever a restart interrupted. Its fix so far is still in its folder."""

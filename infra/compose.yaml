@@ -120,6 +120,8 @@ services:
     oom_score_adj: 500
     environment:
       SERVER_ROLE: shadow
+      # A release with mixins is tested with only what the live server has. See gates/shadow.py.
+      SHADOW_TEST_MODS: ${SHADOW_TEST_MODS:-true}
       MINECRAFT_EULA: ${MINECRAFT_EULA:-false}
       JAVA_MEMORY: ${SHADOW_MEMORY:-6G}
       WHITE_LIST: "false"

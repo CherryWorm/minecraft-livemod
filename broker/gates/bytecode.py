@@ -10,6 +10,7 @@ collected from every descriptor: calling a method that returns a File holds a Fi
 Exceptions are read from beside this file, in the trusted checkout. The agent's repository only supplies
 features (see broker/daemon.py), so it can't approve its own.
 """
+import collections
 import json
 import pathlib
 import re
@@ -55,8 +56,61 @@ SESSION = ("can reach the player's session token",
             "net/minecraft/client/multiplayer/ClientHandshakePacketListenerImpl",
             "net/minecraft/client/multiplayer/ProfileKeyPairManager", "net/minecraft/client/multiplayer/AccountProfileKeyPairManager",
             "com/mojang/authlib/", "com/mojang/realmsclient/"))
-SERVER_REFUSED = (FILES, NETWORK, PROCESSES, REFLECTION, CLASS_LOADING, INTERNALS, NATIVE, THREADS)
+# The patcher and the loader's insides. Asking for one more mixin config at runtime, or for the class bytes of anything, gets
+# around everything else on this list. A mixin can use the few parts of it that it's handed: see MIXIN_USABLE.
+PATCHER = ("reaches the code patcher or the mod loader's insides, which run before anything here can check them",
+           ("org/spongepowered/", "org/objectweb/", "com/llamalad7/", "net/fabricmc/loader/impl/"))
+# These do the refused things above on a caller's behalf, from plain strings, so nothing in a descriptor gives them away. The
+# game's own libraries are all on the server's classpath. oshi runs commands, and Expression calls any method by name.
+WRAPPERS = ("does files, processes or reflection for you, from plain text, so it counts as those",
+            ("oshi/", "org/apache/commons/io/", "org/apache/commons/lang3/reflect/", "org/apache/commons/lang3/ClassUtils",
+             "org/apache/commons/lang3/SerializationUtils", "com/google/common/io/", "com/google/common/reflect/",
+             "org/apache/logging/log4j/core/", "org/apache/logging/log4j/util/LoaderUtil", "io/netty/util/internal/",
+             "it/unimi/dsi/fastutil/io/", "java/beans/", "javax/management/", "java/lang/management/", "java/sql/", "javax/sql/",
+             "java/util/prefs/", "java/util/ResourceBundle", "java/io/ObjectInputStream", "java/awt/", "javax/swing/", "javax/imageio/",
+             "javax/xml/", "org/xml/", "org/w3c/"))
+# The player's own game fetches or connects to whatever these name, which shows their address to whoever's there.
+SENDS_AWAY = ("sends players' games to an address of its own choosing",
+              ("net/minecraft/network/protocol/common/ClientboundResourcePackPushPacket", "net/minecraft/network/protocol/common/ClientboundTransferPacket"))
+SERVER_REFUSED = (FILES, NETWORK, PROCESSES, REFLECTION, CLASS_LOADING, INTERNALS, NATIVE, THREADS, PATCHER, WRAPPERS, SENDS_AWAY)
 CLIENT_REFUSED = (*SERVER_REFUSED, SESSION)
+
+# What a mixin's own code is handed. Its annotations are checked apart from this, in gates/mixins.py. @At and @Constant
+# are here for their nested enums, which javac names as classes.
+MIXIN_USABLE = ("org/spongepowered/asm/mixin/injection/callback/", "org/spongepowered/asm/mixin/injection/invoke/arg/Args",
+                "org/spongepowered/asm/mixin/injection/At", "org/spongepowered/asm/mixin/injection/Constant",
+                "com/llamalad7/mixinextras/injector/wrapoperation/Operation", "com/llamalad7/mixinextras/sugar/ref/")
+# A mixin gets a list rather than the module's denylist, because it sits on the game's own loader with every library there is, and
+# a denylist can't know them all. The refusals below and the module's rules still apply inside these.
+MIXIN_LIBRARIES = ("java/lang/", "java/util/", "java/math/", "java/time/", "java/text/", "java/io/", "java/nio/", "javax/annotation/",
+                   "net/minecraft/", "gm/", "com/mojang/serialization/", "com/mojang/datafixers/util/", "com/mojang/datafixers/kinds/",
+                   "com/mojang/math/", "com/mojang/logging/", "com/mojang/authlib/GameProfile", "com/google/common/collect/",
+                   "com/google/common/base/", "com/google/gson/", "it/unimi/dsi/fastutil/", "org/joml/", "org/slf4j/", "org/jspecify/",
+                   "org/jetbrains/annotations/", "io/netty/buffer/", "net/fabricmc/fabric/api/", "eu/pb4/polymer/")
+# Registries are still open while the game starts, which is when a mixin can run and a module can't. Anything registered
+# there ends up in the world's data under a name that's gone when the mixin is. Slots are how features add things.
+REGISTERS = ("registers something the world can't load without. Blocks, items and mobs go through slots in feature.json, and "
+             "attachments are saved into chunks, so removing the mixin would leave data the game throws away",
+             ("net/minecraft/core/MappedRegistry", "net/minecraft/core/DefaultedMappedRegistry", "net/minecraft/core/RegistrationInfo",
+              "net/minecraft/world/level/block/state/StateDefinition", "net/fabricmc/fabric/api/attachment/",
+              "net/fabricmc/fabric/api/event/registry/", "net/fabricmc/fabric/api/object/builder/"))
+# A command run from code counts as the console, which includes the ones that start the agent again after its owner has stopped it.
+COMMANDS = ("runs server commands, which a mixin has no need to and which could undo the kill switch",
+            ("net/minecraft/commands/Commands", "net/minecraft/commands/execution/", "net/minecraft/server/commands/",
+             "net/minecraft/server/dedicated/", "net/minecraft/server/rcon/", "net/minecraft/server/ServerFunctionManager", "com/mojang/brigadier/"))
+UNRECORDED = ("changes blocks without leaving the record that protects players' builds, so use the level's own setBlock",
+              ("net/minecraft/world/level/chunk/LevelChunkSection", "net/minecraft/world/level/chunk/PalettedContainer"))
+HIDES_CRASHES = ("is how a crash gets noticed, and rollback depends on that", ("net/minecraft/CrashReport", "net/minecraft/ReportedException"))
+MIXIN_REFUSED = (REGISTERS, COMMANDS, UNRECORDED, HIDES_CRASHES)
+REGISTERING_OWNERS = ("net/minecraft/core/Registry", "net/minecraft/core/WritableRegistry", "net/minecraft/world/level/block/Blocks",
+                      "net/minecraft/world/item/Items", "net/minecraft/world/entity/EntityType",
+                      "net/minecraft/world/level/block/entity/BlockEntityType")
+MIXIN_REFUSED_MEMBERS = {
+    # A server that stops itself on purpose writes no crash report, and these can also take a world down without saving it.
+    "net/minecraft/server/MinecraftServer": ({"halt", "stopServer", "close", "getCommands", "getFunctions", "createCommandSourceStack"},
+                                             "stops the server or runs commands, and nothing a mixin does needs that"),
+    "java/lang/Throwable": ({"setStackTrace"}, "takes away what says where a crash came from"),
+}
 
 # Client modules draw HUDs and effects and help on inventory screens, so this is what those need and nothing else. It stays
 # narrow because widening it later only costs a release, and something unsafe that shipped can't be recalled from friends' PCs.
@@ -145,6 +199,9 @@ COMPANION_REFUSES = ("java/io/File", "java/io/RandomAccessFile", "java/nio/file/
 COMPANION_REFUSED_NAMES = {"forName", "getDeclaredMethod", "loadLibrary", "lookup", "publicLookup", "privateLookupIn"}
 COMPANION_IGNORES = "java/lang/RuntimeException"
 
+ANNOTATIONS = {"RuntimeVisibleAnnotations", "RuntimeInvisibleAnnotations"}
+PARAMETER_ANNOTATIONS = {"RuntimeVisibleParameterAnnotations", "RuntimeInvisibleParameterAnnotations"}
+
 _CLASS_PATH = re.compile(r"[A-Za-z_$][\w$]*(/[A-Za-z_$][\w$]*)*\.class", re.ASCII)
 _IN_DESCRIPTOR = re.compile(r"L([^;]+);")
 _ENTRY_LINE = re.compile(r"entry\s*[=:]\s*([\w.$]+)", re.ASCII)
@@ -158,6 +215,33 @@ class BadJar(Exception):
     """A jar the game wouldn't read the way this does, or at all."""
 
 
+ClassValue = collections.namedtuple("ClassValue", "descriptor")
+EnumValue = collections.namedtuple("EnumValue", "descriptor name")
+
+
+class Annotation:
+    """One annotation. Its values are text, numbers, a ClassValue, an EnumValue, another Annotation, or a list of those."""
+
+    def __init__(self, descriptor, values):
+        self.descriptor = descriptor
+        self.values = values
+
+    def and_nested(self):
+        """This one and all those inside it, because @At and @Slice sit inside @Inject."""
+        found = [self]
+
+        def walk(value):
+            if isinstance(value, Annotation):
+                found.extend(value.and_nested())
+            elif isinstance(value, list):
+                for item in value:
+                    walk(item)
+
+        for value in self.values.values():
+            walk(value)
+        return found
+
+
 class ClassFile:
     """What one class file refers to."""
 
@@ -169,6 +253,9 @@ class ClassFile:
         self.natives = []
         self.bootstraps = []
         self.texts = []
+        self.annotations = []
+        self.own_annotations = []
+        self.methods = []
 
 
 def _decode(raw):
@@ -206,7 +293,11 @@ def _read_pool(data):
                 raise BadClass("a constant runs past the end of the file")
             pool[index] = (tag, _decode(data[at + 2:at + 2 + length]))
             at += 2 + length
-        elif tag in (3, 4):
+        elif tag == 3:
+            # Annotations keep their numbers here, and a mixin's require is one of them.
+            pool[index] = (tag, struct.unpack_from(">i", data, at)[0])
+            at += 4
+        elif tag == 4:
             at += 4
         elif tag in (5, 6):
             at += 8
@@ -275,10 +366,64 @@ def _parse(data):
         parsed.parents.append(class_name(struct.unpack_from(">H", data, at)[0]))
         at += 2
 
-    def skip_attributes(position):
+    def annotation(position):
+        descriptor, pairs = struct.unpack_from(">HH", data, position)
+        position += 4
+        values = {}
+        for _ in range(pairs):
+            name = utf8(struct.unpack_from(">H", data, position)[0])
+            # The patcher reads the first of these and a dict keeps the last, so a second could say something else to each of them.
+            if name in values:
+                raise BadClass(f"an annotation says what {name} is twice")
+            values[name], position = element(position + 2)
+        return Annotation(utf8(descriptor), values), position
+
+    def element(position):
+        tag = chr(data[position])
+        position += 1
+        if tag == "@":
+            return annotation(position)
+        if tag == "[":
+            items = []
+            count = struct.unpack_from(">H", data, position)[0]
+            position += 2
+            for _ in range(count):
+                item, position = element(position)
+                items.append(item)
+            return items, position
+        if tag == "e":
+            descriptor, name = struct.unpack_from(">HH", data, position)
+            return EnumValue(utf8(descriptor), utf8(name)), position + 4
+        index = struct.unpack_from(">H", data, position)[0]
+        if tag == "c":
+            return ClassValue(utf8(index)), position + 2
+        if tag == "s":
+            return utf8(index), position + 2
+        if tag not in "BCDFIJSZ":
+            raise BadClass(f"an annotation has a value of an unknown kind, {tag!r}")
+        # Longs, floats and doubles aren't kept, and none of the checks need one.
+        return (pool[index][1] if tag in "BCISZ" else None), position + 2
+
+    def read_annotations(name, position, into):
+        count = 1
+        if name in PARAMETER_ANNOTATIONS:
+            count = data[position]
+            position += 1
+        for _ in range(count):
+            total = struct.unpack_from(">H", data, position)[0]
+            position += 2
+            for _ in range(total):
+                found, position = annotation(position)
+                into.append(found)
+
+    def read_attributes(position, into):
+        """Every copy of an attribute counts. Class readers differ over which one wins, so a second one mustn't hide anything."""
         total = struct.unpack_from(">H", data, position)[0]
         position += 2
         for _ in range(total):
+            name = utf8(struct.unpack_from(">H", data, position)[0])
+            if name in ANNOTATIONS or name in PARAMETER_ANNOTATIONS:
+                read_annotations(name, position + 6, into)
             position += 6 + struct.unpack_from(">I", data, position + 2)[0]
         return position
 
@@ -290,9 +435,11 @@ def _parse(data):
         for _ in range(total):
             flags, name_index, descriptor_index = struct.unpack_from(">HHH", data, at)
             parsed.classes.update(_IN_DESCRIPTOR.findall(utf8(descriptor_index)))
+            if is_method:
+                parsed.methods.append(utf8(name_index))
             if is_method and flags & ACC_NATIVE:
                 parsed.natives.append(utf8(name_index))
-            at = skip_attributes(at + 6)
+            at = read_attributes(at + 6, parsed.annotations)
 
     total = struct.unpack_from(">H", data, at)[0]
     at += 2
@@ -306,6 +453,8 @@ def _parse(data):
                 owner, name, _ = member(pool[pool[handle][2]])
                 parsed.bootstraps.append(f"{owner}.{name}")
                 position += 4 + 2 * arguments
+        elif utf8(name_index) in ANNOTATIONS:
+            read_annotations(utf8(name_index), at + 6, parsed.own_annotations)
         at += 6 + length
     if at != len(data):
         raise BadClass("its length doesn't add up")
@@ -316,7 +465,7 @@ def parse_class(data):
     """Reads one class file. Raises BadClass for anything not understood, rather than guessing."""
     try:
         return _parse(data)
-    except (struct.error, IndexError, KeyError, TypeError, ValueError) as error:
+    except (struct.error, IndexError, KeyError, TypeError, ValueError, RecursionError) as error:
         raise BadClass(f"it's malformed: {error}") from error
 
 
@@ -388,6 +537,15 @@ def _class_problem(name, side):
         if name in CLIENT_CLASSES or name in LIMITED_MEMBERS or name.startswith(CLIENT_PREFIXES):
             return None
         return "isn't on the list client modules may use"
+    if side in ("mixins", "mixin_text"):
+        if name.startswith(MIXIN_USABLE):
+            return None
+        reason = _refusal(name, MIXIN_REFUSED)
+        if reason:
+            return reason
+        # Text might be anything, like a file name in a constant, so it only has to stay off the lists. A class has to be on this one.
+        if side == "mixins" and not name.startswith(MIXIN_LIBRARIES):
+            return "isn't one of the libraries a mixin may use, which are listed in docs/feature-format.md"
     # A machine's tick and a mob's behaviour are handed these, so using them is what the API asks for.
     if name.startswith("gm/conduit/") and not name.startswith("gm/conduit/api/") and name not in ("gm/conduit/slots/SlotBlockEntity", "gm/conduit/mobs/SlotMob"):
         return "is the module host's own code, and modules may only use gm/conduit/api"
@@ -402,6 +560,12 @@ def _member_problem(owner, name, descriptor, side):
     names, reason = REFUSED_MEMBERS.get(owner, ((), None))
     if name in names:
         return reason
+    if side == "mixins":
+        if owner in REGISTERING_OWNERS and name.startswith("register"):
+            return REGISTERS[0]
+        names, reason = MIXIN_REFUSED_MEMBERS.get(owner, ((), None))
+        if name in names:
+            return reason
     if owner.startswith("java/util/") and name.startswith("parallel"):
         return THREADS[0]
     if name == "<init>" and owner in _FILE_NAME_CONSTRUCTORS and descriptor.startswith("(Ljava/lang/String;"):
@@ -439,8 +603,6 @@ def _read_properties(data, classes, feature_id, found):
 
 def _scan(entries, side, feature_id, approved):
     own = f"gm/feature/{feature_id}/"
-    # A member approval also lets its class be named. The class's other members still get checked.
-    owners = {item.split(".", 1)[0] for item in approved}
     problems = {}
 
     def found(reference, why, where=None):
@@ -464,6 +626,9 @@ def _scan(entries, side, feature_id, approved):
             # to the real one. Only a package nothing else uses can honestly be called its own.
             if not (name.startswith(own) and _CLASS_PATH.fullmatch(name)):
                 found(name, f"is outside this module's package. Its classes must all be under {own}")
+            elif side == "server" and name.startswith((f"{own}mixin/", f"{own}shared/")):
+                # The game's own loader is asked first and it has the feature's mixins, so this copy would never run.
+                found(name, "is in a package that belongs to the feature's mixins folder, so a module's own class can't be there")
             try:
                 parsed = parse_class(data)
             except BadClass as error:
@@ -482,6 +647,27 @@ def _scan(entries, side, feature_id, approved):
     else:
         _read_properties(properties, {parsed.name for parsed in parsed_classes}, feature_id, found)
 
+    check_references(parsed_classes, side, own, approved, found)
+
+    # Last, because anything already reported would mostly be reported again here in a less useful way.
+    if side == "client" and not problems:
+        for parsed in parsed_classes:
+            for text in parsed.texts:
+                scanned = text.replace(COMPANION_IGNORES, "")
+                banned = next((item for item in COMPANION_REFUSES if item in scanned), None)
+                if banned or scanned in COMPANION_REFUSED_NAMES:
+                    why = (f"would make every companion refuse this module, because it refuses any class with a constant "
+                           f"{'containing ' + banned if banned else 'with that name'}. That includes plain strings and your "
+                           "own method names, so rename it. The owner can't "
+                           "approve this one, since the companion decides it")
+                    problems.setdefault(f"constant {text!r}", (why, set()))[1].add(parsed.name)
+    return problems
+
+
+def check_references(parsed_classes, side, own, approved, found):
+    """Reports what these classes refer to that this side may not, member by member."""
+    # A member approval also lets its class be named. The class's other members still get checked.
+    owners = {item.split(".", 1)[0] for item in approved}
     limited = CLIENT_MEMBERS if side == "client" else LIMITED_MEMBERS
     for parsed in parsed_classes:
         where = parsed.name
@@ -514,19 +700,18 @@ def _scan(entries, side, feature_id, approved):
             if bootstrap not in BOOTSTRAPS:
                 found(f"bootstrap {bootstrap}", "is a custom bootstrap, which can do whatever reflection can", where)
 
-    # Last, because anything already reported would mostly be reported again here in a less useful way.
-    if side == "client" and not problems:
-        for parsed in parsed_classes:
-            for text in parsed.texts:
-                scanned = text.replace(COMPANION_IGNORES, "")
-                banned = next((item for item in COMPANION_REFUSES if item in scanned), None)
-                if banned or scanned in COMPANION_REFUSED_NAMES:
-                    why = (f"would make every companion refuse this module, because it refuses any class with a constant "
-                           f"{'containing ' + banned if banned else 'with that name'}. That includes plain strings and your "
-                           "own method names, so rename it. The owner can't "
-                           "approve this one, since the companion decides it")
-                    problems.setdefault(f"constant {text!r}", (why, set()))[1].add(parsed.name)
-    return problems
+
+def report_problems(label, problems):
+    """Raises GateFailed for what's been found, in the words the agent acts on."""
+    lines = [f"{label} can't ship:"]
+    for reference, (why, wheres) in sorted(problems.items())[:MAX_REPORTED]:
+        users = f" (used by {', '.join(sorted(wheres))})" if wheres else ""
+        lines.append(f"- {reference}{users}: {why}.")
+    if len(problems) > MAX_REPORTED:
+        lines.append(f"...and {len(problems) - MAX_REPORTED} more.")
+    lines.append("Remove these or do it another way. If the feature really needs one, say so in your report and quote the "
+                 "name after the dash exactly: the owner can approve it for this feature.")
+    raise GateFailed(GATE, "\n".join(lines))
 
 
 def check_jar(path, side, feature_id):
@@ -539,14 +724,5 @@ def check_jar(path, side, feature_id):
     except (BadJar, OSError) as error:
         raise GateFailed(GATE, f"{label} has a jar that can't be checked: {error}. Build it with the normal Gradle jar task.") from error
     problems = _scan(entries, side, feature_id, _approved(feature_id, side))
-    if not problems:
-        return
-    lines = [f"{label} can't ship:"]
-    for reference, (why, wheres) in sorted(problems.items())[:MAX_REPORTED]:
-        users = f" (used by {', '.join(sorted(wheres))})" if wheres else ""
-        lines.append(f"- {reference}{users}: {why}.")
-    if len(problems) > MAX_REPORTED:
-        lines.append(f"...and {len(problems) - MAX_REPORTED} more.")
-    lines.append("Remove these or do it another way. If the feature really needs one, say so in your report and quote the "
-                 "name after the dash exactly: the owner can approve it for this feature.")
-    raise GateFailed(GATE, "\n".join(lines))
+    if problems:
+        report_problems(label, problems)

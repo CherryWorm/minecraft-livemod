@@ -19,7 +19,7 @@ include 'sample-module'
 def features = file('genesis/features')
 if (features.isDirectory()) {
 	features.eachDir { feature ->
-		['server', 'client'].each { side ->
+		['server', 'client', 'mixins'].each { side ->
 			if (new File(feature, "${side}/src").isDirectory()) {
 				def name = ":feature-${feature.name}-${side}"
 				include name

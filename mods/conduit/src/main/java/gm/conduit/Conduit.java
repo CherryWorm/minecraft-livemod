@@ -65,6 +65,7 @@ public final class Conduit implements ModInitializer {
 		KillSwitch.register();
 		Chaos.register();
 
+		ServerLifecycleEvents.SERVER_STARTING.register(server -> MixinCheck.run());
 		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
 			ServerModuleHost.instance().start(server);
 			ModulePush.loadOnStart();

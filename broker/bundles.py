@@ -64,6 +64,10 @@ def load_features(features_dir):
     if not features_dir.is_dir():
         return features
     for folder in sorted(path for path in features_dir.iterdir() if path.is_dir()):
+        # A link can point anywhere on whichever machine reads it, including at what a build leaves behind for the gates to read.
+        link = next((path for path in (folder, *folder.rglob("*")) if path.is_symlink()), None)
+        if link:
+            raise BundleError(f"{folder.name}: {link.relative_to(features_dir)} is a link, and a feature can only hold real files")
         manifest = folder / "feature.json"
         if not manifest.exists():
             raise BundleError(f"{folder.name}: feature.json is missing")
@@ -763,6 +767,11 @@ def find_modules(features):
             if (feature["dir"] / side / "src").is_dir():
                 found.append((feature_id, side))
     return found
+
+
+def find_mixins(features):
+    """Which features patch the game's own code. See broker/gates/mixins.py."""
+    return [feature_id for feature_id, feature in features.items() if (feature["dir"] / "mixins" / "src").is_dir()]
 
 
 if __name__ == "__main__":

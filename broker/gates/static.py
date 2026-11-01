@@ -11,10 +11,15 @@ from PIL import Image
 
 from broker import bundles
 from broker.bundles import TOKEN
-from broker.gates import GateFailed, balance, progression
+from broker.gates import GateFailed, balance, mixins, progression
 from orchestrator import others
 
 GATE = "static"
+BUILT_SIDES = ("server", "client", "mixins")
+BUILD_SCRIPTS = ("build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "gradle.properties", "buildSrc")
+MIXIN_ANNOTATION = re.compile(r"@Mixin\s*\(([^)]*)\)", re.DOTALL)
+MIXIN_SOURCE_REFUSALS = {re.compile(rf"@{name}\b"): mixins.REFUSED_ANNOTATIONS[f"{mixins.MIXIN}{name}"] for name in ("Overwrite", "Pseudo", "Debug")}
+MIXIN_SOURCE_REFUSALS[re.compile(r"require\s*=\s*0\b")] = "lets an injection find nothing and say nothing"
 RESERVE = 0.2
 RECIPE_MODES = {"open", "known", "guessable"}
 ROUTE_TYPES = {"obtain", "examine", "kill", "read", "fragments"}
@@ -672,6 +677,71 @@ def check_minds(features):
                     _fail(f"{label} lists animations {sorted(missing)}, which its model doesn't have.")
 
 
+def check_no_build_scripts(features):
+    """Each side of a feature is a Gradle project, and Gradle runs any build script it finds in a project's folder. That would run in the
+    builder, which has the network and can write to the build output of everything else, the engine's own jar included, so nothing
+    after that could be trusted. The shared build in mods/build.gradle is all a feature needs."""
+    for feature_id, feature in features.items():
+        for side in BUILT_SIDES:
+            for name in BUILD_SCRIPTS:
+                if (feature["dir"] / side / name).exists():
+                    _fail(f"{feature_id}: {side}/{name} can't be here. A feature's Java is built by the shared build, and nothing it brings can change that.")
+
+
+def check_mixins(features):
+    """A mixin is the last resort, so it has to say why no hook will do, and there's a limit to how many a world has. Target rules are
+    checked again in the compiled classes, which is what counts, but most mistakes can be seen right here."""
+    using = bundles.find_mixins(features)
+    for feature_id, feature in features.items():
+        declared = feature["manifest"].get("mixins")
+        if declared is None and feature_id not in using:
+            continue
+        name = f"{feature_id}: mixins"
+        if feature_id not in using:
+            _fail(f"{name} are declared in feature.json, but there's no mixins/src folder with any in it.")
+        if not isinstance(declared, dict) or not isinstance(declared.get("why"), str):
+            _fail(f"{name} need \"mixins\": {{\"why\": \"...\"}} in feature.json, saying which hook you looked for and why none will do. "
+                  "Check docs/feature-format.md first, because a hook is nearly always better: it can be swapped with no restart.")
+        if len(declared["why"].strip()) < mixins.LEAST_WHY_CHARACTERS:
+            _fail(f"{name} need more of a reason in \"why\": which hook you looked for, and why none will do.")
+        if not mixins.FABRIC_ID.fullmatch(mixins.mod_id(feature_id)):
+            _fail(f"{name} can't have a feature id this long, because it won't fit in a mod's id.")
+        folder = feature["dir"] / "mixins"
+        if (folder / "src" / "main" / "resources").exists():
+            _fail(f"{name} can't have src/main/resources. What the game needs to know about them is written for you.")
+        package = folder / "src" / "main" / "java" / "gm" / "feature" / feature_id / "mixin"
+        sources = sorted(package.rglob("*.java")) if package.is_dir() else []
+        if not sources:
+            _fail(f"{name} go in mixins/src/main/java/gm/feature/{feature_id}/mixin/, and there are none there.")
+        if len(sources) > mixins.MOST_MIXINS_A_FEATURE:
+            _fail(f"{name}: {len(sources)} is more than the {mixins.MOST_MIXINS_A_FEATURE} one feature can have. If that's what it takes, a hook is "
+                  "missing, so ask for it in host_requests and build what you can without it.")
+        for source in sources:
+            _check_mixin_source(name, source)
+    if len(using) > mixins.MOST_FEATURES_WITH_MIXINS:
+        _fail(f"{len(using)} features have mixins, over the limit of {mixins.MOST_FEATURES_WITH_MIXINS} for a world. Each one is a restart for everyone "
+              "and something that could stop the server, so use a hook, or ask for one in host_requests.")
+
+
+def _check_mixin_source(name, source):
+    """What can be told from the source, for an answer that's instant. The real check reads the compiled class."""
+    text = source.read_text(encoding="utf-8", errors="replace")
+    imports = {short: full for full, short in re.findall(r"^import\s+(?:static\s+)?((?:[\w$]+\.)*([\w$]+))\s*;", text, re.MULTILINE)}
+    declaration = MIXIN_ANNOTATION.search(text)
+    if not declaration:
+        return
+    targets = re.findall(r'"([^"]+)"', declaration.group(1))
+    targets += [imports.get(short.split(".")[0], short) for short in re.findall(r"([\w$.]+)\.class", declaration.group(1))]
+    for target in targets:
+        why = mixins.target_problem(target) if "." in target or "/" in target else None
+        why = why or (mixins.protected_target(target) if "." in target or "/" in target else None)
+        if why:
+            _fail(f"{name}: {source.name} can't patch {target}: it {why}.")
+    for banned, why in MIXIN_SOURCE_REFUSALS.items():
+        if banned.search(text):
+            _fail(f"{name}: {source.name} can't use {banned.pattern.replace(chr(92), '')}: it {why}.")
+
+
 def run(features, old_ledger, new_ledger, pool, content):
     pack = content / "pack"
     check_ledger_append_only(old_ledger, new_ledger)
@@ -697,4 +767,6 @@ def run(features, old_ledger, new_ledger, pool, content):
     check_mob_sounds(features)
     check_model_costs(features)
     check_minds(features)
+    check_no_build_scripts(features)
+    check_mixins(features)
     balance.run(features)

@@ -823,7 +823,8 @@ class Agent:
         self.bugs.resume()
         print("agent running", flush=True)
         await asyncio.gather(readers, self.event_loop(), self.chat_loop(), self.build_loop(), self.sort_loop(), self.opening_loop(),
-                             self.status_loop(), self.watch_loop(), self.board_loop(), self.self_hosted.serve(), self.hub.serve())
+                             self.status_loop(), self.watch_loop(), self.board_loop(), self.self_hosted.serve(), self.hub.serve(),
+                             self.bugs.watch_for_crashed_mixins())
 
 
 if __name__ == "__main__":

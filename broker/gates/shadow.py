@@ -5,7 +5,7 @@ import sys
 import time
 
 from broker import runtime
-from broker.gates import GateFailed
+from broker.gates import GateFailed, mixins
 
 GATE = "shadow"
 MAX_BOOT_SECONDS = 45
@@ -17,6 +17,14 @@ FORBIDDEN = [
     # The world holds a block ID the mod no longer has, and loading it just erased that block.
     r"Recoverable errors when loading section",
     r"Mixin apply failed",
+    r"Mixin apply for mod .* failed",
+    r"InvalidMixinException",
+    r"InvalidInjectionException",
+    r"InjectionError",
+    r"MixinTransformerError",
+    r"MixinApplyError",
+    r"@Mixin target .* was not found",
+    r"feature mixin .* didn't apply",
     r"Exception in server tick loop",
     r"Couldn't parse data file",
     r"Couldn't load tag",
@@ -33,6 +41,11 @@ FORBIDDEN = [
     r"Can't read config",
 ]
 FORBIDDEN_RE = re.compile("|".join(FORBIDDEN))
+MIXINS_IN_PLACE = re.compile(r"feature mixins in place: \d+ from (\d+) features")
+WONT_START = re.compile(r"feature mixin .* didn't apply|Mixin apply for mod .* failed|InvalidMixinException|MixinTransformerError")
+BOOT_TIMEOUT_SECONDS = 240
+BOOT_LOOK_SECONDS = 5
+MOST_LOG_LINE = 500
 
 
 def _fail(message):
@@ -40,7 +53,8 @@ def _fail(message):
 
 
 def scan_logs(text):
-    return [line[:220] for line in text.splitlines() if FORBIDDEN_RE.search(line)]
+    # Long enough for a mixin's failure to say which mixin and how, which comes after a full method description.
+    return [line[:MOST_LOG_LINE] for line in text.splitlines() if FORBIDDEN_RE.search(line)]
 
 
 def _running():
@@ -91,12 +105,21 @@ def running_these_jars(jars):
     return started_with == {jar.name: jar.read_bytes() for jar in jars}
 
 
-def start():
+def start(mark, test_mods=True):
     # Docker would make these as root if they weren't there, and then the server couldn't write to them.
     runtime.server_folder("shadow").mkdir(parents=True, exist_ok=True)
     runtime.server_folder("shadow-proxy").mkdir(parents=True, exist_ok=True)
-    runtime.stack("up", "-d", *runtime.SHADOW_SERVICES)
-    return runtime.wait_ready("shadow", timeout=240)
+    runtime.stack("up", "-d", *runtime.SHADOW_SERVICES, env={"SHADOW_TEST_MODS": "true" if test_mods else "false"})
+    started = time.monotonic()
+    while time.monotonic() - started < BOOT_TIMEOUT_SECONDS:
+        try:
+            runtime.wait_ready("shadow", timeout=BOOT_LOOK_SECONDS)
+            return time.monotonic() - started
+        except TimeoutError:
+            # A mixin that won't apply stops it starting every time, so there's no need to wait all that time to find out.
+            if WONT_START.search(runtime.logs_since("shadow", mark)):
+                break
+    raise TimeoutError(f"shadow didn't answer after {time.monotonic() - started:.0f}s")
 
 
 def smoke_join():
@@ -156,12 +179,50 @@ def run_diff(before, after, ore_blocks, allowed, new_block_entities=False):
             _fail(f"The world check found a problem with {ore}:\n{result.stdout[-1500:]}")
 
 
-def run_gate(tier, jars, content, patches):
+def check_mixins_applied(jars, logs):
+    """Conduit makes every feature's mixins apply as the server starts, and says how many there were. A mixin that fails
+    says so too, which scan_logs looks for, but this is what shows the check really ran."""
+    expected = sum(1 for jar in jars if mixins.feature_of(jar))
+    found = MIXINS_IN_PLACE.findall(logs)
+    if expected and (not found or int(found[-1]) != expected):
+        _fail(f"This release has {expected} features with mixins, but the server didn't say they were all in place: "
+              + (found[-1] if found else "it said nothing about them"))
+
+
+def boot_without_mixins(jars):
+    """A mixin can go at any moment, by a rollback, by crashing or by being taken out, and when it does the world it's been running on has
+    to load without it. So this tries that now: what the mixin's world saved, on a server that's never heard of it."""
+    runtime.rcon("shadow", "forceload", "add", "-24", "-24", "24", "24", check=False)
+    time.sleep(1)
+    runtime.rcon("shadow", "save-all", "flush", check=False)
+    runtime.stack("stop", "shadow", check=False)
+    candidate = runtime.candidate_folder()
+    for jar in jars:
+        if mixins.feature_of(jar):
+            (candidate / jar.name).unlink(missing_ok=True)
+    mark = runtime.utc_now()
+    try:
+        start(mark, test_mods=False)
+        time.sleep(2)
+        problems = scan_logs(runtime.logs_since("shadow", mark))
+    except TimeoutError:
+        problems = scan_logs(runtime.logs_since("shadow", mark)) or ["it wouldn't start"]
+    # Stopped, so that the next test here starts afresh rather than finding a server with no mixins.
+    runtime.stack("stop", "shadow", check=False)
+    if problems:
+        _fail("The world these mixins leave behind doesn't load without them, and it has to, because that's what a rollback does. "
+              "Keep what they save in fields a game without them will ignore, and don't change the format of what the game saves:\n" + "\n".join(problems[:12]))
+
+
+def run_gate(tier, jars, content, patches, new_mixins=()):
     """Returns timings. Warm for live changes, cold only when the server must restart anyway."""
     timings = {}
     mark = runtime.utc_now()
     cold = tier == "T3" or not _running() or not running_these_jars(jars)
     before = None
+    # Anything with mixins runs with exactly the mods the live server has, because the test ones patch the game as well, so
+    # they could hide a mixin's failure or cause one that wouldn't happen for real.
+    any_mixins = any(mixins.feature_of(jar) for jar in jars)
     if cold:
         started = time.monotonic()
         cold_boot(jars)
@@ -170,7 +231,7 @@ def run_gate(tier, jars, content, patches):
             before = snapshot_regions()
         runtime.apply_content("shadow", content)
         try:
-            boot = start()
+            boot = start(mark, test_mods=not any_mixins)
         except TimeoutError:
             # A loot table the game can't read stops it starting at all, and it would go round and round trying, so what it said is all there is to go on.
             problems = scan_logs(runtime.logs_since("shadow", mark))
@@ -198,6 +259,8 @@ def run_gate(tier, jars, content, patches):
     problems = scan_logs(runtime.logs_since("shadow", mark))
     if problems:
         _fail("The server logged problems:\n" + "\n".join(problems[:12]))
+    if cold:
+        check_mixins_applied(jars, runtime.logs_since("shadow", mark))
 
     started = time.monotonic()
     smoke_join()
@@ -220,6 +283,10 @@ def run_gate(tier, jars, content, patches):
         for block, replaces in sorted(allowed.items()):
             run_diff(before, after, [block], sorted(replaces), new_block_entities)
         timings["world_diff"] = round(time.monotonic() - started, 1)
+    if new_mixins:
+        started = time.monotonic()
+        boot_without_mixins(jars)
+        timings["without_mixins"] = round(time.monotonic() - started, 1)
     return timings
 
 

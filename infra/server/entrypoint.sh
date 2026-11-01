@@ -9,7 +9,7 @@ cp -an /opt/mc/bake/. .
 rm -rf mods
 mkdir -p mods config/polymer
 cp /opt/mc/mods/*.jar mods/
-if [[ "${SERVER_ROLE:-prod}" == "shadow" ]]; then
+if [[ "${SERVER_ROLE:-prod}" == "shadow" && "${SHADOW_TEST_MODS:-true}" == "true" ]]; then
   cp /opt/mc/mods-shadow/*.jar mods/
 fi
 if compgen -G "/opt/release/*.jar" >/dev/null; then

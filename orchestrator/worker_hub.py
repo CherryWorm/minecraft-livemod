@@ -241,7 +241,7 @@ class WorkerHub:
         if commit and not self._known(job, commit):
             return JSONResponse({"problem": "That commit hasn't been uploaded for this job."}, status_code=400)
         job.last_heard = time.time()
-        answer = await self.ask(kind, **{key: value for key, value in fields.items() if key in ("commit", "class_name")})
+        answer = await self.ask(kind, **{key: value for key, value in fields.items() if key in ("commit", "class_name", "private", "code")})
         return JSONResponse({"answer": answer, "main": self._git("rev-parse", "main")})
 
     async def world(self, request, who):

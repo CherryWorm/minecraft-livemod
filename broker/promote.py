@@ -15,7 +15,7 @@ import sys
 import time
 
 from broker import bundles, deploy, runtime, sign
-from broker.gates import GateFailed, advice, balance, bytecode, client, progression, shadow, static
+from broker.gates import GateFailed, advice, balance, bytecode, client, mixins, progression, shadow, static
 
 SERVER_MODS = ("conduit",)
 PROGRESS_SNAPSHOT = "progress_snapshot.json"
@@ -130,6 +130,35 @@ def check_modules(features, content):
         bytecode.check_jar(content / "modules" / side / f"{feature_id}.jar", side, feature_id)
 
 
+def collect_mixins(features, mods, report):
+    """Makes each feature's mixin jar and checks it, leaving out any that's already brought the live server down. Those stay out
+    until they change, rather than stopping every other feature's release behind them. Returns the jars to release."""
+    target = runtime.WORK / "mixin-jars"
+    if target.exists():
+        shutil.rmtree(target)
+    jars = []
+    crashed = deploy.crashed_mixins()
+    for feature_id in bundles.find_mixins(features):
+        libs = mods / "genesis" / "features" / feature_id / "mixins" / "build" / "libs"
+        built = [path for path in libs.glob("*.jar") if not path.name.endswith("-sources.jar")]
+        if not built:
+            raise GateFailed("build", f"{feature_id}: its mixins didn't produce a jar")
+        jar = mixins.assemble(built[0], feature_id, target / mixins.jar_name(feature_id))
+        mixins.check_jar(jar, feature_id)
+        if crashed.get(feature_id, {}).get("sha256") == hashlib.sha256(jar.read_bytes()).hexdigest():
+            report.setdefault("withheld_mixins", {})[feature_id] = crashed[feature_id]["reason"]
+            print(f"{feature_id}: leaving its mixins out, because they crashed the live server: {crashed[feature_id]['reason']}", flush=True)
+        else:
+            jars.append(jar)
+    return jars
+
+
+def new_mixins(jars, current):
+    """The features whose mixin jars this release adds or changes."""
+    old = {path.name: path.read_bytes() for path in (current / "jars").glob(f"{mixins.JAR_PREFIX}*.jar")} if current.exists() else {}
+    return [mixins.feature_of(jar) for jar in jars if mixins.feature_of(jar) and old.get(jar.name) != jar.read_bytes()]
+
+
 def sign_modules(content, old_content):
     """Signs last, because a jar can't change after this without breaking its signature, and only for a release
     that's really going out, because every signature uses up a generation."""
@@ -223,7 +252,8 @@ def run_gates(tier, jars, content, old_ledger, new_ledger, old_content, mods, re
     client_modules = (jar_hashes(content / "modules" / "client") != jar_hashes(old_content / "modules" / "client")
                       or bundles.tree_hash(content / "pack/assets/gm/shaders/post") != bundles.tree_hash(old_content / "pack/assets/gm/shaders/post"))
     sign.mark_for_testing(content)
-    report["shadow"] = stages.run("shadow", lambda: shadow.run_gate(tier, jars, content, new_patches))
+    current = runtime.HISTORY / str(runtime.load_state().get("current"))
+    report["shadow"] = stages.run("shadow", lambda: shadow.run_gate(tier, jars, content, new_patches, new_mixins(jars, current)))
 
     blocks, items, mobs = new_visuals(old_ledger, new_ledger)
     report_dir = runtime.REPORTS / release_id
@@ -274,6 +304,7 @@ def promote(source, release_id, deploy_to_prod, chaos_in_prod, stages, check_onl
     jars = collect_jars(mods)
     collect_modules(features, mods, content)
     stages.run("bytecode", lambda: check_modules(features, content))
+    jars.extend(stages.run("mixins", lambda: collect_mixins(features, mods, report)))
     if check_only:
         report["result"] = "passed_gates"
         return report
