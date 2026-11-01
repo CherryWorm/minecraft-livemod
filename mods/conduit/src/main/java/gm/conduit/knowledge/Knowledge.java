@@ -347,7 +347,7 @@ public final class Knowledge {
 		return matched;
 	}
 
-	/** What players call one of our items. The server has no language files, so it can't work this out from the stack. */
+	/** What players call one of our items, whatever this stack has been renamed to. */
 	public String nameOf(ItemStack stack) {
 		String name = this.plan.names().get(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
 		return name != null ? name : stack.getHoverName().getString();

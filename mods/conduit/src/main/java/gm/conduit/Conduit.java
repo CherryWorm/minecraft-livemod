@@ -12,6 +12,7 @@ import gm.conduit.modules.ModulePush;
 import gm.conduit.modules.ServerModuleHost;
 import gm.conduit.pack.LiveAssets;
 import gm.conduit.pack.PackStatus;
+import gm.conduit.pack.ServerNames;
 import gm.conduit.provenance.Provenance;
 import gm.conduit.retrogen.BiomePatch;
 import gm.conduit.retrogen.OrePatchQueue;
@@ -49,6 +50,7 @@ public final class Conduit implements ModInitializer {
 		BlockSettings.register();
 		PanelNetwork.register();
 		LiveAssets.register();
+		ServerNames.register();
 		PackStatus.register();
 		Knowledge.register();
 		KnownRecipes.register();
