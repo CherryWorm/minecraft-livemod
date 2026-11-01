@@ -90,7 +90,7 @@ def _check_gating(features, doc, recipes):
         node = _node_of(thing, features)
         if node not in doc["nodes"] or not doc["nodes"][node].get("requires") or definition.get("retired"):
             continue
-        if definition.get("tier") is None and definition.get("family") not in ("machine", "model"):
+        if definition.get("tier") is None and definition.get("family") not in ("machine", "facing_machine", "model"):
             continue
         for recipe in recipes_by_output.get(thing, []):
             if not _is_gated(recipe, node, doc, features, recipes_by_output, {thing}):

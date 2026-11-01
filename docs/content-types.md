@@ -92,7 +92,7 @@ A recipe can make several things, with `"outputs": [{"item": "$item:silver_nugge
 "kiln": {"family": "machine", "display": "Kiln", "texture": "kiln", "inventory": {"inputs": 2, "fuel": 1, "outputs": 1}}
 ```
 
-This gives a `machine` or `model` block real slots, up to 27 in all, numbered inputs first, then fuel, then outputs. It works like a furnace for everything else in the game: hoppers fill its inputs from above and its fuel from the sides, and take its outputs from below, and what's in it drops when it's broken. Without any fuel slots, the sides fill its inputs too. From a module:
+This gives a `machine`, `facing_machine` or `model` block real slots, up to 27 in all, numbered inputs first, then fuel, then outputs. It works like a furnace for everything else in the game: hoppers fill its inputs from above and its fuel from the sides, and take its outputs from below, and what's in it drops when it's broken. Without any fuel slots, the sides fill its inputs too. From a module:
 
 ```java
 public void tick(SlotBlockEntity machine) {
@@ -108,6 +108,8 @@ public boolean accepts(SlotBlockEntity machine, int slot, ItemStack stack) {
     return slot != 2 || stack.is(Items.COAL);
 }
 ```
+
+`"limits": {"0": 1, "3": 16}` in `inventory` says how many fit in a slot, by its number, from 1 to 99, and that goes for hoppers and players alike. A slot can't hold more of an item than that item stacks to, whatever it says here. `slotLimit(machine, slot, limit)` in a module can make it less than that for now, for a machine that takes upgrades, so give those their largest.
 
 Pass `null` for the player when nobody's there, as with a machine a hopper keeps fed. A recipe that has to be learned then only works if this world shares what's learned and someone knows it. `accepts` says what can go in each input and fuel slot, and nothing can go in an output. `machine.openMenu(player, title)` shows the inventory on a chest's screen, with inputs and fuel on the left and outputs on the right, usually from a `BlockBehavior.use`.
 

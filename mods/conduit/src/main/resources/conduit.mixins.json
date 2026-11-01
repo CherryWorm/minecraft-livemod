@@ -3,6 +3,8 @@
 	"package": "gm.conduit.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"mixins": [
+		"BlockItemMixin",
+		"BlockStateMixin",
 		"ConsumableMixin",
 		"IngredientMixin",
 		"LevelChunkMixin",

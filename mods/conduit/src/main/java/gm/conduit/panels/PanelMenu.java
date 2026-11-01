@@ -6,6 +6,7 @@ import gm.conduit.api.PanelBehavior;
 import gm.conduit.api.PanelRow;
 import gm.conduit.api.PanelView;
 import gm.conduit.pack.Words;
+import gm.conduit.slots.SlotBlockEntity;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -131,8 +132,21 @@ public final class PanelMenu extends AbstractContainerMenu implements PanelView 
 		}
 
 		@Override
+		public int getMaxStackSize() {
+			return this.container instanceof SlotBlockEntity machine ? machine.limitOf(getContainerSlot()) : super.getMaxStackSize();
+		}
+
+		@Override
+		public void onTake(Player player, ItemStack stack) {
+			super.onTake(player, stack);
+			if (this.container instanceof SlotBlockEntity machine) {
+				machine.taken(getContainerSlot(), stack, player);
+			}
+		}
+
+		@Override
 		public boolean mayPickup(Player player) {
-			return isShown(this.widget);
+			return isShown(this.widget) && (!(this.container instanceof SlotBlockEntity machine) || machine.mayTake(getContainerSlot(), player));
 		}
 	}
 
@@ -242,6 +256,9 @@ public final class PanelMenu extends AbstractContainerMenu implements PanelView 
 		}
 		if (!moved) {
 			return ItemStack.EMPTY;
+		}
+		if (index < this.chestSize) {
+			slot.onTake(mover, before.copyWithCount(before.getCount() - stack.getCount()));
 		}
 		if (stack.isEmpty()) {
 			slot.setByPlayer(ItemStack.EMPTY);

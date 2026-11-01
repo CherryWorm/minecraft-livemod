@@ -19,6 +19,14 @@ public interface WorldEvents {
 	/** A player has broken a block. It's already gone, so state is what it was, and blockEntity is null for most blocks. */
 	default void blockBroken(ServerPlayer player, ServerLevel level, BlockPos pos, BlockState state, BlockEntity blockEntity) {}
 
+	/** Whether a player can break this block now, whichever block it is, asked just before it goes. Any module saying no is enough. It's not asked for anything else breaking it. */
+	default boolean canBreak(ServerPlayer player, ServerLevel level, BlockPos pos, BlockState state) {
+		return true;
+	}
+
+	/** A player has just placed a block, any block, and {@code stack} is what they placed it with. To stop one of this world's blocks being placed, see {@link BlockBehavior#canPlace}. */
+	default void blockPlaced(ServerPlayer player, ServerLevel level, BlockPos pos, BlockState state, ItemStack stack) {}
+
 	/** Something living has died, whatever the cause, and that includes players. {@code source.getEntity()} is who did it, if anyone. */
 	default void mobKilled(LivingEntity mob, DamageSource source) {}
 

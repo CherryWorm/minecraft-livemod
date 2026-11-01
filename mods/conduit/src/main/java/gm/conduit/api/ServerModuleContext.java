@@ -110,6 +110,12 @@ public interface ServerModuleContext {
 	 */
 	boolean isNatural(Level level, BlockPos pos);
 
+	/** Sets how much light a block of this world gives here, from 0 to 15, which stays with the block. It does nothing on any other block. */
+	void setLight(Level level, BlockPos pos, int light);
+
+	/** Tells what's around this block that its redstone output has changed, so they ask again. */
+	void redstoneChanged(Level level, BlockPos pos);
+
 	/**
 	 * Tells any module listening for this, as "this_feature/topic". Modules can't share classes, so what's sent is a tag of
 	 * plain values. Nobody listening is fine, and so is a listener that fails: this never finds out.

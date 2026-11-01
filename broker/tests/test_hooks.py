@@ -34,6 +34,116 @@ def features(*ruins):
     return {"f": {"manifest": {"ruins": {f"r{index}": entry for index, entry in enumerate(ruins)}}}}
 
 
+class BlockSettings(unittest.TestCase):
+    def manifest(self, name="thing", **fields):
+        return {"blocks": {name: {"family": "stone", "display": "Thing", "texture": "thing", **fields}}}
+
+    def assert_fine(self, **fields):
+        static.check_block_kinds({"f": {"manifest": self.manifest(**fields), "dir": pathlib.Path("nowhere")}})
+
+    def assert_refused(self, mention, **fields):
+        with self.assertRaises(GateFailed) as caught:
+            static.check_block_kinds({"f": {"manifest": self.manifest(**fields), "dir": pathlib.Path("nowhere")}})
+        self.assertIn(mention, caught.exception.message)
+
+    def test_facing_takes_a_family_that_can_turn(self):
+        self.assert_fine(family="facing", facing="all")
+        self.assert_fine(family="facing_machine", facing="horizontal")
+        self.assert_fine(family="model", model="nothing", facing="horizontal")
+        self.assert_refused("only a facing", facing="horizontal")
+        self.assert_refused("Use ['all', 'horizontal']", family="facing", facing="sideways")
+
+    def test_light_is_a_level(self):
+        self.assert_fine(light=0)
+        self.assert_fine(light=15)
+        for wrong in (16, -1, 2.5, True, "bright"):
+            self.assert_refused("from 0 to 15", light=wrong)
+
+    def test_flags_are_flags(self):
+        self.assert_fine(redstone=True, comparator=False, unbreakable=True)
+        self.assert_refused("true or false", redstone="yes")
+
+    def test_unbreakable_with_a_hardness_says_two_things(self):
+        self.assert_refused("only one of them", unbreakable=True, hardness=1)
+
+    def test_only_a_model_has_glowing_parts(self):
+        self.assert_refused("only a model block", glowing=["eyes"])
+        self.assert_refused("a list of the names", family="model", model="nothing", glowing="eyes")
+
+    def test_glowing_parts_have_to_be_in_the_model(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = pathlib.Path(folder) / "assets" / "models"
+            path.mkdir(parents=True)
+            (path / "lamp.bbmodel").write_text(json.dumps({"outliner": [{"name": "root", "children": [{"name": "eyes", "children": []}]}]}), encoding="utf-8")
+            block = {"family": "model", "display": "Lamp", "texture": "lamp", "model": "lamp"}
+            static.check_block_kinds({"f": {"manifest": {"blocks": {"lamp": {**block, "glowing": ["eyes", "root"]}}}, "dir": pathlib.Path(folder)}})
+            with self.assertRaises(GateFailed) as caught:
+                static.check_block_kinds({"f": {"manifest": {"blocks": {"lamp": {**block, "glowing": ["tail"]}}}, "dir": pathlib.Path(folder)}})
+            self.assertIn("['tail']", caught.exception.message)
+
+    def test_a_player_can_never_be_handed_an_unbreakable_block(self):
+        def with_it(**tables):
+            return {"f": {"manifest": {**self.manifest(unbreakable=True), **tables}, "dir": pathlib.Path("nowhere")}}
+
+        crafted = {"r": {"mode": "open", "json": {"type": "minecraft:crafting_shapeless", "ingredients": ["minecraft:stone"], "result": {"id": "$block:thing"}}}}
+        for tables in ({"recipes": crafted}, {"items": {"seed": {"display": "Seed", "places": {"block": "$block:thing"}}}},
+                       {"recipes": {"r": {"mode": "open", "machine": "press", "inputs": [], "output": {"item": "$block:thing", "count": 1}}}}):
+            with self.assertRaises(GateFailed) as caught:
+                static.check_block_kinds(with_it(**tables))
+            self.assertIn("never remove", caught.exception.message)
+        static.check_block_kinds(with_it(recipes={"r": {"mode": "open", "json": {"type": "minecraft:crafting_shapeless", "ingredients": ["$block:thing"], "result": {"id": "minecraft:stone"}}}}))
+
+
+class MachineLimits(unittest.TestCase):
+    def check(self, inventory):
+        static.check_machines({"f": {"manifest": {"blocks": {"press": {"family": "facing_machine", "inventory": inventory}}}}})
+
+    def test_limits_by_slot(self):
+        self.check({"inputs": 2, "outputs": 1, "limits": {"0": 1, "2": 16}})
+
+    def test_limits_dont_count_as_slots(self):
+        with self.assertRaises(GateFailed) as caught:
+            self.check({"limits": {"0": 1}})
+        self.assertIn("0 slots", caught.exception.message)
+
+    def test_wrong_limits(self):
+        for limits in ({"3": 1}, {"0": 0}, {"0": 100}, {"east": 1}, {"0": True}, [1]):
+            with self.assertRaises(GateFailed) as caught:
+                self.check({"inputs": 2, "outputs": 1, "limits": limits})
+            self.assertIn("how many fit in a slot", caught.exception.message)
+
+
+class RenderedBlockSettings(unittest.TestCase):
+    def render(self, **fields):
+        block = {"family": "facing", "display": "Thing", "texture": "thing", **fields}
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder)
+            textures = root / "f" / "assets" / "textures"
+            textures.mkdir(parents=True)
+            from PIL import Image
+            Image.new("RGBA", (16, 16), (1, 2, 3, 255)).save(textures / "thing.png")
+            features = {"f": {"manifest": {"id": "f", "blocks": {"thing": block}}, "dir": root / "f"}}
+            pool = {"families": {"facing": {"first": 2700, "count": 4}}, "item_count": 4, "mobs": {"monster": 1, "creature": 1}}
+            ledger = bundles.assign_slots(features, bundles.empty_ledger(), pool)
+            bundles.render(features, ledger, root / "out", 1)
+            slot = ledger["blocks"]["f/thing"]["slot"]
+            settings = json.loads((root / "out" / "config" / "block_settings.json").read_text(encoding="utf-8")).get(slot, {})
+            tags = {path.stem for path in (root / "out" / "datapack" / "data" / "minecraft" / "tags" / "block").glob("*.json")}
+            return settings, tags
+
+    def test_a_facing_block_turns_unless_it_says_how(self):
+        self.assertEqual(self.render()[0]["facing"], "horizontal")
+        self.assertEqual(self.render(facing="all")[0]["facing"], "all")
+
+    def test_settings_reach_the_server(self):
+        settings, _ = self.render(light=9, redstone=True, comparator=True, unbreakable=True)
+        self.assertEqual((settings["light"], settings["redstone"], settings["comparator"], settings["unbreakable"]), (9, True, True, True))
+
+    def test_nothing_that_breaks_blocks_can_break_an_unbreakable_one(self):
+        self.assertEqual(self.render(unbreakable=True)[1] & {"wither_immune", "dragon_immune"}, {"wither_immune", "dragon_immune"})
+        self.assertFalse(self.render()[1] & {"wither_immune", "dragon_immune"})
+
+
 class RuinRules(unittest.TestCase):
     def assert_fine(self, entry):
         static.check_ruins(features(entry))

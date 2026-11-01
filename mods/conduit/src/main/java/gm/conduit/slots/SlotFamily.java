@@ -7,8 +7,8 @@ import net.minecraft.world.level.block.state.BlockBehaviour;
 import java.util.function.Supplier;
 
 /**
- * The kinds of blank block registered at boot. Properties like hardness and light can't change on a
- * live block, so each combination the agent might want has its own family.
+ * The kinds of blank block registered at boot. Properties like whether it needs a tool can't change on
+ * a live block, so each combination the agent might want has its own family.
  *
  * <p>Each family owns a fixed ID range, so its IDs can never shift between releases. Counts may grow
  * up to the range size but must never shrink, because worlds store these IDs. Together the counts stay
@@ -21,21 +21,25 @@ public enum SlotFamily {
 	METAL(1500, 50, BlockModelType.FULL_BLOCK, () -> base(5.0f, 6.0f, SoundType.METAL).requiresCorrectToolForDrops()),
 	WOOD(1600, 60, BlockModelType.FULL_BLOCK, () -> base(2.0f, 3.0f, SoundType.WOOD)),
 	SOIL(1700, 40, BlockModelType.FULL_BLOCK, () -> base(0.6f, 0.6f, SoundType.GRAVEL)),
-	GLOW(1800, 40, BlockModelType.FULL_BLOCK, () -> base(1.5f, 3.0f, SoundType.GLASS).lightLevel(state -> 12)),
+	GLOW(1800, 40, BlockModelType.FULL_BLOCK, () -> base(1.5f, 3.0f, SoundType.GLASS)),
 	MACHINE(1900, 80, BlockModelType.FULL_BLOCK, () -> base(3.5f, 6.0f, SoundType.METAL).requiresCorrectToolForDrops()),
 	CUTOUT(2000, 40, BlockModelType.LEAVES, () -> base(0.3f, 0.3f, SoundType.GRASS).noOcclusion()),
 	PLANT(2100, 5, BlockModelType.PLANT, () -> base(0.0f, 0.0f, SoundType.GRASS).noCollision().randomTicks()),
-	GLOW_PLANT(2110, 2, BlockModelType.PLANT, () -> base(0.0f, 0.0f, SoundType.GRASS).noCollision().randomTicks().lightLevel(state -> 10)),
+	GLOW_PLANT(2110, 2, BlockModelType.PLANT, () -> base(0.0f, 0.0f, SoundType.GRASS).noCollision().randomTicks()),
 	TINTED_PLANT(2150, 12, BlockModelType.BIOME_PLANT, () -> base(0.0f, 0.0f, SoundType.GRASS).noCollision().randomTicks()),
 	/** Drawn by a model rather than a texture, so it has no model type: it costs none of Polymer's limited block states. */
 	MODEL(2300, 200, null, () -> base(3.5f, 6.0f, SoundType.METAL).requiresCorrectToolForDrops().noOcclusion()),
 	/** A deep ore that gives off a little light, so it can be spotted across a dark cave. */
-	GLOW_ORE(2500, 20, BlockModelType.FULL_BLOCK, () -> base(4.5f, 3.0f, SoundType.DEEPSLATE).requiresCorrectToolForDrops().lightLevel(state -> 4)),
+	GLOW_ORE(2500, 20, BlockModelType.FULL_BLOCK, () -> base(4.5f, 3.0f, SoundType.DEEPSLATE).requiresCorrectToolForDrops()),
 	/** These choose a client block state for each stage or shape, so they ask for those themselves. See CropSlotBlock and ConnectedSlotBlock. */
 	CROP(2200, 7, null, () -> base(0.0f, 0.0f, SoundType.CROP).noCollision().randomTicks()),
 	CONNECTED(2600, 2, null, () -> base(0.5f, 0.5f, SoundType.COPPER).noOcclusion()),
 	/** See LadderSlotBlock. Each takes 4 of the 50 or so vines states Polymer can spare, and nothing else can be climbed on a client. */
-	LADDER(2700, 10, null, () -> base(0.4f, 0.4f, SoundType.LADDER).noCollision().noOcclusion());
+	LADDER(2700, 10, null, () -> base(0.4f, 0.4f, SoundType.LADDER).noCollision().noOcclusion()),
+	/** A cube that can face any way, for a log or a shrine. Each way is a client block state of its own, so these cost six each. */
+	FACING(3000, 40, BlockModelType.FULL_BLOCK, () -> base(1.5f, 6.0f, SoundType.STONE)),
+	/** A machine with a front, like a furnace. These cost six client block states each too. */
+	FACING_MACHINE(3100, 40, BlockModelType.FULL_BLOCK, () -> base(3.5f, 6.0f, SoundType.METAL).requiresCorrectToolForDrops());
 
 	private final int firstId;
 	private final int count;
@@ -50,7 +54,17 @@ public enum SlotFamily {
 	}
 
 	private static BlockBehaviour.Properties base(float hardness, float resistance, SoundType sound) {
-		return BlockBehaviour.Properties.of().strength(hardness, resistance).sound(sound);
+		return BlockBehaviour.Properties.of().strength(hardness, resistance).sound(sound).lightLevel(state -> state.getValue(SlotBlock.LIGHT));
+	}
+
+	/** How much light it gives unless its feature says otherwise. */
+	public int startingLight() {
+		return switch (this) {
+			case GLOW -> 12;
+			case GLOW_PLANT -> 10;
+			case GLOW_ORE -> 4;
+			default -> 0;
+		};
 	}
 
 	public int firstId() {

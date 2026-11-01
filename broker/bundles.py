@@ -19,6 +19,7 @@ TOKEN = re.compile(r"\$(block|item|mob|sound|biome|dimension):([a-z0-9_]+(?:/[a-
 TOOL_TAGS = {"pickaxe": "pickaxe", "axe": "axe", "shovel": "shovel", "hoe": "hoe"}
 LEVEL_TAGS = {"stone": "needs_stone_tool", "iron": "needs_iron_tool", "diamond": "needs_diamond_tool"}
 ORE_FAMILIES = {"ore", "deep_ore", "glow_ore"}
+FACING_FAMILIES = {"facing", "facing_machine"}
 # Not cubes, so like vanilla's flowers, what these look like in an inventory is a flat picture of the texture. A sculpted block's texture is a picture of it for just that.
 FLAT_ICON_FAMILIES = {"model", "plant", "glow_plant", "tinted_plant", "crop", "ladder"}
 # What vanilla's grasses are coloured by when they're held, away from any biome.
@@ -817,7 +818,9 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
             if block["family"] == "connected":
                 for shape in range(1 << len(CONNECTED_ARMS)):
                     _write_json(pack / f"assets/gm/models/block/{slot}_c{shape}.json", _connected_model(slot, shape))
-            settings = {key: block[key] for key in ("hardness", "growth") if key in block}
+            settings = {key: block[key] for key in ("hardness", "growth", "facing", "light", "redstone", "comparator", "unbreakable", "glowing") if key in block}
+            if block["family"] in FACING_FAMILIES:
+                settings.setdefault("facing", "horizontal")
             settings.update({key: _resolve_tokens(block[key], feature_id, ledger) for key in ("on", "connects") if key in block})
             if settings:
                 block_settings[slot] = settings
@@ -825,6 +828,10 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
                         _loot_table(block, name, slot, feature_id, ledger))
             if block.get("inventory"):
                 machine_inventories[slot] = block["inventory"]
+            if block.get("unbreakable"):
+                # The two bosses that break whatever's in their way go by these lists and nothing else.
+                tags.setdefault("wither_immune", []).append(f"gm:{slot}")
+                tags.setdefault("dragon_immune", []).append(f"gm:{slot}")
             tool = block.get("tool")
             if tool:
                 if tool not in TOOL_TAGS:

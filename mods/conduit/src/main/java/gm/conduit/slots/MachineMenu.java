@@ -52,16 +52,34 @@ final class MachineMenu extends AbstractContainerMenu {
 	}
 
 	private static final class Held extends Slot {
+		private final SlotBlockEntity machine;
 		private final boolean output;
 
-		Held(Container container, int slot, boolean output) {
-			super(container, slot, 0, 0);
+		Held(SlotBlockEntity machine, int slot, boolean output) {
+			super(machine, slot, 0, 0);
+			this.machine = machine;
 			this.output = output;
 		}
 
 		@Override
 		public boolean mayPlace(ItemStack stack) {
 			return !this.output && this.container.canPlaceItem(getContainerSlot(), stack);
+		}
+
+		@Override
+		public int getMaxStackSize() {
+			return this.machine.limitOf(getContainerSlot());
+		}
+
+		@Override
+		public boolean mayPickup(Player player) {
+			return this.machine.mayTake(getContainerSlot(), player);
+		}
+
+		@Override
+		public void onTake(Player player, ItemStack stack) {
+			super.onTake(player, stack);
+			this.machine.taken(getContainerSlot(), stack, player);
 		}
 	}
 
@@ -107,6 +125,9 @@ final class MachineMenu extends AbstractContainerMenu {
 			slot.setByPlayer(ItemStack.EMPTY);
 		} else {
 			slot.setChanged();
+		}
+		if (index < this.size) {
+			slot.onTake(player, before.copyWithCount(before.getCount() - stack.getCount()));
 		}
 		return before;
 	}

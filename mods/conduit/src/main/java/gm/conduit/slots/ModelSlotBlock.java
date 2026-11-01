@@ -1,6 +1,5 @@
 package gm.conduit.slots;
 
-import de.tomalbrc.bil.core.holder.positioned.PositionedHolder;
 import de.tomalbrc.bil.core.model.Model;
 import eu.pb4.polymer.virtualentity.api.BlockWithElementHolder;
 import eu.pb4.polymer.virtualentity.api.ElementHolder;
@@ -24,12 +23,17 @@ public final class ModelSlotBlock extends MachineSlotBlock implements BlockWithE
 	}
 
 	@Override
+	protected boolean turns() {
+		return true;
+	}
+
+	@Override
 	public ElementHolder createElementHolder(ServerLevel level, BlockPos pos, BlockState state) {
 		Model model = BlockModels.model(slotId());
 		if (model == null) {
 			return null;
 		}
-		PositionedHolder holder = new PositionedHolder(model);
+		SlotModelHolder holder = new SlotModelHolder(model, state.getValue(FACING), BlockSettings.of(slotId()).glowing());
 		if (model.animations().containsKey(IDLE)) {
 			holder.getAnimator().playAnimation(IDLE);
 		}

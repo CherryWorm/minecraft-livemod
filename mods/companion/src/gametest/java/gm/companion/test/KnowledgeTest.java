@@ -110,6 +110,27 @@ public final class KnowledgeTest implements FabricClientGameTest {
 		context.waitFor(client -> client.level == null && client.gui.screen() instanceof TitleScreen, TICKS_PER_MINUTE);
 	}
 
+	/** What a client has really been told about each part of a model, for a test to compare with what a module asked for. */
+	private static String describeParts(net.minecraft.client.Minecraft client, BlockPos pos) {
+		var box = new net.minecraft.world.phys.AABB(pos).inflate(0.5);
+		StringBuilder parts = new StringBuilder("[");
+		var displays = new java.util.ArrayList<>(client.level.getEntitiesOfClass(net.minecraft.world.entity.Display.ItemDisplay.class, box));
+		displays.sort(java.util.Comparator.comparingInt(net.minecraft.world.entity.Entity::getId));
+		for (var display : displays) {
+			var look = display.renderState().transformation().get(1.0F);
+			var translation = look.translation();
+			var rotation = look.leftRotation();
+			var stack = display.getSlot(0).get();
+			var brightness = display.getBrightnessOverride();
+			var tint = stack.get(DataComponents.DYED_COLOR);
+			parts.append(parts.length() > 1 ? "," : "").append(String.format(java.util.Locale.ROOT,
+					"{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f,\"scale\":%.3f,\"rotation\":\"%.2f %.2f %.2f %.2f\",\"brightness\":%d,\"tint\":%d}",
+					translation.x(), translation.y(), translation.z(), look.scale().x(), rotation.x(), rotation.y(), rotation.z(), rotation.w(),
+					brightness == null ? -1 : brightness.block(), tint == null ? -1 : tint.rgb() & 0xFFFFFF));
+		}
+		return parts.append("]").toString();
+	}
+
 	private void act(ClientGameTestContext context, String request) {
 		String[] words = request.split(" ");
 		switch (words[0]) {
@@ -265,6 +286,13 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				String seen = context.computeOnClient(client -> client.level.getBlockState(pos).toString());
 				LOGGER.info("[M8] the client sees {}", seen);
 			}
+			case "parts" -> {
+				BlockPos pos = new BlockPos(Integer.parseInt(words[1]), Integer.parseInt(words[2]), Integer.parseInt(words[3]));
+				String parts = context.computeOnClient(client -> describeParts(client, pos));
+				LOGGER.info("[M8] parts: {}", parts);
+			}
+			case "hotbarclick" -> context.runOnClient(client -> client.gameMode.handleContainerInput(client.player.containerMenu.containerId,
+					client.player.containerMenu.slots.size() - 9 + Integer.parseInt(words[1]), LEFT_BUTTON, ContainerInput.PICKUP, client.player));
 			case "oldcompanion" -> rejoinWithout(context, "inventory_hooks");
 			case "nopanels" -> rejoinWithout(context, "panel");
 			case "type" -> context.getInput().typeChars(words[1]);

@@ -41,8 +41,12 @@ MAX_CHARACTER = 800
 MAX_STASH = 8
 MOB_SOUNDS = {"idle", "hurt", "death"}
 INVENTORY_KINDS = {"inputs", "fuel", "outputs"}
-MACHINE_FAMILIES = {"machine", "model"}
+MACHINE_FAMILIES = {"machine", "facing_machine", "model"}
+TURNING_FAMILIES = {"facing", "facing_machine", "model"}
+FACING_WAYS = {"horizontal", "all"}
+MOST_LIGHT = 15
 MOST_MACHINE_SLOTS = 27
+MOST_IN_A_SLOT = 99
 MOST_HARDNESS = 5
 CROP_STAGES = 4
 NOT_CUBES = {"plant", "glow_plant", "tinted_plant", "crop", "connected", "model", "cutout", "ladder"}
@@ -396,12 +400,72 @@ def check_block_drops(features):
                 _fail(f"Block {feature_id}/{name} has an empty list of drops. Leave it out, and it drops itself.")
 
 
+def _model_parts(path):
+    """The names of a model's parts, which are what a feature or a module calls them by."""
+    model = json.loads(path.read_text(encoding="utf-8"))
+
+    def names(node):
+        for child in node.get("children", []):
+            if isinstance(child, dict):
+                yield child.get("name")
+                yield from names(child)
+
+    # Newer files keep a part's name in a list of their own, and only refer to it from the outline.
+    return {group.get("name") for group in model.get("groups", []) if isinstance(group, dict)} | {
+        name for root in model.get("outliner", []) if isinstance(root, dict) for name in (root.get("name"), *names(root))}
+
+
+def _check_unbreakable_stays_out_of_hands(features):
+    """Something nobody can ever break is a wall in someone's base for good if players can place it, so only a ruin or a module can."""
+    unbreakable = {f"$block:{name}" for feature in features.values() for name, block in feature["manifest"].get("blocks", {}).items() if block.get("unbreakable")}
+    unbreakable |= {f"$block:{feature_id}/{name}" for feature_id, feature in features.items() for name, block in feature["manifest"].get("blocks", {}).items() if block.get("unbreakable")}
+    if not unbreakable:
+        return
+    for feature_id, feature in features.items():
+        for name, item in feature["manifest"].get("items", {}).items():
+            if (item.get("places") or {}).get("block") in unbreakable:
+                _fail(f"Item {feature_id}/{name} places an unbreakable block, which a player could then never remove. Only a ruin or a module can put one in the world.")
+        for name, recipe in feature["manifest"].get("recipes", {}).items():
+            made = [(recipe.get("json") or {}).get("result"), recipe.get("output"), *(recipe.get("outputs") or [])]
+            found = {str(thing.get("id") or thing.get("item")) for thing in made if isinstance(thing, dict)} | {str(thing) for thing in made if isinstance(thing, str)}
+            if found & unbreakable:
+                _fail(f"Recipe {feature_id}/{name} makes an unbreakable block, which a player could then never remove. Only a ruin or a module can put one in the world.")
+
+
+def _check_block_settings(feature, label, block):
+    family = block.get("family")
+    if "facing" in block:
+        if family not in TURNING_FAMILIES:
+            _fail(f"{label} has facing, which only a facing, facing_machine or model block can. A family can't change once it's out, so make a new block in one of those.")
+        if block["facing"] not in FACING_WAYS:
+            _fail(f"{label} has facing {block['facing']!r}. Use {sorted(FACING_WAYS)}: horizontal turns its front towards whoever places it, and all can also point up or down.")
+    if "light" in block and not (isinstance(block["light"], int) and not isinstance(block["light"], bool) and 0 <= block["light"] <= MOST_LIGHT):
+        _fail(f"{label} has light {block['light']!r}. It's a whole number from 0 to {MOST_LIGHT}.")
+    for field in ("redstone", "comparator", "unbreakable"):
+        if field in block and not isinstance(block[field], bool):
+            _fail(f"{label} has {field} {block[field]!r}, which is true or false.")
+    if block.get("unbreakable") and "hardness" in block:
+        _fail(f"{label} is unbreakable and has a hardness, and only one of them can mean anything.")
+    glowing = block.get("glowing")
+    if glowing is not None:
+        if family != "model":
+            _fail(f"{label} has glowing parts, which only a model block has. For a cube, use emissive.")
+        if not (isinstance(glowing, list) and all(isinstance(part, str) for part in glowing)):
+            _fail(f"{label} has glowing {glowing!r}. It's a list of the names of parts in its model.")
+        path = feature["dir"] / "assets" / "models" / f"{block.get('model')}.bbmodel"
+        missing = set(glowing) - _model_parts(path) if path.exists() else set()
+        if missing:
+            _fail(f"{label} has glowing parts {sorted(missing)}, which its model doesn't have.")
+
+
 def check_block_kinds(features):
     """What each kind of block needs is easy to get wrong, and most of it would just quietly look or act wrong."""
+    _check_unbreakable_stays_out_of_hands(features)
     for feature_id, feature in features.items():
         for name, block in feature["manifest"].get("blocks", {}).items():
             label = f"Block {feature_id}/{name}"
             family = block.get("family")
+            _check_block_settings(feature, label, block)
             if "hardness" in block and not (isinstance(block["hardness"], (int, float)) and not isinstance(block["hardness"], bool) and 0 <= block["hardness"] <= MOST_HARDNESS):
                 _fail(f"{label} has hardness {block['hardness']!r}. It's from 0, which breaks at once, up to {MOST_HARDNESS}. For anything harder, use a family that is.")
             if family == "crop":
@@ -638,10 +702,15 @@ def check_machines(features):
             label = f"Block {feature_id}/{name}"
             if block.get("family") not in MACHINE_FAMILIES:
                 _fail(f"{label} has an inventory, which only a machine or model block can have.")
-            if not isinstance(inventory, dict) or not set(inventory) <= INVENTORY_KINDS or not all(isinstance(count, int) and not isinstance(count, bool) and count >= 0 for count in inventory.values()):
+            slots = {kind: count for kind, count in inventory.items() if kind != "limits"} if isinstance(inventory, dict) else None
+            if slots is None or not set(slots) <= INVENTORY_KINDS or not all(isinstance(count, int) and not isinstance(count, bool) and count >= 0 for count in slots.values()):
                 _fail(f"{label} has inventory {inventory!r}. It's whole numbers of slots, like {{\"inputs\": 2, \"fuel\": 1, \"outputs\": 1}}.")
-            if not 0 < sum(inventory.values()) <= MOST_MACHINE_SLOTS:
-                _fail(f"{label} has {sum(inventory.values())} slots in its inventory. It can have from 1 to {MOST_MACHINE_SLOTS}.")
+            if not 0 < sum(slots.values()) <= MOST_MACHINE_SLOTS:
+                _fail(f"{label} has {sum(slots.values())} slots in its inventory. It can have from 1 to {MOST_MACHINE_SLOTS}.")
+            limits = inventory.get("limits", {})
+            for slot, limit in limits.items() if isinstance(limits, dict) else [(None, None)]:
+                if not (str(slot).isdigit() and int(slot) < sum(slots.values()) and isinstance(limit, int) and not isinstance(limit, bool) and 1 <= limit <= MOST_IN_A_SLOT):
+                    _fail(f"{label} has limits {limits!r}. It's how many fit in a slot, from 1 to {MOST_IN_A_SLOT}, by the slot's number, like {{\"0\": 1}}, and it has slots 0 to {sum(slots.values()) - 1}.")
         for name, recipe in feature["manifest"].get("recipes", {}).items():
             if not isinstance(recipe.get("machine"), str):
                 continue

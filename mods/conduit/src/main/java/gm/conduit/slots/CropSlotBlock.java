@@ -61,6 +61,7 @@ public final class CropSlotBlock extends SlotBlock implements BonemealableBlock 
 
 	@Override
 	protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
+		super.createBlockStateDefinition(builder);
 		builder.add(AGE);
 	}
 

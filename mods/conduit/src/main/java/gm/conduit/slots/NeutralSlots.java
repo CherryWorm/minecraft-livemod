@@ -55,7 +55,7 @@ public final class NeutralSlots {
 		for (SlotFamily family : SlotFamily.values()) {
 			for (int i = 0; i < family.count(); i++) {
 				Block block = registerBlock("s%04d".formatted(family.firstId() + i), family);
-				if (family == SlotFamily.MACHINE || family == SlotFamily.MODEL) {
+				if (block instanceof MachineSlotBlock) {
 					machines.add(block);
 				}
 			}
@@ -75,6 +75,8 @@ public final class NeutralSlots {
 		var properties = family.properties().setId(ResourceKey.create(Registries.BLOCK, id));
 		Block block = switch (family) {
 			case MACHINE -> new MachineSlotBlock(properties, family, model, path);
+			case FACING -> new FacingSlotBlock(properties, family, model, path);
+			case FACING_MACHINE -> new FacingMachineSlotBlock(properties, family, model, path);
 			case MODEL -> new ModelSlotBlock(properties, family, model, path);
 			case CROP -> new CropSlotBlock(properties, family, model, path);
 			case CONNECTED -> new ConnectedSlotBlock(properties, family, model, path);

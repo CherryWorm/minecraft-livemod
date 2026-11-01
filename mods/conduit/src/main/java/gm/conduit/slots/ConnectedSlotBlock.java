@@ -63,6 +63,7 @@ public final class ConnectedSlotBlock extends SlotBlock {
 
 	@Override
 	protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
+		super.createBlockStateDefinition(builder);
 		for (Direction direction : DIRECTIONS) {
 			builder.add(PipeBlock.PROPERTY_BY_DIRECTION.get(direction));
 		}
@@ -89,7 +90,10 @@ public final class ConnectedSlotBlock extends SlotBlock {
 	}
 
 	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
+	public @Nullable BlockState getStateForPlacement(BlockPlaceContext context) {
+		if (!canPlace(context)) {
+			return null;
+		}
 		BlockState state = defaultBlockState();
 		for (Direction direction : DIRECTIONS) {
 			BlockState neighbour = context.getLevel().getBlockState(context.getClickedPos().relative(direction));

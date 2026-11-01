@@ -18,15 +18,21 @@ public final class MachineInventories {
 	private static final Logger LOGGER = LoggerFactory.getLogger("Conduit");
 	private static final Path FILE = Path.of("config", "conduit", "machine_inventories.json");
 	private static final Map<String, Layout> LAYOUTS = new HashMap<>();
-	private static final Layout NONE = new Layout(0, 0, 0);
+	private static final Layout NONE = new Layout(0, 0, 0, Map.of());
 
-	public record Layout(int inputs, int fuel, int outputs) {
+	/** @param limits how many fit in a slot, for those that say */
+	public record Layout(int inputs, int fuel, int outputs, Map<Integer, Integer> limits) {
 		public int size() {
 			return this.inputs + this.fuel + this.outputs;
 		}
 
 		public boolean isOutput(int slot) {
 			return slot >= this.inputs + this.fuel;
+		}
+
+		/** How many this slot holds at most, or the given number if it doesn't say. */
+		int limit(int slot, int otherwise) {
+			return this.limits.getOrDefault(slot, otherwise);
 		}
 	}
 
@@ -50,7 +56,11 @@ public final class MachineInventories {
 			JsonObject json = new Gson().fromJson(Files.readString(FILE), JsonObject.class);
 			for (Map.Entry<String, JsonElement> entry : json.entrySet()) {
 				JsonObject layout = entry.getValue().getAsJsonObject();
-				LAYOUTS.put(entry.getKey(), new Layout(count(layout, "inputs"), count(layout, "fuel"), count(layout, "outputs")));
+				Map<Integer, Integer> limits = new HashMap<>();
+				if (layout.has("limits")) {
+					layout.getAsJsonObject("limits").asMap().forEach((slot, limit) -> limits.put(Integer.parseInt(slot), limit.getAsInt()));
+				}
+				LAYOUTS.put(entry.getKey(), new Layout(count(layout, "inputs"), count(layout, "fuel"), count(layout, "outputs"), limits));
 			}
 		} catch (IOException | RuntimeException error) {
 			LOGGER.error("Can't read {}", FILE, error);

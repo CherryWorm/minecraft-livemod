@@ -21,10 +21,12 @@ import gm.conduit.knowledge.Codex;
 import gm.conduit.knowledge.Knowledge;
 import gm.conduit.provenance.Provenance;
 import gm.conduit.slots.ButtonMenu;
+import gm.conduit.slots.SlotBlock;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
@@ -114,6 +116,12 @@ public final class ServerModuleHost {
 	}
 
 	public static void register() {
+		PlayerBlockBreakEvents.BEFORE.register((level, player, pos, state, blockEntity) -> {
+			if (!(level instanceof ServerLevel serverLevel) || !(player instanceof ServerPlayer serverPlayer)) {
+				return true;
+			}
+			return INSTANCE.mayBreak(serverPlayer, serverLevel, pos, state);
+		});
 		PlayerBlockBreakEvents.AFTER.register((level, player, pos, state, blockEntity) -> {
 			if (level instanceof ServerLevel serverLevel && player instanceof ServerPlayer serverPlayer) {
 				INSTANCE.fire(events -> events.blockBroken(serverPlayer, serverLevel, pos, state, blockEntity));
@@ -141,6 +149,30 @@ public final class ServerModuleHost {
 				guard(module, () -> tick.accept(server));
 			}
 		}
+	}
+
+	private boolean mayBreak(ServerPlayer player, ServerLevel level, BlockPos pos, BlockState state) {
+		if (state.getBlock() instanceof SlotBlock block) {
+			BlockBehavior behavior = this.blocks.get(block.slotId());
+			if (behavior != null && !guarded(block.slotId(), true, () -> behavior.canBreak(state, level, pos, player))) {
+				return false;
+			}
+		}
+		return allAgree(events -> events.canBreak(player, level, pos, state));
+	}
+
+	/** Asks every module that's listening, until one says no. One that throws doesn't get a say. */
+	private boolean allAgree(Predicate<WorldEvents> question) {
+		for (LoadedModule module : List.copyOf(this.modules.values())) {
+			for (WorldEvents events : module.events) {
+				boolean[] agrees = {true};
+				guard(module, () -> agrees[0] = question.test(events));
+				if (!agrees[0]) {
+					return false;
+				}
+			}
+		}
+		return true;
 	}
 
 	/** Tells every module that's listening. One that throws only loses its own turn. */
@@ -434,6 +466,24 @@ public final class ServerModuleHost {
 		@Override
 		public boolean isNatural(Level level, BlockPos pos) {
 			return !Provenance.isTouched(level.getChunk(pos), pos);
+		}
+
+		@Override
+		public void setLight(Level level, BlockPos pos, int light) {
+			BlockState state = level.getBlockState(pos);
+			if (state.getBlock() instanceof SlotBlock) {
+				level.setBlock(pos, state.setValue(SlotBlock.LIGHT, Math.clamp(light, 0, 15)), Block.UPDATE_ALL);
+			}
+		}
+
+		/** Strong redstone reaches through the block next to it, so what's around those has to ask again too. */
+		@Override
+		public void redstoneChanged(Level level, BlockPos pos) {
+			Block block = level.getBlockState(pos).getBlock();
+			level.updateNeighborsAt(pos, block, null);
+			for (Direction side : Direction.values()) {
+				level.updateNeighborsAt(pos.relative(side), block, null);
+			}
 		}
 
 		@Override

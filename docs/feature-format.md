@@ -124,11 +124,8 @@ Other builders may be changing the same feature right now, and neither of you ca
 **If something that's gone out changes the same lines as you,** a check will stop and say which files, and it doesn't cost you a try. Those files now have both versions in them, marked the way git marks them, with yours first and what's out second:
 
 ```
-<<<<<<< HEAD
 yours
-=======
 what's out
->>>>>>> main
 ```
 
 Keep what both need and take out the marker lines. Nothing can go any further until you have. `git log main -- <file>` says who changed it, and `git show main:<file>` shows what's out. Art can't show both, so a picture you both changed is left as what's out, and the answer tells you how to get yours back.
@@ -156,10 +153,12 @@ A family fixes what can't change on a live block. `stone`, `ore`, `deep_ore`, `m
 | `crop` | One crop with all four growth stages in one block. See below. Only 7 exist |
 | `connected` | A thin line that grows arms toward its neighbours, like a cable. See below. Only 2 exist |
 | `ladder` | Something to climb, on a wall. See below. Only 10 exist |
+| `facing` | A cube with a front or a top, turned the way it's placed, like a log. It breaks in about a second and always drops. See "Which way it faces" |
+| `facing_machine` | A `machine` with a front, turned the way it's placed, like a furnace |
 
 Families are limited, and a name stays assigned to its slot forever, so don't create blocks casually. A block's family can never change once it's been released.
 
-A cube block can have different textures on its faces. `side` covers any side you don't name, and a face with nothing named uses `texture`. A block always faces the same way once placed, so `front` is always north, and it can't turn to face the player.
+A cube block can have different textures on its faces. `side` covers any side you don't name, and a face with nothing named uses `texture`. A block in any family but the two below always faces the same way once placed, so `front` is always north.
 
 ```json
 "press": {"family": "machine", "display": "Press", "texture": "press_side",
@@ -174,7 +173,32 @@ A `model` block is any shape you can model, with moving parts, for machines that
 
 An animation called `idle` plays by itself. Start and stop others from a module with `machine.play("stamp")` and `machine.stop("stamp")`. Every moving part is an entity for players' computers to draw, so this suits things that matter. Use a cube for anything players will place by the hundred.
 
-To show a value on it, like a gauge, make one animation that sweeps from empty to full and hold it at the right point with `machine.show("fill", 0.75)`. Call it whenever the value changes. It stays there, even through a restart, until `machine.stop("fill")`.
+To show a value on it, like a gauge, make one animation that sweeps from empty to full and hold it at the right point with `machine.show("fill", 0.75)`. Call it whenever the value changes. It stays there, even through a restart, until `machine.stop("fill")`. Several can be held at once, as long as they don't move the same parts.
+
+A module can also change one part by its name in the model, which goes on top of whatever an animation is doing to it and stays through a restart, so call these whenever the value changes:
+
+```java
+machine.movePart("piston", 0, level * 0.5F, 0);  // in blocks
+machine.turnPart("needle", 0, 0, pressure * 180); // in degrees: pitch, yaw, roll
+machine.scalePart("tank", 1, fill, 1);            // times its size
+machine.tintPart("tank", 0x55CCFF);               // multiplies its colours, so paint it in light greys
+machine.glowPart("core", 15);                     // gives it its own light, from 0 to 15, whatever's around it
+machine.resetPart("piston");                      // back to how its model says
+```
+
+Each returns false if the model has no part of that name. Parts that should always glow go in the block: `"glowing": ["core"]`.
+
+### Which way it faces
+
+```json
+"kiln": {"family": "facing_machine", "display": "Kiln", "texture": "kiln_side", "tool": "pickaxe",
+         "faces": {"front": "kiln_front", "side": "kiln_side", "top": "kiln_top"}, "facing": "horizontal"},
+"statue": {"family": "model", "display": "Statue", "texture": "statue_icon", "model": "statue", "facing": "all"}
+```
+
+`"facing": "horizontal"` turns its front towards whoever places it, which is what a `facing` or `facing_machine` block does if you leave it out. `"facing": "all"` does that up and down as well, for something that points at what it's placed on, like a dispenser. A `model` block doesn't turn at all unless it says, and its front is the side of the model towards north, which is Z going negative. Only these three families can do this, and each `facing` or `facing_machine` block costs six of a limited kind of client block, so there are only 40 of each.
+
+A module reads it with `machine.facing()`, or `state.getValue(BlockStateProperties.FACING)` for a block with no machine in it, and turns one with `level.setBlockAndUpdate(pos, state.setValue(BlockStateProperties.FACING, Direction.EAST))`.
 
 ### Crops
 
@@ -214,6 +238,39 @@ A player's game works out climbing for itself, from what it takes a block to be,
 - **`"drops": "nothing"`** means it never drops anything, not even with silk touch.
 - **`"emissive": true`** draws a cube at full brightness even in the dark, so it seems to glow, without giving off any light. For light as well, use the `glow` or `glow_ore` family. Dark pixels stay dark, so paint it with that in mind.
 - **`"from_module": true`** says a module hands this out, or places it. It then counts as something players can get, which no check can see for itself, so it's on you that the module really does.
+- **`"light": 9`** gives off that much light, from 0 to 15, on any block, and a module can change it: `context.setLight(level, pos, 15)` or `machine.setLight(15)`. It stays with that block through a restart. A release changing this only reaches new ones, because it's part of what's in the world. The `glow` family starts at 12 and `glow_ore` at 4 if you leave it out, and everything else at 0.
+- **`"unbreakable": true`** means nothing in the game can break or move it: no tool, explosion, piston, wither or dragon, like bedrock. Someone in creative mode still can, and so can a module. Players could never get rid of one, so it can't be crafted or placed by an item. Only a ruin or a module can put one in the world.
+- **`"redstone": true`** lets it give a redstone signal, and **`"comparator": true`** lets a comparator read it. See "Redstone".
+
+### Redstone
+
+```java
+context.bindBlock("beacon_post", new BlockBehavior() {
+    @Override
+    public int redstone(BlockState state, Level level, BlockPos pos, Direction side) {
+        return side == Direction.EAST ? 15 : 0;
+    }
+
+    @Override
+    public void neighborChanged(BlockState state, Level level, BlockPos pos, Block neighbor) {
+        int power = level.getBestNeighborSignal(pos);
+    }
+});
+```
+
+`redstone` is what it gives out of each side, from 0 to 15, and needs `"redstone": true`. The game asks this often, so keep it quick and change nothing from it. Whenever the answer would change, call `context.redstoneChanged(level, pos)`, or nothing around it will ask again. `strongRedstone` is the same but reaches through the block it runs into, as a redstone torch does upwards. Most blocks don't need it.
+
+`neighborChanged` is something next to it changing, which is when the power reaching it may have changed. `level.getBestNeighborSignal(pos)` is the strongest signal reaching it from any side, `level.hasNeighborSignal(pos)` is whether there's any, and `level.getSignal(pos.relative(side), side)` is what's coming from one side. A machine can use `machine.redstoneInput()` from its `tick` instead, and something that should react a little later can call `level.scheduleTick(pos, state.getBlock(), 4)` and do it in `scheduledTick`.
+
+`comparator(state, level, pos)` is what a comparator reads, and needs `"comparator": true`. A machine with an inventory gives what a chest would if you leave it out.
+
+### Placing and breaking
+
+- `BlockBehavior.canPlace(context)` is asked just before a player places it, and saying no leaves it in their hand. `context` has the player, the item, and where, as `context.getClickedPos()`. `placed(state, level, pos, by, stack)` is it having just been placed.
+- `BlockBehavior.canBreak(state, level, pos, player)` is asked when it would break, and saying no leaves it there. The cracks still spread while they dig, so for a block that should never give at all use `"unbreakable"`. Explosions, pistons and modules don't ask.
+- `WorldEvents.canBreak(player, level, pos, state)` is the same for any block in the world, vanilla's too, and `WorldEvents.blockPlaced(player, level, pos, state, stack)` is any block a player places. Any module saying no is enough.
+
+### Crops
 
 ## Names
 
@@ -338,6 +395,7 @@ Names passed to `bindBlock`, `bindItem` and `bindMachine` are the ones in `featu
 What each behaviour can do is in `/reference/conduit-api/`, and all of it is optional except a machine's `tick`. A few that are easy to miss:
 
 - `BlockBehavior.removed(state, level, pos)` runs when the block has left the world, however it went: broken, blown up, pushed by a piston, or replaced by a command or a module. Use it to take something off a list the moment it goes, instead of sweeping for it. It doesn't run for a chunk unloading, or for anything that happens while your module isn't loaded, so don't rely on it alone for what has to stay exactly right.
+- `MachineBehavior.outputTaken(machine, slot, stack, player)` runs when a player takes something from an output slot, such as to give them experience the way a furnace does. A hopper emptying it doesn't count. `canTake(machine, slot, player)` can stop them, for a machine that's still busy.
 - `MachineBehavior.removed(machine)` runs just before a machine goes, while `machine.data()` is still there, so it's where a machine drops what it holds. A command replacing it doesn't count, in the same way a chest's contents don't drop then.
 - `MobBehavior.interact(mob, player, hand)` is a player using something on a mob. See "Mobs" in `docs/content-types.md`.
 - `ItemBehavior.useOnEntity(stack, player, target, hand)` is this item used on a mob, if the mob itself had nothing to do with it. `ItemBehavior.mineBlock(stack, level, state, pos, miner)` is this item having just broken a block, which vanilla doesn't report for a player in creative mode.
