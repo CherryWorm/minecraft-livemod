@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """What modules can hook into, proved on a real client and by reading the world's raw files. A feature plays its own sound by
 name and hears about blocks broken, mobs killed, food eaten and players joining. A block's removal is noticed however it goes,
-and a machine can still read its data then. A mob can be fed by using an item on it. Start with a blank world from
-reset-dev-world.sh, and reset it afterwards.
+and a machine can still read its data then. A mob can be fed by using an item on it. Ruins follow the terrain, pick between
+layouts and keep their distance. Start with a blank world from reset-dev-world.sh, and reset it afterwards.
 
 Usage: python3 -m broker.tests.m16_test
 """
 import base64
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,8 @@ FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "hooks"
 PLAYER = "Player0"
 SPOT = (40, 120, 40)
 TEXTURES = ("hook_block", "hook_machine", "hook_food", "hook_token")
+LAND = ((-128, -128, 127, 127), (128, -128, 383, 127))
+LAND_CHUNKS = 512
 
 
 def make_sound(path):
@@ -62,6 +65,91 @@ def release():
     if result.returncode != 0:
         print(promoted.get("reason"), flush=True)
         sys.exit(1)
+
+
+def generate_land():
+    """Ruins only turn up in chunks nobody has been in, so this happens before anyone joins. It waits for the patches to catch up."""
+    mark = runtime.utc_now()
+    for x1, z1, x2, z2 in LAND:
+        runtime.rcon("prod", "forceload", "add", str(x1), str(z1), str(x2), str(z2))
+    deadline = time.monotonic() + 600
+    chunks = 0
+    while time.monotonic() < deadline and chunks < LAND_CHUNKS:
+        time.sleep(5)
+        found = re.findall(r"retrogen: queued=\d+ chunks=(\d+)", runtime.logs_since("prod", mark))
+        chunks = int(found[-1]) if found else 0
+    print(f"{chunks} chunks of land patched", flush=True)
+    runtime.rcon("prod", "save-all", "flush")
+    time.sleep(5)
+
+
+class World:
+    """Reads the world's raw files, so this can't be fooled by the mod's own idea of what it placed."""
+
+    def __init__(self):
+        sys.path.insert(0, str(runtime.REPO / "broker" / "gates"))
+        from world_diff import block_name, decode, read_chunks
+
+        self.decode, self.block_name = decode, block_name
+        self.sections, self.decoded = {}, {}
+        for regions in (runtime.RUNTIME / "prod" / "world").rglob("region"):
+            for path in regions.glob("*.mca"):
+                for x, z, chunk in read_chunks(path):
+                    for section in chunk.get("sections", []):
+                        self.sections[(x, z, section["Y"])] = section
+
+    def _read(self, key):
+        if key not in self.decoded:
+            self.decoded[key] = self.decode(self.sections[key])
+        return self.decoded[key]
+
+    def block_at(self, x, y, z):
+        key = (x >> 4, z >> 4, y >> 4)
+        if key not in self.sections:
+            return "minecraft:air"
+        blocks, palette = self._read(key)
+        return palette[blocks[(y & 15) << 8 | (z & 15) << 4 | x & 15]]
+
+    def find(self, block):
+        """Every place this block is, as (x, y, z). It only unpacks sections whose palette mentions it."""
+        found = []
+        for key, section in self.sections.items():
+            names = {self.block_name(entry) for entry in section.get("block_states", {}).get("palette", [])}
+            if block in names:
+                blocks, palette = self._read(key)
+                wanted = palette.index(block)
+                found += [(key[0] * 16 + (i & 15), key[2] * 16 + (i >> 8), key[1] * 16 + (i >> 4 & 15))
+                          for i, value in enumerate(blocks) if value == wanted]
+        return found
+
+
+def check_ruins(results):
+    manifest = json.loads((FIXTURE / "feature.json").read_text(encoding="utf-8"))
+    ruins = manifest["ruins"]
+    world = World()
+
+    wall = ruins["bending_wall"]
+    by_chunk = {}
+    for x, y, z in world.find("minecraft:magenta_concrete"):
+        by_chunk.setdefault((x >> 4, z >> 4), []).append((x, y, z))
+    whole = sum(1 for spots in by_chunk.values() if len(spots) == len(wall["parts"]))
+    results.append(report("ruins that follow the terrain were placed, whole", by_chunk and whole == len(by_chunk), f"{whole} of {len(by_chunk)}"))
+    flush = [world.block_at(x, y - 1, z) in wall["on"] for spots in by_chunk.values() for x, y, z in spots]
+    # Sand and gravel can hang over a cave from worldgen until something disturbs them, so now and then the ground falls away afterwards.
+    results.append(report("each part sits right on the ground under it", flush and sum(flush) >= len(flush) * 0.98, f"{sum(flush)} of {len(flush)} parts"))
+    rises = [max(y for _, y, _ in spots) - min(y for _, y, _ in spots) for spots in by_chunk.values()]
+    results.append(report("they bend with the land", any(rises), f"heights across each: {sorted(rises)[-8:]}"))
+    results.append(report("they stay within maxSlope", rises and max(rises) <= wall["maxSlope"], f"largest {max(rises, default=None)}"))
+
+    first, second, sometimes = (world.find(f"minecraft:{name}") for name in ("lime_concrete", "orange_concrete", "target"))
+    results.append(report("a ruin picks between its layouts", first and second, f"{len(first)} of one, {len(second)} of the other"))
+    results.append(report("a part with a chance is only there some of the time", 0 < len(sometimes) < len(first), f"{len(sometimes)} of {len(first)}"))
+
+    spots = {(x >> 4, z >> 4) for x, _, z in world.find("minecraft:lodestone")}
+    gaps = [max(abs(a[0] - b[0]), abs(a[1] - b[1])) for a in spots for b in spots if a != b]
+    spacing = ruins["far_apart"]["spacing"]
+    results.append(report("ruins with spacing keep their distance", len(spots) >= 2 and min(gaps) > spacing,
+                          f"{len(spots)} placed, closest {min(gaps, default=None)} chunks, spacing {spacing}"))
 
 
 def slot(name, table="items"):
@@ -174,7 +262,10 @@ def main():
     build_source()
     print("building and releasing the test feature", flush=True)
     release()
+    generate_land()
     results = []
+    check_ruins(results)
+
     runtime.REPORTS.mkdir(parents=True, exist_ok=True)
     client = Client(runtime.WORK / "mods", runtime.REPORTS / "m16-client.log")
     try:

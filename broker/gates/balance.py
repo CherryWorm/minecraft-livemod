@@ -464,6 +464,11 @@ def _check_cycles(recipes):
     return problems
 
 
+def ruin_layouts(ruin):
+    """A ruin is one fixed shape, or several to pick from."""
+    return ruin.get("layouts") or [ruin.get("parts", [])]
+
+
 def _natural_sources(features):
     """What exists without crafting: blocks the world places, and what mobs and ruin chests hand out."""
     placed, handed_out = set(), set()
@@ -476,7 +481,7 @@ def _natural_sources(features):
             if mob.get("drops"):
                 handed_out.add(f"item:{_key(feature_id, mob['drops']['item'])}")
         for ruin in manifest.get("ruins", {}).values():
-            placed.update(_node(part["block"], feature_id) for part in ruin.get("parts", []) if str(part.get("block")).startswith("$block:"))
+            placed.update(_node(part["block"], feature_id) for layout in ruin_layouts(ruin) for part in layout if str(part.get("block")).startswith("$block:"))
             handed_out.update(f"{found.group(1)}:{_key(feature_id, found.group(2))}"
                               for found in TOKEN.finditer(json.dumps(ruin.get("loot") or {})))
     return placed, handed_out

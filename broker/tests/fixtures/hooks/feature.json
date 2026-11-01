@@ -1,7 +1,7 @@
 {
   "id": "hooks",
   "phase": 1,
-  "summary": "Test fixture for what modules can hook into: sounds by name, world events, a block leaving the world, and feeding a mob.",
+  "summary": "Test fixture for what modules can hook into: sounds by name, world events, a block leaving the world, feeding a mob, and ruins that vary.",
   "blocks": {
     "hook_block": {"family": "soil", "display": "Hook Block", "texture": "hook_block", "retired": true},
     "hook_machine": {"family": "machine", "display": "Hook Machine", "texture": "hook_machine", "retired": true}
@@ -14,5 +14,35 @@
   "mobs": {
     "hook_mob": {"category": "creature", "display": "Hook Mob", "model": "hook_mob", "behaviour": "passive", "health": 8, "damage": 0, "speed": 0.2, "width": 0.8, "height": 0.8}
   },
-  "sounds": ["hook_chime"]
+  "sounds": ["hook_chime"],
+  "ruins": {
+    "bending_wall": {
+      "id": "hooks_bending_wall_v1",
+      "parts": [
+        {"x": 0, "y": 0, "z": 8, "block": "minecraft:magenta_concrete"}, {"x": 3, "y": 0, "z": 8, "block": "minecraft:magenta_concrete"},
+        {"x": 6, "y": 0, "z": 8, "block": "minecraft:magenta_concrete"}, {"x": 9, "y": 0, "z": 8, "block": "minecraft:magenta_concrete"},
+        {"x": 12, "y": 0, "z": 8, "block": "minecraft:magenta_concrete"}, {"x": 15, "y": 0, "z": 8, "block": "minecraft:magenta_concrete"}
+      ],
+      "on": ["minecraft:grass_block", "minecraft:dirt", "minecraft:stone", "minecraft:sand", "minecraft:gravel", "minecraft:snow_block", "minecraft:andesite", "minecraft:granite", "minecraft:diorite", "minecraft:red_sand", "minecraft:terracotta", "minecraft:podzol"],
+      "replaces": ["minecraft:air", "minecraft:short_grass", "minecraft:tall_grass", "minecraft:fern", "minecraft:snow", "minecraft:water", "minecraft:dandelion", "minecraft:poppy"],
+      "chance": 0.5, "minY": 20, "maxY": 250, "followTerrain": true, "maxSlope": 12
+    },
+    "two_shapes": {
+      "id": "hooks_two_shapes_v1",
+      "layouts": [
+        [{"x": 4, "y": 0, "z": 4, "block": "minecraft:lime_concrete"}, {"x": 4, "y": 1, "z": 4, "block": "minecraft:target", "chance": 0.5}],
+        [{"x": 11, "y": 0, "z": 11, "block": "minecraft:orange_concrete"}]
+      ],
+      "on": ["minecraft:grass_block", "minecraft:dirt", "minecraft:stone", "minecraft:sand", "minecraft:gravel", "minecraft:snow_block", "minecraft:andesite", "minecraft:granite", "minecraft:diorite", "minecraft:red_sand", "minecraft:terracotta", "minecraft:podzol"],
+      "replaces": ["minecraft:air", "minecraft:short_grass", "minecraft:tall_grass", "minecraft:fern", "minecraft:snow", "minecraft:water", "minecraft:dandelion", "minecraft:poppy"],
+      "chance": 0.5, "minY": 20, "maxY": 250, "followTerrain": true
+    },
+    "far_apart": {
+      "id": "hooks_far_apart_v1",
+      "parts": [{"x": 7, "y": 0, "z": 7, "block": "minecraft:lodestone"}],
+      "on": ["minecraft:grass_block", "minecraft:dirt", "minecraft:stone", "minecraft:sand", "minecraft:gravel", "minecraft:snow_block", "minecraft:andesite", "minecraft:granite", "minecraft:diorite", "minecraft:red_sand", "minecraft:terracotta", "minecraft:podzol"],
+      "replaces": ["minecraft:air", "minecraft:short_grass", "minecraft:tall_grass", "minecraft:fern", "minecraft:snow", "minecraft:water", "minecraft:dandelion", "minecraft:poppy"],
+      "spacing": 4, "minY": 20, "maxY": 250, "followTerrain": true
+    }
+  }
 }

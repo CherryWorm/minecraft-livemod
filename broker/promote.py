@@ -15,7 +15,7 @@ import sys
 import time
 
 from broker import bundles, deploy, runtime, sign
-from broker.gates import GateFailed, advice, bytecode, client, progression, shadow, static
+from broker.gates import GateFailed, advice, balance, bytecode, client, progression, shadow, static
 
 SERVER_MODS = ("conduit",)
 PROGRESS_SNAPSHOT = "progress_snapshot.json"
@@ -217,7 +217,7 @@ def patches_changed(content, old_content):
             # Each block in a ruin can only overwrite what the ruin says it may, and only a ruin may add a chest.
             for ruin in json.loads(ruins.read_text(encoding="utf-8")):
                 found.extend({"id": ruin["id"], "block": block, "replaces": ruin["replaces"], "adds_block_entities": True}
-                             for block in {part["block"] for part in ruin["parts"]})
+                             for block in {part["block"] for layout in balance.ruin_layouts(ruin) for part in layout})
         return found
 
     old_ids = {patch["id"] for patch in read(old_content)}

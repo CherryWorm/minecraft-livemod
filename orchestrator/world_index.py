@@ -148,7 +148,10 @@ def _guide_feature(manifest, say, not_out):
     for name, ruin in manifest.get("ruins", {}).items():
         side = "underground" if ruin.get("underground") else "on the surface"
         chance = f", about one chunk in {round(1 / ruin['chance'])}" if ruin.get("chance") else ""
-        loot = [say(entry.get("name")) for pool in (ruin.get("loot") or {}).get("pools", []) for entry in pool.get("entries", []) if entry.get("name")]
+        # With spacing, a chance is per spot rather than per chunk, so the distance is the thing worth saying.
+        if ruin.get("spacing"):
+            chance = f", at least {ruin['spacing']} chunks apart"
+        loot =[say(entry.get("name")) for pool in (ruin.get("loot") or {}).get("pools", []) for entry in pool.get("entries", []) if entry.get("name")]
         holds = f", its chest can hold {', '.join(dict.fromkeys(loot))}" if loot else ""
         lines.append(f"- site {name.replace('_', ' ')}: {side}, {places({**ruin, 'underground': False})}{chance}{holds}")
     for name in manifest.get("biomes", {}):

@@ -206,6 +206,42 @@ def check_no_tags_in_patches(features):
                               "so list them instead of using a tag. Only mob spawns can use tags.")
 
 
+def _is_share(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and 0 < value <= 1
+
+
+def check_ruins(features):
+    """The server reads every ruin at once, so one it can't place stops all of them. And one with no way to appear would just never turn up."""
+    for feature_id, feature in features.items():
+        for name, ruin in feature["manifest"].get("ruins", {}).items():
+            label = f"Ruin {feature_id}/{name}"
+            if bool(ruin.get("parts")) == bool(ruin.get("layouts")):
+                _fail(f"{label} needs either parts, for one fixed shape, or layouts, for several to pick from, and not both.")
+            layouts = balance.ruin_layouts(ruin)
+            if not all(layouts):
+                _fail(f"{label} has a layout with nothing in it.")
+            for layout in layouts:
+                for part in layout:
+                    if not all(isinstance(part.get(axis), int) and not isinstance(part.get(axis), bool) and 0 <= part[axis] < 16 for axis in "xz"):
+                        _fail(f"{label} has a part at x {part.get('x')}, z {part.get('z')}. A ruin has to fit in one chunk, so both run from 0 to 15.")
+                    if "chance" in part and not _is_share(part["chance"]):
+                        _fail(f"{label} has a part with chance {part['chance']!r}. It's how often that part is there, above 0 and up to 1.")
+            spacing = ruin.get("spacing")
+            if spacing is not None and (not isinstance(spacing, int) or isinstance(spacing, bool) or spacing < 1):
+                _fail(f"{label} has spacing {spacing!r}. It's a whole number of chunks, at least 1.")
+            if "chance" in ruin and not _is_share(ruin["chance"]):
+                _fail(f"{label} has chance {ruin['chance']!r}. It has to be above 0 and up to 1.")
+            if "chance" not in ruin and not spacing:
+                _fail(f"{label} needs a chance per chunk, or a spacing, or it would never appear.")
+            if ruin.get("followTerrain") and ruin.get("underground"):
+                _fail(f"{label} follows the terrain and is underground. Only something on the surface has terrain to follow.")
+            if "maxSlope" in ruin:
+                if not ruin.get("followTerrain"):
+                    _fail(f"{label} has a maxSlope, which only means something with followTerrain.")
+                if not isinstance(ruin["maxSlope"], int) or isinstance(ruin["maxSlope"], bool) or ruin["maxSlope"] < 0:
+                    _fail(f"{label} has maxSlope {ruin['maxSlope']!r}. It's a whole number of blocks.")
+
+
 def _model_cost(path):
     """Bones that have cubes, because each is an entity for players' computers to draw, and the number of cubes."""
     model = json.loads(path.read_text(encoding="utf-8"))
@@ -292,6 +328,7 @@ def run(features, old_ledger, new_ledger, pool, content):
     check_knowledge(features)
     check_loot_format(features)
     check_no_tags_in_patches(features)
+    check_ruins(features)
     check_model_costs(features)
     check_minds(features)
     balance.run(features)

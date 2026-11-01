@@ -12,6 +12,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
@@ -215,35 +216,73 @@ public final class OrePatchQueue {
 		ChunkPos pos = chunk.getPos();
 		RandomSource random = RandomSource.create(level.getSeed() ^ (patch.id().hashCode() * 0x9E3779B97F4A7C15L)
 				^ (pos.x() * 341873128712L) ^ (pos.z() * 132897987541L));
-		if (random.nextFloat() >= patch.chance()) {
+		if (!patch.spotAt(level.getSeed(), pos) || random.nextFloat() >= patch.chance()) {
 			return;
 		}
+		List<RuinPatch.Part> parts = patch.choose(random);
 		int x = pos.getMinBlockX();
 		int z = pos.getMinBlockZ();
 		BlockPos origin = patch.underground()
 				? new BlockPos(x, patch.minY() + random.nextInt(Math.max(1, patch.maxY() - patch.minY())), z)
 				: new BlockPos(x, chunk.getHeight(Heightmap.Types.OCEAN_FLOOR, x & 15, z & 15) + 1, z);
-		if (origin.getY() < patch.minY() || origin.getY() > patch.maxY()
-				|| !patch.on().contains(chunk.getBlockState(origin.below()).getBlock())
-				|| !(patch.biomes().isEmpty() || patch.biomes().stream().anyMatch(level.getBiome(origin)::is))) {
+		int[] ground = patch.followTerrain() ? groundUnder(chunk, patch, parts) : null;
+		boolean suits = patch.followTerrain() ? ground != null
+				: origin.getY() >= patch.minY() && origin.getY() <= patch.maxY() && patch.on().contains(chunk.getBlockState(origin.below()).getBlock());
+		if (!suits || !(patch.biomes().isEmpty() || patch.biomes().stream().anyMatch(level.getBiome(origin)::is))) {
 			return;
 		}
+		List<BlockPos> spots = parts.stream().map(part -> ground == null ? origin.offset(part.x(), part.y(), part.z())
+				: new BlockPos(x + part.x(), ground[column(part)] + 1 + part.y(), z + part.z())).toList();
 		// All of it or none of it, so no half-built ruin ever appears.
-		for (RuinPatch.Part part : patch.parts()) {
-			if (!patch.replaces().contains(chunk.getBlockState(origin.offset(part.x(), part.y(), part.z())).getBlock())) {
+		for (BlockPos spot : spots) {
+			if (!patch.replaces().contains(chunk.getBlockState(spot).getBlock())) {
 				return;
 			}
 		}
 		Provenance.untracked(() -> {
-			for (RuinPatch.Part part : patch.parts()) {
-				BlockPos spot = origin.offset(part.x(), part.y(), part.z());
-				level.setBlock(spot, part.block().defaultBlockState(), Block.UPDATE_CLIENTS);
+			for (int i = 0; i < spots.size(); i++) {
+				BlockPos spot = spots.get(i);
+				level.setBlock(spot, parts.get(i).block().defaultBlockState(), Block.UPDATE_CLIENTS);
 				if (patch.loot() != null && level.getBlockEntity(spot) instanceof RandomizableContainerBlockEntity chest) {
 					chest.setLootTable(ResourceKey.create(Registries.LOOT_TABLE, Identifier.parse(patch.loot())), random.nextLong());
 				}
 			}
 		});
 		this.ruinsPlaced++;
+	}
+
+	private static int column(RuinPatch.Part part) {
+		return part.x() + part.z() * 16;
+	}
+
+	/** The height of the ground under each column these parts use, or null if somewhere here doesn't suit the ruin. */
+	private static int[] groundUnder(LevelChunk chunk, RuinPatch patch, List<RuinPatch.Part> parts) {
+		int[] ground = new int[16 * 16];
+		Arrays.fill(ground, Integer.MIN_VALUE);
+		int lowest = Integer.MAX_VALUE;
+		int highest = Integer.MIN_VALUE;
+		for (RuinPatch.Part part : parts) {
+			if (ground[column(part)] != Integer.MIN_VALUE) {
+				continue;
+			}
+			BlockPos floor = groundAt(chunk, part.x(), part.z());
+			if (floor.getY() < patch.minY() - 1 || floor.getY() >= patch.maxY() || !patch.on().contains(chunk.getBlockState(floor).getBlock())) {
+				return null;
+			}
+			ground[column(part)] = floor.getY();
+			lowest = Math.min(lowest, floor.getY());
+			highest = Math.max(highest, floor.getY());
+		}
+		return highest - lowest > patch.maxSlope() ? null : ground;
+	}
+
+	/** The heightmap stops at a tree's canopy, and a ruin under the trees should still sit on the forest floor. */
+	private static BlockPos groundAt(LevelChunk chunk, int x, int z) {
+		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos(chunk.getPos().getMinBlockX() + x, chunk.getHeight(Heightmap.Types.OCEAN_FLOOR, x, z), chunk.getPos().getMinBlockZ() + z);
+		while (chunk.getBlockState(pos).is(BlockTags.LEAVES) || chunk.getBlockState(pos).is(BlockTags.LOGS)) {
+			pos.move(Direction.DOWN);
+		}
+		return pos.immutable();
 	}
 
 	private void growPlants(ServerLevel level, LevelChunk chunk, SurfacePatch patch) {

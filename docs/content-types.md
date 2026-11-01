@@ -227,6 +227,30 @@ A small built thing that turns up in land nobody has been to yet. It has to fit 
 
 `x` and `z` run from 0 to 15, and `y` from the ground up. A ruin is placed whole or not at all. `chance` is per chunk: 0.02 is about one in fifty. On the surface it sits on the sea floor if there's water. Underground it's placed at a random height, which is only right for something meant to be found while digging.
 
+Without any of what follows, the ground under its corner at `x` 0, `z` 0 is what counts, and all of it is built level from there, so it can float or bury itself on a slope.
+
+- **`"followTerrain": true`** counts each part's `y` from the ground under that part, so it sits flush on a slope. A part at `y` -1 goes into the ground and one at `y` 1 stands above it, wherever the ground is. Every column it uses has to have its ground in `on`, so a wide ruin needs a wide `on`, and a ruin under trees sits on the forest floor. `"maxSlope": 8` is how far the ground may rise and fall under it before it won't go there, which is 8 if you leave it out. It's only for the surface.
+- **`"layouts": [[...], [...]]`** replaces `parts` with several shapes, and each one placed picks one of them.
+- **`"chance": 0.5` on a part** means it's only there half the time, so counts can vary without a layout for each.
+- **`"spacing": 40`** keeps any two of this ruin at least that many chunks apart. It also makes them rare: that spacing gives one possible spot in every 60 by 60 chunks, which is one and a half times as wide. `chance` is then how likely each spot is to get one, and you can leave it out for all of them. Some spots won't suit it and stay empty, so allow for fewer than that.
+
+```json
+"crater": {
+  "id": "crater_v1",
+  "layouts": [
+    [{"x": 6, "y": -1, "z": 6, "block": "$block:scorched"}, {"x": 7, "y": 0, "z": 6, "block": "$block:aerolite", "chance": 0.5}],
+    [{"x": 9, "y": -1, "z": 9, "block": "$block:scorched"}, {"x": 9, "y": 1, "z": 9, "block": "$block:aerolite"}]
+  ],
+  "on": ["minecraft:grass_block", "minecraft:dirt", "minecraft:stone"],
+  "replaces": ["minecraft:air", "minecraft:short_grass", "minecraft:grass_block", "minecraft:dirt", "minecraft:stone"],
+  "followTerrain": true,
+  "spacing": 30,
+  "minY": 50, "maxY": 200
+}
+```
+
+A ruin's `id` is permanent, like an ore's. Chunks remember which ids they've had, so to change a ruin that's out, give the new version a new `id`. That's a new ruin in land nobody's been to, and the old ones stay where they are.
+
 ## Loot tables
 
 Minecraft 26 changed this format, and the game ignores fields it doesn't know without saying so. Use `modifier`, not `functions`, and `condition`, not `conditions`:
