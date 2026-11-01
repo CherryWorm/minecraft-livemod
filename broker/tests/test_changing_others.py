@@ -120,6 +120,26 @@ class WithinALine(Repo):
             await self.shop.build("fix_it", "Own thing.", "e_one", "early")
         self.assertNotIn("changes_to_other_features", self.prompts[0])
 
+    async def test_the_reviewer_is_shown_what_it_adds_to_others_but_only_whats_new(self):
+        addition = {"why": REASON, "knowledge.gems.routes": [{"type": "read", "id": "$item:tablet"}]}
+        tree = self.builder("fix_it", adds_to={"kiln": addition})
+        workshop.ready_commit("Ready", tree, "fix_it", "e_one")
+        self.assertIn("knowledge.gems.routes", workshop.changes_to_others(tree, "fix_it"))
+        await self.shop._release("fix_it", tree, "e_one")
+        self.assertEqual(workshop.changes_to_others(tree, "fix_it"), "")
+
+    async def test_something_odd_in_a_feature_it_isnt_working_on_doesnt_hold_it_up(self):
+        (self.repo / PLACE / "kiln/notes.txt").write_text("<<<<<<< not a conflict at all\n", encoding="utf-8")
+        git("add", "-A", cwd=self.repo)
+        git("commit", "-q", "-m", "Notes", cwd=self.repo)
+        self.assertEqual((await self.lint("fix_it", self.builder("fix_it")))["result"], "passed_lint")
+
+    async def test_listing_one_that_only_just_went_out_is_fine(self):
+        tree = self.builder("fix_it", changes_features={"mill": REASON})
+        self.out("mill")
+        self.assertEqual((await self.lint("fix_it", tree))["result"], "passed_lint")
+        self.assertTrue((tree / PLACE / "mill/feature.json").exists())
+
     async def test_changing_one_without_saying_so_is_refused_and_nothing_is_lost(self):
         tree = self.builder("fix_it")
         self.change(tree, "kiln", bronze={"machine": "kiln"})

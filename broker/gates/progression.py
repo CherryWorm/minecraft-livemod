@@ -240,7 +240,7 @@ def _check_reached(features, ledger, old_prints, reached, new_prints):
         reason = features.get(feature_id, {"manifest": {}})["manifest"].get("changes_reached", {}).get(name, "")
         if len(str(reason).strip()) < MIN_REASON:
             problems.append(f"Players already have {key}, and this release changes it. What players have is left alone unless there's a "
-                            f"clear reason or feedback. Undo the change, or give the reason in feature.json as \"changes_reached\": "
+                            f"clear reason or feedback. Undo the change, or give the reason in {feature_id}'s feature.json as \"changes_reached\": "
                             f"{{\"{name}\": \"why\"}}.")
     return problems
 
