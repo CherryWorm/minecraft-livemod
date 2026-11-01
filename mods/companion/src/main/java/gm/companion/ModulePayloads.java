@@ -38,4 +38,15 @@ final class ModulePayloads {
 			return TYPE;
 		}
 	}
+
+	/** Never sent. A client that listens for this is new enough for inventory hooks, and the server can see that it does. */
+	record InventoryHooksSupported() implements CustomPacketPayload {
+		static final Type<InventoryHooksSupported> TYPE = new Type<>(Identifier.fromNamespaceAndPath("gm", "inventory_hooks"));
+		static final StreamCodec<ByteBuf, InventoryHooksSupported> CODEC = StreamCodec.unit(new InventoryHooksSupported());
+
+		@Override
+		public Type<InventoryHooksSupported> type() {
+			return TYPE;
+		}
+	}
 }

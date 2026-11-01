@@ -1,11 +1,16 @@
 package gm.companion;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import gm.companion.api.ClientModule;
+import gm.companion.api.InventoryHooks;
+import gm.companion.api.InventoryView;
+import gm.companion.api.KeyInput;
 import gm.companion.api.ModuleContext;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 /**
  * Loads, runs and unloads client modules. Vanilla hooks can't be removed once added, so the host
@@ -190,7 +196,24 @@ public final class ModuleHost {
 	}
 
 	void tick(Minecraft client) {
+		ContainerView.newTick();
 		dispatch(module -> module.tick(client));
+	}
+
+	/** Asks each module's hooks in turn. The first to say it's dealt with this is the last to hear of it. */
+	boolean handleInventory(Predicate<InventoryHooks> call) {
+		boolean[] handled = {false};
+		dispatch(module -> {
+			if (!handled[0]) {
+				handled[0] = module.handleInventory(call);
+			}
+		});
+		return handled[0];
+	}
+
+	public void keyPressed(KeyEvent event) {
+		KeyInput key = InventoryScreens.key(event);
+		dispatch(module -> module.keyPressed(key));
 	}
 
 	private void dispatch(Consumer<LoadedModule> call) {
@@ -217,6 +240,8 @@ public final class ModuleHost {
 		private final int generation;
 		private final List<HudElement> hudElements = new ArrayList<>();
 		private final List<Consumer<Minecraft>> ticks = new ArrayList<>();
+		private final List<InventoryHooks> inventoryHooks = new ArrayList<>();
+		private final List<Consumer<KeyInput>> keyHooks = new ArrayList<>();
 		private ClientModule module;
 		private int failures;
 		private long windowNanos;
@@ -248,6 +273,26 @@ public final class ModuleHost {
 			this.ticks.add(tick);
 		}
 
+		@Override
+		public void onInventory(InventoryHooks hooks) {
+			this.inventoryHooks.add(hooks);
+		}
+
+		@Override
+		public void onKeyPressed(Consumer<KeyInput> hook) {
+			this.keyHooks.add(hook);
+		}
+
+		@Override
+		public boolean keyDown(int key) {
+			return InventoryScreens.keysAreSafe() && InputConstants.isKeyDown(key);
+		}
+
+		@Override
+		public InventoryView inventory() {
+			return InventoryScreens.current();
+		}
+
 		/** An average over many calls, so one slow frame while chunks load doesn't count. */
 		boolean overBudget(long nanos) {
 			this.windowNanos += nanos;
@@ -272,6 +317,23 @@ public final class ModuleHost {
 			}
 		}
 
+		boolean handleInventory(Predicate<InventoryHooks> call) {
+			boolean[] handled = {false};
+			for (InventoryHooks hooks : this.inventoryHooks) {
+				guarded(() -> handled[0] = call.test(hooks));
+				if (handled[0]) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		void keyPressed(KeyInput key) {
+			for (Consumer<KeyInput> hook : this.keyHooks) {
+				guarded(() -> hook.accept(key));
+			}
+		}
+
 		private void guarded(Runnable call) {
 			try {
 				call.run();
@@ -289,6 +351,8 @@ public final class ModuleHost {
 			// Dropping every reference is what lets the module's class loader be collected.
 			this.hudElements.clear();
 			this.ticks.clear();
+			this.inventoryHooks.clear();
+			this.keyHooks.clear();
 			this.module = null;
 		}
 	}

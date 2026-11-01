@@ -1,8 +1,13 @@
 package gm.companion.test;
 
+import com.mojang.blaze3d.platform.InputConstants;
+import gm.companion.mixin.AbstractContainerScreenAccessor;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
+import net.fabricmc.fabric.api.client.gametest.v1.TestInput;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
@@ -12,9 +17,12 @@ import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.numbers.BlankFormat;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.phys.BlockHitResult;
@@ -133,13 +141,16 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				context.waitTicks(40);
 				context.takeScreenshot("m8_" + words[1]);
 			}
-			case "sneak" -> context.getInput().holdShift();
-			case "unsneak" -> context.getInput().releaseShift();
 			case "inventory" -> {
 				context.getInput().pressKey(options -> options.keyInventory);
 				context.waitFor(client -> client.gui.screen() instanceof AbstractContainerScreen<?>, TICKS_PER_MINUTE);
 			}
 			case "close" -> context.runOnClient(client -> client.gui.setScreen(null));
+			case "chat" -> context.runOnClient(client -> client.gui.setScreen(new ChatScreen("", false)));
+			case "press" -> context.getInput().pressKey(Integer.parseInt(words[1]));
+			case "shiftdrag" -> shiftDrag(context, words);
+			case "sneak" -> context.getInput().holdShift();
+			case "unsneak" -> context.getInput().releaseShift();
 			case "hold" -> context.getInput().holdKeyFor(options -> options.keyUse, Integer.parseInt(words[1]));
 			case "click" -> context.runOnClient(client -> client.gameMode.handleContainerInput(client.player.containerMenu.containerId, Integer.parseInt(words[1]),
 					words.length > 2 && words[2].equals("right") ? RIGHT_BUTTON : LEFT_BUTTON, words.length > 2 && words[2].equals("shift") ? ContainerInput.QUICK_MOVE : ContainerInput.PICKUP, client.player));
@@ -168,6 +179,7 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				String seen = context.computeOnClient(client -> client.level.getBlockState(pos).toString());
 				LOGGER.info("[M8] the client sees {}", seen);
 			}
+			case "oldcompanion" -> rejoinAsOldCompanion(context);
 			case "screen" -> {
 				String shown = context.computeOnClient(client -> client.gui.screen() == null ? "none" : client.gui.screen().getClass().getSimpleName());
 				LOGGER.info("[M8] the screen is {}", shown);
@@ -188,6 +200,44 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				.forEach(entry -> shown.append(" | ").append(entry.ownerName().getString())
 						.append(" = ").append(entry.formatValue(objective.numberFormatOrDefault(BlankFormat.INSTANCE)).getString()));
 		return shown.toString();
+	}
+
+	/** Holds shift and the left button, and moves the real mouse across these slots of the open screen. */
+	private void shiftDrag(ClientGameTestContext context, String[] words) {
+		TestInput input = context.getInput();
+		input.holdShift();
+		for (int word = 1; word < words.length; word++) {
+			int slot = Integer.parseInt(words[word]);
+			double[] pixel = context.computeOnClient(client -> {
+				AbstractContainerScreen<?> screen = (AbstractContainerScreen<?>) client.gui.screen();
+				AbstractContainerScreenAccessor at = (AbstractContainerScreenAccessor) screen;
+				Slot found = screen.getMenu().getSlot(slot);
+				double scale = client.getWindow().getGuiScale();
+				return new double[] {(at.companion$leftPos() + found.x + 8) * scale, (at.companion$topPos() + found.y + 8) * scale};
+			});
+			input.setCursorPos(pixel[0], pixel[1]);
+			context.waitTicks(2);
+			if (word == 1) {
+				input.holdMouse(InputConstants.MOUSE_BUTTON_LEFT);
+				context.waitTicks(2);
+			}
+		}
+		input.releaseMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		input.releaseShift();
+	}
+
+	/** Which channels it listens on is all a server can see of a companion, so this looks just like one from before inventory hooks. */
+	private void rejoinAsOldCompanion(ClientGameTestContext context) {
+		context.runOnClient(client -> {
+			ClientPlayNetworking.unregisterGlobalReceiver(Identifier.fromNamespaceAndPath("gm", "inventory_hooks"));
+			client.getConnection().getConnection().disconnect(Component.literal("Leaving"));
+			client.disconnect(new TitleScreen(), false);
+		});
+		context.waitFor(client -> client.level == null && client.gui.screen() instanceof TitleScreen, TICKS_PER_MINUTE);
+		// Long enough for the proxy to notice, or it refuses the same player connecting twice.
+		context.waitTicks(60);
+		connect(context);
+		context.waitFor(client -> client.level != null && client.player != null && client.gui.screen() == null, 5 * TICKS_PER_MINUTE);
 	}
 
 	private void connect(ClientGameTestContext context) {

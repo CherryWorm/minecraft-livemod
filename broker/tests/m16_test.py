@@ -3,8 +3,9 @@
 name and hears about blocks broken, mobs killed, food eaten, players joining, knowledge learned and things examined. A block's
 removal is noticed however it goes, and a machine can still read its data then. A mob can be fed by using an item on it, and has
 its own sounds. A block's drops can be vanilla's and several at once. Ruins follow the terrain, pick between layouts, keep their
-distance, set block states, give containers their own loot and look for high ground. Start with a blank world from
-reset-dev-world.sh, and reset it afterwards.
+distance, set block states, give containers their own loot and look for high ground. On the client, dragging across slots with
+shift held moves each one, modules can draw on inventory screens and use keys there, and what's typed into a text box never
+reaches them. Start with a blank world from reset-dev-world.sh, and reset it afterwards.
 
 Usage: python3 -m broker.tests.m16_test
 """
@@ -17,7 +18,9 @@ import subprocess
 import sys
 import time
 
-from broker import runtime
+from PIL import Image
+
+from broker import runtime, sign
 from broker.tests.m8_test import Client, make_model, report
 
 SOURCE = runtime.BROKER / "testsrc-m16"
@@ -32,6 +35,10 @@ LAND_CHUNKS = 512
 WORLD_BOTTOM = -64
 HEIGHT_BITS = 9
 HEIGHT_PER_LONG = 64 // HEIGHT_BITS
+# The game's own numbers for these keys, which go by where they are on the keyboard.
+KEY_K, KEY_E, KEY_ESCAPE = 14, 8, 41
+OUT_OF_DATE = "out of date"
+MARK_COLOUR = (0x11, 0xEE, 0x77)
 
 
 def make_sound(path):
@@ -244,6 +251,10 @@ def empty_hands():
     rcon("clear", PLAYER)
 
 
+def holds(place, item):
+    return "passed" in rcon("execute", "if", "items", "entity", PLAYER, place, item)
+
+
 def chat_count(client, text):
     return client.text().count(f"[M8] chat: HOOK {text}")
 
@@ -422,6 +433,106 @@ def check_ruin_loot(results):
         results.append(report(says, "passed" in answer, f"{spot}: {answer}"))
 
 
+def play_inventory_hooks(client, results):
+    x, y, z = SPOT
+    empty_hands()
+    for index, item in enumerate(("cobblestone", "dirt", "sand")):
+        rcon("item", "replace", "entity", PLAYER, f"inventory.{index}", "with", f"minecraft:{item}")
+    time.sleep(1)
+
+    # What players asked for. On its own the game only moves the first slot of a drag.
+    client.ask("inventory")
+    client.ask("shot inventory")
+    client.ask("shiftdrag 9 10 11")
+    time.sleep(1)
+    moved = [holds(f"hotbar.{index}", f"minecraft:{item}") for index, item in enumerate(("cobblestone", "dirt", "sand"))]
+    results.append(report("holding shift and dragging moves every slot it crosses", all(moved), str(moved)))
+
+    empty_hands()
+    rcon("item", "replace", "entity", PLAYER, "inventory.0", "with", "minecraft:cobblestone")
+    time.sleep(1)
+    client.ask(f"press {KEY_K}")
+    time.sleep(1)
+    results.append(report("a module gets keys on an inventory screen, and can act on them", holds("hotbar.0", "minecraft:cobblestone")))
+
+    # It claims every key, so E shouldn't close this, and Escape still has to.
+    client.ask(f"press {KEY_E}")
+    client.ask("screen")
+    results.append(report("a module can claim a key from the game", re.findall(r"\[M8\] the screen is (\w+)", client.text())[-1] != "none"))
+    client.ask(f"press {KEY_ESCAPE}")
+    client.ask("screen")
+    results.append(report("no module can stop Escape closing the screen", re.findall(r"\[M8\] the screen is (\w+)", client.text())[-1] == "none"))
+
+    # With no screen open, and then with one that someone types into.
+    empty_hands()
+    rcon("item", "replace", "entity", PLAYER, "inventory.0", "with", "minecraft:cobblestone")
+    time.sleep(1)
+    client.ask("chat")
+    client.ask(f"press {KEY_K}")
+    client.ask("close")
+    time.sleep(1)
+    results.append(report("a key pressed in chat never reaches a module", holds("inventory.0", "minecraft:cobblestone")))
+    client.ask(f"press {KEY_K}")
+    time.sleep(1)
+    results.append(report("a module gets keys in the world, and can use the player's own inventory", holds("hotbar.0", "minecraft:cobblestone")))
+
+    # In an anvil, the same slot number is the seventh of the main rows. The box for its name has the keyboard as it opens.
+    empty_hands()
+    rcon("item", "replace", "entity", PLAYER, "inventory.6", "with", "minecraft:cobblestone")
+    rcon("setblock", str(x), str(y), str(z + 1), "minecraft:anvil")
+    rcon("tp", PLAYER, str(x), str(y), str(z), "0", "60")
+    time.sleep(1)
+    client.ask(f"useblock {x} {y} {z + 1}")
+    client.ask("screen")
+    opened = re.findall(r"\[M8\] the screen is (\w+)", client.text())[-1]
+    client.ask(f"press {KEY_K}")
+    time.sleep(1)
+    results.append(report("a key typed into a text box never reaches a module", opened == "AnvilScreen" and holds("inventory.6", "minecraft:cobblestone"), opened))
+    client.ask("close")
+    rcon("setblock", str(x), str(y), str(z + 1), "minecraft:air")
+
+    # Unloading has to take all of it away, with no help from the module.
+    rcon("conduit", "module", "unload", "hooks")
+    time.sleep(2)
+    empty_hands()
+    for index, item in enumerate(("cobblestone", "dirt")):
+        rcon("item", "replace", "entity", PLAYER, f"inventory.{index}", "with", f"minecraft:{item}")
+    time.sleep(1)
+    client.ask(f"press {KEY_K}")
+    time.sleep(1)
+    results.append(report("unloading a module removes its key hook", holds("inventory.0", "minecraft:cobblestone")))
+    client.ask("inventory")
+    client.ask("shot inventory_unloaded")
+    client.ask("shiftdrag 9 10")
+    time.sleep(1)
+    results.append(report("unloading a module removes its inventory hooks", holds("inventory.1", "minecraft:dirt")))
+    client.ask("close")
+
+
+def check_mark(results, shots):
+    """Whether the corner really shows what the module drew there, and stops once it's unloaded."""
+    def marked(name):
+        shot = next(iter(sorted(shots.glob(f"*{name}.png"))), None)
+        if shot is None:
+            return None
+        with Image.open(shot) as image:
+            return sum(1 for pixel in image.convert("RGB").crop((0, 0, 16, 16)).getdata() if pixel == MARK_COLOUR)
+
+    drawn, gone = marked("m8_inventory"), marked("m8_inventory_unloaded")
+    results.append(report("a module can draw on an inventory screen", bool(drawn), f"{drawn} pixels of its colour"))
+    results.append(report("and what it drew goes when it's unloaded", gone == 0, f"{gone} pixels of its colour"))
+
+
+def check_old_companions(results, client):
+    results.append(report("a current companion isn't told it's out of date", OUT_OF_DATE not in client.text()))
+    result = subprocess.run([sys.executable, "-u", "scripts/smoketest_join.py", "--name", "nocompanion", "--stay", "6", "--watch-for", OUT_OF_DATE],
+                            cwd=runtime.REPO, stdin=subprocess.DEVNULL, capture_output=True, text=True, check=False, timeout=120)
+    results.append(report("and neither is someone with no companion", "JOINED" in result.stdout and f"SAW {OUT_OF_DATE}" not in result.stdout, result.stdout[-120:]))
+    client.ask("oldcompanion", 300)
+    found = client.wait(rf"\[M8\] chat: .*{OUT_OF_DATE}", 30)
+    results.append(report("a companion from before inventory hooks is told to update", True, found.group(0)[:120]))
+
+
 def main():
     build_source()
     print("building and releasing the test feature", flush=True)
@@ -430,8 +541,13 @@ def main():
     results = []
     check_ruins(results)
 
+    with sign._locked():
+        sign._load_key()
     runtime.REPORTS.mkdir(parents=True, exist_ok=True)
-    client = Client(runtime.WORK / "mods", runtime.REPORTS / "m16-client.log")
+    mods = runtime.WORK / "mods"
+    # Generations are remembered per client, so a run after this one needs a clean slate to prove the same things.
+    shutil.rmtree(mods / "companion" / "build" / "run" / "clientGameTest" / "config" / "companion", ignore_errors=True)
+    client = Client(mods, runtime.REPORTS / "m16-client.log", {"COMPANION_TEST_KEY": sign.public_key_text()})
     try:
         client.wait(r"\[M8\] joined as [A-Za-z0-9_]+$", 420)
         time.sleep(5)
@@ -439,8 +555,19 @@ def main():
         play_examining(client, results)
         play_drops(client, results)
         check_ruin_loot(results)
+        play_inventory_hooks(client, results)
+        check_old_companions(results, client)
     finally:
         client.stop()
+    shots = mods / "companion" / "build" / "run" / "clientGameTest" / "screenshots"
+    out = runtime.REPORTS / "m16"
+    if out.exists():
+        shutil.rmtree(out)
+    out.mkdir(parents=True, exist_ok=True)
+    for path in shots.glob("*m8_*.png"):
+        shutil.copy(path, out)
+    check_mark(results, out)
+    print("screenshots:", sorted(path.name for path in out.glob("*.png")), flush=True)
     failed = [result for result in results if not result]
     print(f"{len(results) - len(failed)} of {len(results)} checks passed", flush=True)
     sys.exit(1 if failed else 0)

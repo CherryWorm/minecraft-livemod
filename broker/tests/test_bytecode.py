@@ -205,6 +205,20 @@ class ClientRefusals(JarCase):
     def test_minecraft_members_are_a_list(self):
         self.assert_refused(self.fixture("minecraft_stop"), "client", "minecraft_stop", "net/minecraft/client/Minecraft.stop")
 
+    def test_an_inventory_helper_can_use_all_of_its_hooks(self):
+        self.assert_passes(self.fixture("inventory_helper", "HelperModule"), "client", "inventory_helper")
+
+    def test_a_stack_in_a_menu_is_only_for_looking_at(self):
+        self.assert_refused(self.fixture("stack_changing"), "client", "stack_changing", "net/minecraft/world/item/ItemStack.setCount")
+
+    def test_the_player_is_still_out_of_reach_from_an_inventory_helper(self):
+        self.assert_refused(self.fixture("player_reach"), "client", "player_reach", "net/minecraft/client/player/LocalPlayer")
+
+    def test_extending_a_stack_would_inherit_past_the_member_check(self):
+        maker = ClassMaker("gm/feature/crafted/Made")
+        maker.super_class = maker.klass("net/minecraft/world/item/ItemStack")
+        self.assert_refused(self.made_class(maker), "client", "crafted", "extends net/minecraft/world/item/ItemStack")
+
     def test_anything_unknown_is_refused(self):
         maker = ClassMaker("gm/feature/crafted/Made")
         maker.klass("net/minecraft/client/player/LocalPlayer")

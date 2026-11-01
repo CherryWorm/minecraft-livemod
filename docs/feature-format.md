@@ -363,7 +363,62 @@ Beyond the rules in Module code, a server module can use most of Minecraft, but 
 
 ## Client modules
 
-Java that runs on players' game clients: HUDs and effects. See `/reference/companion-api/`. These run on friends' computers, so they may only use the companion API and approved Minecraft classes. No files, network, processes, reflection or class loading: the checks refuse those. Prefer doing things on the server. Use a client module only for what truly needs one.
+Java that runs on players' game clients: HUDs, effects, and helpers on inventory screens. See `/reference/companion-api/`. These run on friends' computers, so they may only use the companion API and approved Minecraft classes. No files, network, processes, reflection or class loading: the checks refuse those. Prefer doing things on the server. Use a client module only for what truly needs one.
+
+### Inventory screens and keys
+
+A module can draw on an inventory screen and use the mouse and keys there, which is what inventory helpers need. Everything goes through `context`, so it all goes away by itself when the module unloads. This is holding shift and dragging across slots to move each one:
+
+```java
+public final class ShiftDrag implements ClientModule {
+    private int lastSlot = -1;
+
+    @Override
+    public void enable(ModuleContext context) {
+        context.onInventory(new InventoryHooks() {
+            @Override
+            public boolean mousePressed(InventoryView inventory, MouseInput mouse) {
+                return moveWhatsUnder(inventory, mouse);
+            }
+
+            @Override
+            public boolean mouseDragged(InventoryView inventory, MouseInput mouse) {
+                return moveWhatsUnder(inventory, mouse);
+            }
+
+            @Override
+            public boolean mouseReleased(InventoryView inventory, MouseInput mouse) {
+                lastSlot = -1;
+                return false;
+            }
+        });
+    }
+
+    private boolean moveWhatsUnder(InventoryView inventory, MouseInput mouse) {
+        if (!mouse.shift() || mouse.button() != MouseInput.LEFT) {
+            return false;
+        }
+        int slot = inventory.slotAt(mouse.x(), mouse.y());
+        if (slot != lastSlot && !inventory.item(slot).isEmpty()) {
+            inventory.quickMove(slot);
+        }
+        lastSlot = slot;
+        return true;
+    }
+}
+```
+
+- `InventoryHooks` has `draw`, `mousePressed`, `mouseDragged`, `mouseReleased`, `mouseScrolled` and `keyPressed`. The mouse and key ones return true if they've dealt with it, so the game doesn't. If two modules want the same thing, the first to say it's dealt with it stops the other hearing of it.
+- `InventoryView` is the inventory: `item(slot)`, `carried()`, `slotAt(x, y)`, `slotX(slot)`, `isOwn(slot)`, `hotbarIndex(slot)`, `accepts(slot, stack)`. Its actions are the ones a player could do by hand, and the server checks them the same way: `click`, `clickRight`, `quickMove`, `swapWithHotbar` and `gather`. It can't throw items out, and it can't reach anything else a player could do.
+- `context.inventory()` gives a view at any time, for things that run from a tick: the open inventory screen's, or the player's own if no screen is open, so refilling the hotbar works while they play. It's null while any other screen is open.
+- `context.onKeyPressed(key -> ...)` is a key going down in the world with no screen open. The game still gets the key too, so pick one it isn't using. `context.keyDown(key)` is whether a key is held. Keys are numbered by where they are on the keyboard, so use `key.key() == KeyInput.of('R')` for a letter or a digit, and the constants in `KeyInput` for the rest.
+- Actions are limited to 64 a tick between all modules, past which they return false, so a big job like sorting has to carry on from where it got to on the next tick. Keep that in the module's own fields, and get a fresh `context.inventory()` each time, because a view stops working once its screen closes.
+
+Some limits exist to protect players, and no feature can get past them. Nothing typed into chat, a sign, a book, a text box or the server's password dialog ever reaches a module. Escape always closes the screen. The creative menu isn't hooked at all, because its slots work differently.
+
+A stack from a view is only for looking at. A module can read `isEmpty`, `getCount`, `getMaxStackSize`, `isStackable`, `getHoverName`, `isDamageableItem`, `isDamaged`, `getDamageValue`, `getMaxDamage`, `ItemStack.isSameItem` and `ItemStack.isSameItemSameComponents`, and draw one with `graphics.item(stack, x, y)`. Items of ours look like a vanilla stand-in to a client, so tell them apart with `isSameItemSameComponents` or their name, not by what item they seem to be.
+
+A player whose companion is older than these hooks gets told to update when they join, and modules that use them won't load for that player until they do.
 
 Only what's listed here is allowed, so anything else is refused until the owner adds it:
 
@@ -371,6 +426,7 @@ Only what's listed here is allowed, so anything else is refused until the owner 
 - From `java.lang`: `Object`, `String`, `StringBuilder`, `CharSequence`, `Comparable`, `Iterable`, `Runnable`, `Math`, `Number`, `Record`, `Enum`, the boxed types, and common exceptions.
 - From `java.util`: the collections, `Collections`, `Arrays`, `Objects`, `Optional` and `Comparator`, and everything in `java.util.function`. Not streams.
 - For drawing: `GuiGraphicsExtractor`, `Font` and `DeltaTracker`.
+- `ItemStack`, but only what's listed above.
 - For text: `Component`, `MutableComponent`, `FormattedText`, `FormattedCharSequence`, `Style`, `TextColor`, `ChatFormatting` and `Identifier`.
 - For math: `Mth`, `ARGB`, `CommonColors`, `Vec2` and `Vec3`.
 - `Minecraft`, but only `getInstance()`, `font`, `getFps()` and `getDeltaTracker()`.

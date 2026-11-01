@@ -349,4 +349,4 @@ For anything more, `context.sound("chime")` gives the game's own `SoundEvent`, s
 
 ## What the engine doesn't do yet
 
-Structures larger than a chunk, new dimensions, screens beyond chest-style menus and books, and client rendering beyond the HUD. Armor can only look like vanilla's when worn, and custom tools can't take enchantments at an enchanting table. Build the closest thing that works, and say what you wanted in `host_requests`.
+Structures larger than a chunk, new dimensions, and screens beyond chest-style menus, books and drawing on inventory screens. Armor can only look like vanilla's when worn, and custom tools can't take enchantments at an enchanting table. Build the closest thing that works, and say what you wanted in `host_requests`.

@@ -4,7 +4,7 @@
 Logs in through the proxy, accepts and downloads the resource pack, checks its SHA-1, and enters the
 world. Needs a proxy with online-mode off, so it only ever runs against local or test stacks.
 
-Usage: smoketest_join.py [--host H] [--port P] [--name NAME] [--stay SECONDS]
+Usage: smoketest_join.py [--host H] [--port P] [--name NAME] [--stay SECONDS] [--watch-for TEXT]
 Exits 0 only if the player reached the world and stayed connected.
 """
 import argparse
@@ -181,7 +181,7 @@ def configure(conn, require_pack=True):
             got_pack = True
 
 
-def play(conn, stay):
+def play(conn, stay, watch_for=None):
     joined_at = None
     while joined_at is None or time.monotonic() - joined_at < stay:
         conn.sock.settimeout(1 if joined_at else 20)
@@ -191,6 +191,8 @@ def play(conn, stay):
             if joined_at:
                 continue
             raise Failed("timed out waiting to enter the world")
+        if watch_for and watch_for.encode("utf-8") in data.rest():
+            print(f"SAW {watch_for}", flush=True)
         if packet_id == PLAY_LOGIN:
             joined_at = joined_at or time.monotonic()
             print("JOINED the world", flush=True)
@@ -216,12 +218,13 @@ def main():
     parser.add_argument("--port", type=int, default=25565)
     parser.add_argument("--name", default="smoketest")
     parser.add_argument("--stay", type=int, default=8)
+    parser.add_argument("--watch-for", help="prints SAW and this text if it turns up in anything the server sends")
     args = parser.parse_args()
     try:
         conn = Connection(args.host, args.port)
         login(conn, args.host, args.port, args.name)
         configure(conn)
-        play(conn, args.stay)
+        play(conn, args.stay, args.watch_for)
     except (Failed, OSError, zlib.error) as error:
         print(f"FAILED: {error}", file=sys.stderr)
         sys.exit(1)

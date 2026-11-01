@@ -58,8 +58,8 @@ SESSION = ("can reach the player's session token",
 SERVER_REFUSED = (FILES, NETWORK, PROCESSES, REFLECTION, CLASS_LOADING, INTERNALS, NATIVE, THREADS)
 CLIENT_REFUSED = (*SERVER_REFUSED, SESSION)
 
-# Client modules draw HUDs and effects, so this is what drawing needs and nothing else. It stays narrow because
-# widening it later only costs a release, and something unsafe that shipped can't be recalled from friends' PCs.
+# Client modules draw HUDs and effects and help on inventory screens, so this is what those need and nothing else. It stays
+# narrow because widening it later only costs a release, and something unsafe that shipped can't be recalled from friends' PCs.
 # Worth knowing what isn't here: LocalPlayer and ClientLevel, because they can act as the player and send packets,
 # org/joml, which GuiGraphicsExtractor.pose() needs, and java/lang/System. A feature that wants one can ask.
 CLIENT_CLASSES = {
@@ -91,6 +91,8 @@ CLIENT_CLASSES = {
     "net/minecraft/world/phys/Vec2", "net/minecraft/world/phys/Vec3",
     # A tick callback is handed a Minecraft, so the class must be nameable, but see CLIENT_MEMBERS.
     "net/minecraft/client/Minecraft",
+    # An inventory view hands these out, and drawing can take them, but see CLIENT_MEMBERS.
+    "net/minecraft/world/item/ItemStack",
 }
 CLIENT_PREFIXES = ("gm/companion/api/", "java/util/function/")
 
@@ -116,7 +118,11 @@ for _bootstrap in BOOTSTRAPS:
     LIMITED_MEMBERS.setdefault(_owner, set()).add(_name)
 # Minecraft is the door to everything: getUser() is the session token, stop() closes the game, gameDirectory is a
 # File and getConnection() sends packets. A list of what's allowed can't miss one the way a list of what isn't could.
-CLIENT_MEMBERS = {**LIMITED_MEMBERS, "net/minecraft/client/Minecraft": {"getInstance", "font", "getFps", "getDeltaTracker"}}
+CLIENT_MEMBERS = {**LIMITED_MEMBERS, "net/minecraft/client/Minecraft": {"getInstance", "font", "getFps", "getDeltaTracker"},
+                  # Only for looking. A stack in a menu is the game's own, and changing it would show what the server hasn't said.
+                  "net/minecraft/world/item/ItemStack": {"EMPTY", "isEmpty", "getCount", "getMaxStackSize", "isStackable", "getHoverName",
+                                                         "isSameItem", "isSameItemSameComponents", "isDamageableItem", "isDamaged",
+                                                         "getDamageValue", "getMaxDamage"}}
 # Members refused on classes that are otherwise fine.
 REFUSED_MEMBERS = {
     "java/lang/System": ({"exit", "load", "loadLibrary", "getenv", "setProperty", "setProperties", "clearProperty",

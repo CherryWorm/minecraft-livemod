@@ -40,6 +40,9 @@ public final class ModulePush {
 	private static final Path DIRECTORY = Path.of("modules", "client");
 	private static final Path REQUIRE_COMPANION = Path.of("config", "conduit", "require_companion");
 	private static final int CHUNK_BYTES = 512 * 1024;
+	/** A companion listens for this if it has inventory hooks. Only its name is ever used, so it's never sent. */
+	private static final CustomPacketPayload.Type<?> INVENTORY_HOOKS = new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath("gm", "inventory_hooks"));
+	private static final String OUT_OF_DATE = "§6Your Companion mod is out of date, so anything on your inventory screens won't work. Download the pack from the website again, and import it the same way.";
 
 	private static final Map<String, Module> ACTIVE = new HashMap<>();
 
@@ -88,6 +91,9 @@ public final class ModulePush {
 					handler.disconnect(Component.literal("This server needs the Companion mod. Ask whoever runs it for the install file."));
 				}
 				return;
+			}
+			if (!ServerPlayNetworking.canSend(player, INVENTORY_HOOKS)) {
+				player.sendSystemMessage(Component.literal(OUT_OF_DATE));
 			}
 			ACTIVE.values().forEach(module -> send(player, module));
 		});

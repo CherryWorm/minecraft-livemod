@@ -33,5 +33,5 @@ What the engine can do today, so your specs can be built quickly. Each of these 
 - New biomes, as a variation of a vanilla one, which do need a restart.
 - Crafting and machine recipes, and knowledge entries learned by obtaining, examining, killing, reading or collecting pieces.
 - Java on the server for anything else: machines that run every tick, custom items and block behaviour, world events and the time and tide of the world.
-- Java on players' clients for HUDs.
+- Java on players' clients for HUDs and inventory helpers.
 Ambitious systems are welcome. The first version of anything can be simple, and later features can build on it, but it has to be useful from the start.

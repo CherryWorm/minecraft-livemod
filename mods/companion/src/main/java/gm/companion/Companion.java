@@ -9,6 +9,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
@@ -27,8 +28,12 @@ public final class Companion implements ClientModInitializer {
 
 		ClientPlayNetworking.registerGlobalReceiver(ModulePayloads.Chunk.TYPE, (payload, context) -> HOST.onChunk(payload));
 		ClientPlayNetworking.registerGlobalReceiver(ModulePayloads.Unload.TYPE, (payload, context) -> HOST.unload(payload.moduleId()));
+		// Never sent. Listening for it is how the server tells this companion from one too old for inventory hooks.
+		PayloadTypeRegistry.clientboundPlay().register(ModulePayloads.InventoryHooksSupported.TYPE, ModulePayloads.InventoryHooksSupported.CODEC);
+		ClientPlayNetworking.registerGlobalReceiver(ModulePayloads.InventoryHooksSupported.TYPE, (payload, context) -> {});
 
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("gm", "modules"), HOST::renderHud);
+		ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> InventoryScreens.attach(HOST, screen));
 		ClientTickEvents.END_CLIENT_TICK.register(HOST::tick);
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> HOST.unloadAll());
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> HOST.unloadAll());
