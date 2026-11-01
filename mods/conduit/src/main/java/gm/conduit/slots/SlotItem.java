@@ -79,6 +79,24 @@ public final class SlotItem extends SimplePolymerItem {
 	}
 
 	@Override
+	public InteractionResult interactLivingEntity(ItemStack stack, Player player, LivingEntity target, InteractionHand hand) {
+		ItemBehavior behavior = ServerModuleHost.instance().itemBehavior(this.slotId);
+		if (behavior == null || player.level().isClientSide()) {
+			return super.interactLivingEntity(stack, player, target, hand);
+		}
+		return ServerModuleHost.instance().guarded(this.slotId, InteractionResult.PASS, () -> behavior.useOnEntity(stack, player, target, hand));
+	}
+
+	@Override
+	public boolean mineBlock(ItemStack stack, Level level, BlockState state, BlockPos pos, LivingEntity miner) {
+		ItemBehavior behavior = ServerModuleHost.instance().itemBehavior(this.slotId);
+		if (behavior != null && level instanceof ServerLevel) {
+			ServerModuleHost.instance().guarded(this.slotId, () -> behavior.mineBlock(stack, level, state, pos, miner));
+		}
+		return super.mineBlock(stack, level, state, pos, miner);
+	}
+
+	@Override
 	public void hurtEnemy(ItemStack stack, LivingEntity target, LivingEntity attacker) {
 		ItemBehavior behavior = ServerModuleHost.instance().itemBehavior(this.slotId);
 		if (behavior != null && target.level() instanceof ServerLevel) {

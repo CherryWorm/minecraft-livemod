@@ -1,0 +1,29 @@
+package gm.conduit.api;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+
+/**
+ * Things that happen anywhere in the world, for a module to react to instead of checking every tick. Runs on the server.
+ * A method left out does nothing. These fire for everything, vanilla's and every feature's, so check what it was first,
+ * for example with {@code state.is(context.block("ember_ore"))}.
+ */
+public interface WorldEvents {
+	/** A player has broken a block. It's already gone, so state is what it was, and blockEntity is null for most blocks. */
+	default void blockBroken(ServerPlayer player, ServerLevel level, BlockPos pos, BlockState state, BlockEntity blockEntity) {}
+
+	/** Something living has died, whatever the cause, and that includes players. {@code source.getEntity()} is who did it, if anyone. */
+	default void mobKilled(LivingEntity mob, DamageSource source) {}
+
+	/** A player has finished eating or drinking. The stack is a copy of what they had just before, so it's never empty. */
+	default void itemEaten(ServerPlayer player, ItemStack stack) {}
+
+	/** A player has joined. Anyone already online when a module loads doesn't count, so look through the player list in enable() if that matters. */
+	default void playerJoined(ServerPlayer player) {}
+}

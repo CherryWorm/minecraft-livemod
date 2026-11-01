@@ -3,6 +3,7 @@
 	"package": "gm.conduit.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"mixins": [
+		"ConsumableMixin",
 		"LevelChunkMixin",
 		"RecipeCraftingHolderMixin",
 		"ServerCommonPacketListenerImplMixin"

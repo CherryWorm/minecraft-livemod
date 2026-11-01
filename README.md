@@ -75,7 +75,7 @@ Inside the distro:
 
 | Command | What it proves |
 |---|---|
-| `python3 -m unittest broker.tests.test_balance broker.tests.test_bytecode broker.tests.test_sign broker.tests.test_prune broker.tests.test_progression broker.tests.test_player_guide broker.tests.test_daemon_order` | The gates' rules, the world's progression, `tune` and pruning, with no servers |
+| `python3 -m unittest broker.tests.test_balance broker.tests.test_bytecode broker.tests.test_hooks broker.tests.test_sign broker.tests.test_prune broker.tests.test_progression broker.tests.test_player_guide broker.tests.test_daemon_order` | The gates' rules, the world's progression, `tune` and pruning, with no servers |
 | `python3 -m broker.tests.m2_test` | Bad releases are stopped at the right gate, and a crash rolls back |
 | `python3 -m broker.tests.m3_test` | Records survive a restart, modules hot-swap, and a crash holds players |
 | `python3 -m broker.tests.m7_test` | Signed modules run on a real client, and unsigned or unsafe ones are refused |
@@ -84,6 +84,7 @@ Inside the distro:
 | `python3 -m broker.tests.m11_test` | Sculpted creatures and a model block on a real client, then 150 more models at once |
 | `python3 -m broker.tests.m12_test` | Mobs with minds, on a real client with the real fast model: they answer, remember, gossip and keep to their limits. Uses a little of your plan |
 | `python3 -m broker.tests.m15_test` | What players ask for, on the real agent and models: a server rule changes on the spot, a small ask gets its own builder and reaches the game, a big one goes to the director, and the player hears about each. Uses a little of your plan |
+| `python3 -m broker.tests.m16_test` | What modules can hook into, on a real client: sounds by name, world events, blocks removed and feeding mobs. Start from a blank world |
 | `./scripts/stack.sh --profile agent run --rm -T agent python3 /spikes/dm_voice.py` | The voices on the real model, in character: plain, real answers over `/dm` and in chat, and nothing that isn't out. Uses a tiny bit of your plan |
 | `./spikes/m4_e2e.sh` | The whole agent, from a blank world to shipped features, a tuned number and a mid-game machine. Uses your plan |
 | `python3 scripts/smoketest_join.py` | Login, resource pack and joining, with no game |

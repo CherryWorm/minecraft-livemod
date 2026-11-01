@@ -1,11 +1,14 @@
 package gm.conduit.api;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvent;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 
 import java.util.List;
@@ -30,6 +33,9 @@ public interface ServerModuleContext {
 
 	void onServerTick(Consumer<MinecraftServer> tick);
 
+	/** Hears about things that happen anywhere in the world, so there's no need to poll for them each tick. */
+	void listen(WorldEvents events);
+
 	/** The block for a name in this feature's manifest, or for "other_feature/name". */
 	Block block(String name);
 
@@ -38,6 +44,15 @@ public interface ServerModuleContext {
 
 	/** The entity type for a mob in this feature's manifest, or for "other_feature/name". */
 	EntityType<?> mob(String name);
+
+	/** The sound for a name in this feature's "sounds", or for "other_feature/name". */
+	SoundEvent sound(String name);
+
+	/**
+	 * Plays one of those sounds at a spot, for everyone close enough to hear it. A volume above 1 carries further, and
+	 * pitch runs from 0.5 to 2. To choose its volume slider or who hears it, use {@link #sound} with the game's own calls.
+	 */
+	void playSound(String name, Level level, BlockPos pos, float volume, float pitch);
 
 	/** Checks what a player put in one of this feature's machines against its recipes, and reports near misses. */
 	MachineAttempt attemptRecipe(Player player, String machine, List<ItemStack> inputs);

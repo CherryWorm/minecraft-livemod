@@ -77,6 +77,14 @@ public class SlotBlock extends Block implements PolymerTexturedBlock {
 		super.stepOn(level, pos, state, entity);
 	}
 
+	/** Called from every block change on a live chunk, because vanilla's own removal hook is skipped by some of them. */
+	public void removed(BlockState state, ServerLevel level, BlockPos pos) {
+		BlockBehavior behavior = ServerModuleHost.instance().blockBehavior(this.slotId);
+		if (behavior != null) {
+			ServerModuleHost.instance().guarded(this.slotId, () -> behavior.removed(state, level, pos));
+		}
+	}
+
 	@Override
 	protected void randomTick(BlockState state, ServerLevel level, BlockPos pos, RandomSource random) {
 		BlockBehavior behavior = ServerModuleHost.instance().blockBehavior(this.slotId);

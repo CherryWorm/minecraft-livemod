@@ -221,8 +221,6 @@ If a feature really needs something refused, say so in your report and quote the
 
 ## Server modules
 
-## Server modules
-
 Java that runs on the server, swappable while the game runs. See `/reference/conduit-api/` for the interfaces.
 
 ```java
@@ -241,6 +239,36 @@ public final class EmberModule implements ServerModule {
 ```
 
 Names passed to `bindBlock`, `bindItem` and `bindMachine` are the ones in `feature.json`. A machine keeps everything it remembers in `machine.data()`, because that survives the module being replaced. Keep tick work small: a machine runs 20 times a second, for every one placed.
+
+What each behaviour can do is in `/reference/conduit-api/`, and all of it is optional except a machine's `tick`. A few that are easy to miss:
+
+- `BlockBehavior.removed(state, level, pos)` runs when the block has left the world, however it went: broken, blown up, pushed by a piston, or replaced by a command or a module. Use it to take something off a list the moment it goes, instead of sweeping for it. It doesn't run for a chunk unloading, or for anything that happens while your module isn't loaded, so don't rely on it alone for what has to stay exactly right.
+- `MachineBehavior.removed(machine)` runs just before a machine goes, while `machine.data()` is still there, so it's where a machine drops what it holds. A command replacing it doesn't count, in the same way a chest's contents don't drop then.
+- `MobBehavior.interact(mob, player, hand)` is a player using something on a mob. See "Mobs" in `docs/content-types.md`.
+- `ItemBehavior.useOnEntity(stack, player, target, hand)` is this item used on a mob, if the mob itself had nothing to do with it. `ItemBehavior.mineBlock(stack, level, state, pos, miner)` is this item having just broken a block, which vanilla doesn't report for a player in creative mode.
+
+### Things that happen in the world
+
+Don't watch for these from a tick handler. Listen for them, and it takes no work at all until they happen:
+
+```java
+context.listen(new WorldEvents() {
+    @Override
+    public void blockBroken(ServerPlayer player, ServerLevel level, BlockPos pos, BlockState state, BlockEntity blockEntity) {
+        if (state.is(context.block("rune_ore"))) { /* the exact depth it came from is pos.getY() */ }
+    }
+    @Override
+    public void mobKilled(LivingEntity mob, DamageSource source) {
+        if (mob.getType() == context.mob("rune_crab") && source.getEntity() instanceof ServerPlayer killer) { /* ... */ }
+    }
+    @Override
+    public void itemEaten(ServerPlayer player, ItemStack stack) { /* ... */ }
+    @Override
+    public void playerJoined(ServerPlayer player) { /* ... */ }
+});
+```
+
+These fire for everything, vanilla's and every feature's, so check what it was first. `blockBroken` is only for what a player breaks, and the block is already gone, so `state` is what it was. `mobKilled` is anything living that dies, however it happened, including players, and `source.getEntity()` is who did it, if anyone. `itemEaten` is food and drink, including potions and milk, and `stack` is a copy of what they had just before. `playerJoined` doesn't include anyone already online when your module loads, so look through `context.server().getPlayerList().getPlayers()` in `enable` if that matters.
 
 A module that keeps throwing errors is switched off automatically.
 

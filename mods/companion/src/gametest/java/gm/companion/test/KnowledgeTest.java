@@ -56,12 +56,13 @@ public final class KnowledgeTest implements FabricClientGameTest {
 			}
 		});
 
-		String address = System.getenv().getOrDefault("LIVINGMOD_SERVER", "localhost:25565");
-		context.runOnClient(client -> {
-			ServerData data = new ServerData("test", address, ServerData.Type.OTHER);
-			data.setResourcePackStatus(ServerData.ServerPackStatus.ENABLED);
-			ConnectScreen.startConnecting(new TitleScreen(), client, ServerAddress.parseString(address), data, false, null);
-		});
+		// The game gives up on a sound the pack doesn't have before it gets this far, so this also proves the pack has it.
+		context.runOnClient(client -> client.getSoundManager().addListener((sound, events, range) -> {
+			if (sound.getIdentifier().getNamespace().equals("gm")) {
+				LOGGER.info("[M8] sound: {}", sound.getIdentifier());
+			}
+		}));
+		connect(context);
 		context.waitFor(client -> client.level != null && client.player != null, 5 * TICKS_PER_MINUTE);
 		String playerName = context.computeOnClient(client -> client.player.getName().getString());
 		LOGGER.info("[M8] joined as {}", playerName);
@@ -116,7 +117,11 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				String sidebar = context.computeOnClient(client -> sidebar(client.level.getScoreboard()));
 				LOGGER.info("[M8] sidebar: {}", sidebar);
 			}
-			case "rightclick" -> context.getInput().holdKeyFor(options -> options.keyUse, 2);
+			case "rightclick" -> {
+				String target = context.computeOnClient(client -> String.valueOf(client.hitResult == null ? null : client.hitResult.getType()));
+				LOGGER.info("[M8] using what the crosshair is on, which is a {}", target);
+				context.getInput().holdKeyFor(options -> options.keyUse, 2);
+			}
 			case "mine" -> {
 				String target = context.computeOnClient(client -> String.valueOf(client.hitResult == null ? null : client.hitResult.getLocation()));
 				LOGGER.info("[M8] mining what the crosshair is on, at {}", target);
@@ -142,6 +147,15 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				.forEach(entry -> shown.append(" | ").append(entry.ownerName().getString())
 						.append(" = ").append(entry.formatValue(objective.numberFormatOrDefault(BlankFormat.INSTANCE)).getString()));
 		return shown.toString();
+	}
+
+	private void connect(ClientGameTestContext context) {
+		String address = System.getenv().getOrDefault("LIVINGMOD_SERVER", "localhost:25565");
+		context.runOnClient(client -> {
+			ServerData data = new ServerData("test", address, ServerData.Type.OTHER);
+			data.setResourcePackStatus(ServerData.ServerPackStatus.ENABLED);
+			ConnectScreen.startConnecting(new TitleScreen(), client, ServerAddress.parseString(address), data, false, null);
+		});
 	}
 
 	/** Puts one of the held stack into each of two grid squares, reads the result, and takes them back out. */

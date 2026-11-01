@@ -221,6 +221,13 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 
 	@Override
 	protected InteractionResult mobInteract(Player player, InteractionHand hand) {
+		MobBehavior behavior = ServerModuleHost.instance().mobBehavior(slotId());
+		if (behavior != null && !level().isClientSide()) {
+			InteractionResult result = ServerModuleHost.instance().guarded(slotId(), InteractionResult.PASS, () -> behavior.interact(this, player, hand));
+			if (result != InteractionResult.PASS) {
+				return result;
+			}
+		}
 		if (mind() != null && player instanceof ServerPlayer serverPlayer) {
 			return Minds.onUse(this, serverPlayer, hand);
 		}

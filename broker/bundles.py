@@ -427,6 +427,8 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
         for name, ruin in manifest.get("ruins", {}).items():
             ruin_patches.append(_render_ruin(feature_id, name, ruin, ledger, datapack))
         _copy_sounds(feature, feature_id, pack, sounds_json)
+        # Marked as sounds, so one can share its name with a block or a mob, which are all in here by bare name.
+        bindings.update({f"sound:{feature_id}/{name}": _sound_id(feature_id, name) for name in manifest.get("sounds", [])})
         for ore in manifest.get("ores", []):
             patches.append({
                 "id": ore["id"],

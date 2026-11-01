@@ -56,6 +56,17 @@ public final class SlotBlockEntity extends BlockEntity {
 	}
 
 	@Override
+	public void preRemoveSideEffects(BlockPos pos, BlockState state) {
+		super.preRemoveSideEffects(pos, state);
+		if (state.getBlock() instanceof SlotBlock block) {
+			MachineBehavior behavior = ServerModuleHost.instance().machineBehavior(block.slotId());
+			if (behavior != null) {
+				ServerModuleHost.instance().guarded(block.slotId(), () -> behavior.removed(this));
+			}
+		}
+	}
+
+	@Override
 	protected void saveAdditional(ValueOutput output) {
 		super.saveAdditional(output);
 		output.store("machine", CompoundTag.CODEC, this.data);

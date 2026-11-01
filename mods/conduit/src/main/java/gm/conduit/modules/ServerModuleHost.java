@@ -9,15 +9,24 @@ import gm.conduit.api.MachineBehavior;
 import gm.conduit.api.MobBehavior;
 import gm.conduit.api.ServerModule;
 import gm.conduit.api.ServerModuleContext;
+import gm.conduit.api.WorldEvents;
 import gm.conduit.knowledge.Knowledge;
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
+import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,6 +63,7 @@ public final class ServerModuleHost {
 	private final Map<String, ItemBehavior> items = new HashMap<>();
 	private final Map<String, MachineBehavior> machines = new HashMap<>();
 	private final Map<String, MobBehavior> mobs = new HashMap<>();
+	private final List<ServerPlayer> joining = new ArrayList<>();
 	private Map<String, String> slotsByName = Map.of();
 	private MinecraftServer server;
 
@@ -79,15 +89,41 @@ public final class ServerModuleHost {
 		return this.mobs.get(slotId);
 	}
 
+	public static void register() {
+		PlayerBlockBreakEvents.AFTER.register((level, player, pos, state, blockEntity) -> {
+			if (level instanceof ServerLevel serverLevel && player instanceof ServerPlayer serverPlayer) {
+				INSTANCE.fire(events -> events.blockBroken(serverPlayer, serverLevel, pos, state, blockEntity));
+			}
+		});
+		ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> INSTANCE.fire(events -> events.mobKilled(entity, source)));
+		// Fabric says so before the player is in the world or the player list, so a module would be handed someone half arrived.
+		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> INSTANCE.joining.add(handler.player));
+	}
+
 	public void start(MinecraftServer server) {
 		this.server = server;
 		reloadAll();
 	}
 
 	public void tick(MinecraftServer server) {
+		for (ServerPlayer player : List.copyOf(this.joining)) {
+			if (!player.hasDisconnected()) {
+				fire(events -> events.playerJoined(player));
+			}
+		}
+		this.joining.clear();
 		for (LoadedModule module : List.copyOf(this.modules.values())) {
 			for (Consumer<MinecraftServer> tick : module.ticks) {
 				guard(module, () -> tick.accept(server));
+			}
+		}
+	}
+
+	/** Tells every module that's listening. One that throws only loses its own turn. */
+	public void fire(Consumer<WorldEvents> event) {
+		for (LoadedModule module : List.copyOf(this.modules.values())) {
+			for (WorldEvents events : module.events) {
+				guard(module, () -> event.accept(events));
 			}
 		}
 	}
@@ -227,6 +263,7 @@ public final class ServerModuleHost {
 		private final byte[] jar;
 		private final ServerModule module;
 		private final List<Consumer<MinecraftServer>> ticks = new ArrayList<>();
+		private final List<WorldEvents> events = new ArrayList<>();
 		private int failures;
 
 		LoadedModule(String moduleId, byte[] jar, ServerModule module) {
@@ -279,6 +316,11 @@ public final class ServerModuleHost {
 			this.ticks.add(tick);
 		}
 
+		@Override
+		public void listen(WorldEvents events) {
+			this.events.add(events);
+		}
+
 		private Identifier idOf(String name) {
 			String key = name.contains("/") ? name : this.moduleId + "/" + name;
 			String slot = ServerModuleHost.this.slotsByName.get(key);
@@ -301,6 +343,21 @@ public final class ServerModuleHost {
 		@Override
 		public EntityType<?> mob(String name) {
 			return BuiltInRegistries.ENTITY_TYPE.getValue(idOf(name));
+		}
+
+		@Override
+		public SoundEvent sound(String name) {
+			String key = "sound:" + (name.contains("/") ? name : this.moduleId + "/" + name);
+			String sound = ServerModuleHost.this.slotsByName.get(key);
+			if (sound == null) {
+				throw new IllegalArgumentException("No sound is called " + name + ". It has to be listed in \"sounds\" in feature.json");
+			}
+			return SoundEvent.createVariableRangeEvent(Identifier.fromNamespaceAndPath("gm", sound));
+		}
+
+		@Override
+		public void playSound(String name, Level level, BlockPos pos, float volume, float pitch) {
+			level.playSound(null, pos, sound(name), SoundSource.NEUTRAL, volume, pitch);
 		}
 
 		@Override

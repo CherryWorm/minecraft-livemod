@@ -92,7 +92,23 @@ Use `known` with a `route` for recipes learned elsewhere, `open` for ones that a
 - `behaviour` is `hostile`, `neutral` (fights back), `passive` or `skittish` (avoids players).
 - `spawn` is optional. Leave it out for something only a module summons. `light` is `dark`, `bright` or `any`. `cap` limits how many gather near one player. Biomes can be ids or `#tags`.
 
-For anything more, bind code to it: `context.bindMob("rune_crab", new MobBehavior() { ... })`, with `tick(mob)` and `hurt(mob, source)`. A model's animations are played with `mob.animator().playAnimation("name")`.
+For anything more, bind code to it: `context.bindMob("rune_crab", new MobBehavior() { ... })`, with `tick(mob)`, `hurt(mob, source)` and `interact(mob, player, hand)`. A model's animations are played with `mob.animator().playAnimation("name")`.
+
+`interact` is how a mob gets fed, tamed or sheared by using something on it. It runs ahead of its mind, so anything but `PASS` is the end of it, and `PASS` carries on to its mind if it has one. It runs once for each hand, and using up the item is up to you:
+
+```java
+context.bindMob("rune_crab", new MobBehavior() {
+    @Override
+    public InteractionResult interact(SlotMob mob, Player player, InteractionHand hand) {
+        if (hand != InteractionHand.MAIN_HAND || !player.getMainHandItem().is(context.item("rune_berry"))) {
+            return InteractionResult.PASS;
+        }
+        player.getMainHandItem().shrink(1);
+        context.playSound("crab_munch", mob.level(), mob.blockPosition(), 1.0F, 1.0F);
+        return InteractionResult.SUCCESS;
+    }
+});
+```
 
 ## Minds
 
@@ -248,11 +264,19 @@ It starts as an exact copy of `base`, and replaces `proportion` of it. If you ch
 
 ## Sounds
 
-List names in `"sounds": ["chime"]`, with `assets/sounds/chime.ogg` from `assetkit/sounds.py`. Refer to one as `$sound:chime` in data, or look it up in a module.
+List names in `"sounds": ["chime"]`, with `assets/sounds/chime.ogg` from `assetkit/sounds.py`. Refer to one as `$sound:chime` in data.
+
+A module plays one by name, for everyone close enough to hear it. It can be `"other_feature/name"` for another feature's. A volume above 1 carries further, and pitch runs from 0.5 to 2:
+
+```java
+context.playSound("chime", level, pos, 1.0F, 1.0F);
+```
+
+For anything more, `context.sound("chime")` gives the game's own `SoundEvent`, so `level.playSound(null, pos, context.sound("chime"), SoundSource.BLOCKS, 1.0F, 1.0F)` chooses its volume slider.
 
 ## Using your content from a module
 
-`context.block("name")`, `context.item("name")` and `context.mob("name")` give you the real objects for names in `feature.json`, or `"other_feature/name"` for another feature's.
+`context.block("name")`, `context.item("name")`, `context.mob("name")` and `context.sound("name")` give you the real objects for names in `feature.json`, or `"other_feature/name"` for another feature's.
 
 ## What the engine doesn't do yet
 

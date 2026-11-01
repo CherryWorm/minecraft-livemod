@@ -49,6 +49,7 @@ public final class Conduit implements ModInitializer {
 		Codex.register();
 		OrePatchQueue.register();
 		BiomePatch.registerPlacements();
+		ServerModuleHost.register();
 		ModulePush.register();
 		Bridge.register();
 		Board.register();
