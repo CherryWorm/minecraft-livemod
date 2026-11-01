@@ -1,7 +1,7 @@
 {
   "id": "moduleapi",
   "phase": 1,
-  "summary": "Test fixture for the server modules' API: blocks that face a way and refuse things, redstone, light, unbreakable blocks and model parts. Mobs that fly and drop several things, walking somewhere, and changing damage and knockback. A bar on an item that isn't a tool, recipes that carry things over or mend, and a bench with a bigger grid. Jumping and double tapping heard on the server, chunks loading, and a module's own saved data.",
+  "summary": "Test fixture for the server modules' API: blocks that face a way and refuse things, redstone, light, unbreakable blocks and model parts. Mobs that fly and drop several things, walking somewhere, and changing damage and knockback. A bar on an item that isn't a tool, recipes that carry things over or mend, and a bench with a bigger grid. Jumping and double tapping heard on the server, chunks loading, and a module's own saved data. Status effects of its own.",
   "blocks": {
     "api_front": {
       "family": "facing",
@@ -283,6 +283,19 @@
         "item": "$item:api_ingot",
         "count": 1
       }
+    }
+  },
+  "effects": {
+    "api_blessed": {
+      "display": "Api Blessed",
+      "color": "#FF00FF",
+      "category": "beneficial"
+    },
+    "api_cursed": {
+      "display": "Api Cursed",
+      "icon": "api_blessed",
+      "color": "#00FF00",
+      "category": "harmful"
     }
   }
 }

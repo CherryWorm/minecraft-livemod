@@ -340,6 +340,43 @@ class MachineShapes(unittest.TestCase):
             self.assertIn(mention, caught.exception.message)
 
 
+class Effects(unittest.TestCase):
+    def test_rules(self):
+        static.check_effects({"f": {"manifest": {"effects": {"blessed": {"display": "Blessed", "color": "#FFCC00", "category": "beneficial"}}}}})
+        for effects, mention in (({"blessed": {}}, "needs a display"), ({"blessed": {"display": "B", "category": "good"}}, "has category"),
+                                 ({"blessed": {"display": "B", "color": "yellow"}}, "has color"), (["blessed"], "has effects")):
+            with self.assertRaises(GateFailed) as caught:
+                static.check_effects({"f": {"manifest": {"effects": effects}}})
+            self.assertIn(mention, caught.exception.message)
+
+    def test_slots_never_change(self):
+        pool = {**POOL, "effect_count": 3}
+        features = {"f": {"manifest": {"effects": {"a": {"display": "A"}, "b": {"display": "B"}}}}}
+        ledger = bundles.assign_slots(features, bundles.empty_ledger(), pool)
+        self.assertEqual(ledger["effects"]["f/a"]["slot"], "fx0001")
+        features["f"]["manifest"]["effects"]["c"] = {"display": "C"}
+        again = bundles.assign_slots(features, json.loads(json.dumps(ledger)), pool)
+        self.assertEqual((again["effects"]["f/a"]["slot"], again["effects"]["f/c"]["slot"]), ("fx0001", "fx0003"))
+        with self.assertRaises(GateFailed):
+            static.check_ledger_append_only(again, ledger)
+
+    def test_it_reaches_the_server_and_pack(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder)
+            textures = root / "f" / "assets" / "textures"
+            textures.mkdir(parents=True)
+            from PIL import Image
+            Image.new("RGBA", (18, 18), (1, 2, 3, 255)).save(textures / "blessed.png")
+            features = {"f": {"manifest": {"id": "f", "effects": {"blessed": {"display": "Blessed", "color": "#010203", "category": "harmful"}}}, "dir": root / "f"}}
+            ledger = bundles.assign_slots(features, bundles.empty_ledger(), {**POOL, "effect_count": 3})
+            bundles.render(features, ledger, root / "out", 1)
+            self.assertEqual(json.loads((root / "out" / "config" / "effects.json").read_text(encoding="utf-8")), {"fx0001": {"category": "harmful", "color": 0x010203}})
+            self.assertEqual(json.loads((root / "out" / "config" / "bindings.json").read_text(encoding="utf-8"))["effect:f/blessed"], "fx0001")
+            self.assertEqual(json.loads((root / "out" / "pack" / "assets" / "gm" / "lang" / "en_us.json").read_text(encoding="utf-8"))["effect.gm.fx0001"], "Blessed")
+            static.check_textures(root / "out" / "pack")
+            static.check_spoilers(root / "out" / "pack")
+
+
 class RuinRules(unittest.TestCase):
     def assert_fine(self, entry):
         static.check_ruins(features(entry))

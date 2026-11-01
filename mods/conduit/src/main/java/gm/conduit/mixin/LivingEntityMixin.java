@@ -3,17 +3,21 @@ package gm.conduit.mixin;
 import com.llamalad7.mixinextras.sugar.Local;
 import com.llamalad7.mixinextras.sugar.ref.LocalDoubleRef;
 import com.llamalad7.mixinextras.sugar.ref.LocalFloatRef;
+import gm.conduit.effects.SlotEffect;
 import gm.conduit.modules.ServerModuleHost;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.LivingEntity;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+import java.util.Collection;
 
 /** Every hit on anything living comes through here, players and mobs alike. Fabric's own events can only say whether it happens, not how hard. */
 @Mixin(LivingEntity.class)
@@ -29,6 +33,15 @@ abstract class LivingEntityMixin {
 			info.setReturnValue(false);
 		}
 		amount.set(said);
+	}
+
+	@Inject(method = "onEffectsRemoved", at = @At("HEAD"))
+	private void conduit$tellOfEffectsEnding(Collection<MobEffectInstance> effects, CallbackInfo info) {
+		for (MobEffectInstance effect : effects) {
+			if (effect.getEffect().value() instanceof SlotEffect slot) {
+				slot.ended((LivingEntity) (Object) this);
+			}
+		}
 	}
 
 	/** A player moves by itself, and only the move that shows they've left the ground gets here, which is on the server. */

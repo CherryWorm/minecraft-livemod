@@ -14,7 +14,7 @@ from broker import guide, rawpack
 from orchestrator import others
 from orchestrator import wording
 
-TOKEN = re.compile(r"\$(block|item|mob|sound|biome|dimension):([a-z0-9_]+(?:/[a-z0-9_]+)?)")
+TOKEN = re.compile(r"\$(block|item|mob|sound|biome|dimension|effect):([a-z0-9_]+(?:/[a-z0-9_]+)?)")
 
 TOOL_TAGS = {"pickaxe": "pickaxe", "axe": "axe", "shovel": "shovel", "hoe": "hoe"}
 LEVEL_TAGS = {"stone": "needs_stone_tool", "iron": "needs_iron_tool", "diamond": "needs_diamond_tool"}
@@ -95,7 +95,8 @@ def read_pool(repo):
     slots = (repo / "mods/conduit/src/main/java/gm/conduit/slots/NeutralSlots.java").read_text(encoding="utf-8")
     item_count = int(re.search(r"ITEM_COUNT = (\d+)", slots).group(1))
     mobs = (repo / "mods/conduit/src/main/java/gm/conduit/mobs/SlotMobs.java").read_text(encoding="utf-8")
-    return {"families": families, "item_count": item_count, "mobs": {
+    effects = (repo / "mods/conduit/src/main/java/gm/conduit/effects/SlotEffects.java").read_text(encoding="utf-8")
+    return {"families": families, "item_count": item_count, "effect_count": int(re.search(r"EFFECT_COUNT = (\d+)", effects).group(1)), "mobs": {
         "monster": int(re.search(r"MONSTER_COUNT = (\d+)", mobs).group(1)),
         "creature": int(re.search(r"CREATURE_COUNT = (\d+)", mobs).group(1)),
     }}
@@ -128,7 +129,7 @@ def load_features(features_dir):
 
 
 def empty_ledger():
-    return {"blocks": {}, "items": {}, "mobs": {}, "dimensions": {}, "patches": [], "raw": []}
+    return {"blocks": {}, "items": {}, "mobs": {}, "dimensions": {}, "effects": {}, "patches": [], "raw": []}
 
 
 def assign_slots(features, ledger, pool):
@@ -168,6 +169,8 @@ def assign_slots(features, ledger, pool):
             _assign_mob(ledger, pool, f"{feature_id}/{name}", mob.get("category"))
         for name, dimension in feature["manifest"].get("dimensions", {}).items():
             _assign_dimension(ledger, f"{feature_id}/{name}", dimension)
+        for name in feature["manifest"].get("effects", {}):
+            _assign_effect(ledger, pool, f"{feature_id}/{name}")
     return ledger
 
 
@@ -202,6 +205,16 @@ def _assign_dimension(ledger, key, dimension):
     table[key] = {"slot": "d%04d" % (len(table) + 1), "terrain": terrain}
 
 
+def _assign_effect(ledger, pool, key):
+    table = ledger.setdefault("effects", {})
+    if key in table:
+        return
+    index = len(table)
+    if index >= pool.get("effect_count", 0):
+        raise BundleError(f"{key}: no free effect slots left")
+    table[key] = {"slot": "fx%04d" % (index + 1), "index": index}
+
+
 def _sound_id(feature_id, name):
     return hashlib.sha256(f"{feature_id}/{name}".encode()).hexdigest()[:16]
 
@@ -217,7 +230,7 @@ def _resolver(feature_id, ledger):
             return f"gm:{_sound_id(*key.split('/'))}"
         if kind == "biome":
             return f"gm:{_biome_id(*key.split('/'))}"
-        table = {"block": ledger["blocks"], "item": ledger["items"], "mob": ledger.get("mobs", {}), "dimension": ledger.get("dimensions", {})}[kind]
+        table = {"block": ledger["blocks"], "item": ledger["items"], "mob": ledger.get("mobs", {}), "dimension": ledger.get("dimensions", {}), "effect": ledger.get("effects", {})}[kind]
         if key not in table:
             raise BundleError(f"{feature_id}: refers to unknown {kind} {key!r}")
         return f"gm:{table[key]['slot']}"
@@ -796,6 +809,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
     panels = {}
     vanilla_tags = {}
     kept_raw = set(ledger.get("raw", []))
+    effects = {}
 
     for feature_id, feature in features.items():
         manifest = feature["manifest"]
@@ -922,6 +936,17 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
             bindings[f"{feature_id}/{name}"] = slot
             names[f"gm:{slot}"] = mob["display"]
             mobs[f"gm:{slot}"] = definition
+        for name, effect in manifest.get("effects", {}).items():
+            slot = ledger["effects"][f"{feature_id}/{name}"]["slot"]
+            bindings[f"effect:{feature_id}/{name}"] = slot
+            lang.name(f"effect.gm.{slot}", effect["display"])
+            source = feature["dir"] / "assets" / "textures" / f"{effect.get('icon', name)}.png"
+            if not source.exists():
+                raise BundleError(f"{feature_id}: effect {name}'s icon {source.name} is missing")
+            target = pack / "assets/gm/textures/gui/sprites/mob_effect" / f"{slot}.png"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
+            effects[slot] = {"category": effect.get("category", "neutral"), "color": int(effect.get("color", "#FFFFFF").lstrip("#"), 16)}
         for plant in manifest.get("plants", []):
             surface_patches.append({**_resolve_tokens(plant, feature_id, ledger), "block": _resolve_tokens(f"$block:{plant['block']}", feature_id, ledger)})
         for name, biome in manifest.get("biomes", {}).items():
@@ -995,6 +1020,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
     _write_json(config / "machine_inventories.json", machine_inventories)
     _write_json(config / "block_settings.json", block_settings)
     _write_panels(panels, languages, config)
+    _write_json(config / "effects.json", effects)
     _write_json(config / "knowledge.json", {"scope": scope, "entries": entries, "gated": gated, "open": sorted(open_recipes),
                                             "machines": machines, "names": names})
     _write_json(out / "recipes.json", recipe_modes)

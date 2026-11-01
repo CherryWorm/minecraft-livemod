@@ -478,6 +478,41 @@ context.playSound("chime", level, pos, 1.0F, 1.0F);
 
 For anything more, `context.sound("chime")` gives the game's own `SoundEvent`, so `level.playSound(null, pos, context.sound("chime"), SoundSource.BLOCKS, 1.0F, 1.0F)` chooses its volume slider.
 
+## Status effects
+
+```json
+"effects": {
+  "blessed": {"display": "Blessed", "icon": "blessed_icon", "color": "#FFCC00", "category": "beneficial"}
+}
+```
+
+A status effect of this world's own, next to the game's in the top corner of a player's screen and in their inventory, with its name, how long it's got and the level it's at. `icon` is a texture from `assets/textures`, 18 by 18, and is `<name>.png` if you leave it out. `color` is the colour of the swirls around whoever has it. `category` is `beneficial`, `harmful` or `neutral`: the game shows beneficial ones first, and gives them their own frame. There are 100 in all.
+
+It does nothing unless a module says so. A module gives it, and says what it does while it lasts:
+
+```java
+player.addEffect(new MobEffectInstance(context.effect("blessed"), 600, 0));
+
+context.bindEffect("blessed", new EffectBehavior() {
+    @Override
+    public void tick(LivingEntity entity, int level) {
+        if (entity.level().getGameTime() % 20 == 0) {
+            entity.heal(1 + level);
+        }
+    }
+
+    @Override
+    public void started(LivingEntity entity, int level) { /* ... */ }
+
+    @Override
+    public void ended(LivingEntity entity) { /* ... */ }
+});
+```
+
+`level` starts at 0, the same as the game's own amplifier. `tick` runs every tick for each thing that has it, so keep it small. `started` is getting it, or a stronger one, and `ended` is it running out or being taken away, which milk and dying both do. It goes on mobs too, and vanilla's own ways of giving effects all work with it: `$effect:blessed` names it in a food's `minecraft:consumable`, or a recipe's result. `/effect give` works with its slot id, which `/effect` will complete.
+
+Showing it takes the companion, because a game client can only be told about effects it was shipped with. Someone with no companion, or one too old for this, doesn't see it at all, though it works on them just the same. So don't rely on them seeing it to know what's happening: a sound or some particles too, for anything that matters. Once it's there, what shows is the game's own, so the name, the time left and the level all work as usual.
+
 ## Screen effects
 
 A client module can put a shader over everything a player sees, for something like the air warping near a tear. It covers the whole screen and there's no way to limit it to one place, so turn it on as they come near. It's about the most expensive thing that can be done to a player's computer, so save it for something that matters, and don't leave it on.

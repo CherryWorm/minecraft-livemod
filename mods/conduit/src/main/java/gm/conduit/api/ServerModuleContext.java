@@ -1,6 +1,7 @@
 package gm.conduit.api;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -9,6 +10,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.world.Container;
+import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
@@ -38,6 +40,8 @@ public interface ServerModuleContext {
 
 	void bindMob(String name, MobBehavior behavior);
 
+	void bindEffect(String name, EffectBehavior behavior);
+
 	void onServerTick(Consumer<MinecraftServer> tick);
 
 	/** Hears about things that happen anywhere in the world, so there's no need to poll for them each tick. */
@@ -51,6 +55,12 @@ public interface ServerModuleContext {
 
 	/** The entity type for a mob in this feature's manifest, or for "other_feature/name". */
 	EntityType<?> mob(String name);
+
+	/**
+	 * The status effect for a name in this feature's "effects", or for "other_feature/name", to give with
+	 * {@code entity.addEffect(new MobEffectInstance(context.effect("name"), ticks, level))}.
+	 */
+	Holder<MobEffect> effect(String name);
 
 	/** The sound for a name in this feature's "sounds", or for "other_feature/name". */
 	SoundEvent sound(String name);

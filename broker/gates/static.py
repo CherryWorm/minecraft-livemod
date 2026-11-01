@@ -23,7 +23,11 @@ MIXIN_SOURCE_REFUSALS[re.compile(r"require\s*=\s*0\b")] = "lets an injection fin
 RESERVE = 0.2
 RECIPE_MODES = {"open", "known", "guessable"}
 ROUTE_TYPES = {"obtain", "examine", "kill", "read", "fragments"}
-LEDGER_TABLES = ("blocks", "items", "mobs", "dimensions")
+LEDGER_TABLES = ("blocks", "items", "mobs", "dimensions", "effects")
+EFFECT_CATEGORIES = {"beneficial", "harmful", "neutral"}
+EFFECT_COLOUR = re.compile(r"#[0-9a-fA-F]{6}")
+# What the game draws an effect's picture at, and the same at the size of everything else in a feature.
+EFFECT_ICON_SIZES = (16, 18)
 OLD_LOOT_FIELDS = {"functions", "function", "conditions"}
 MACHINE_RECIPE_TYPES = {"gm:machine"}
 # Starting values, to be tuned once real players' computers have shown what they can draw.
@@ -90,7 +94,7 @@ BLOCK_WITH_STATE = re.compile(r"[^\[\]\s]+(\[[a-z0-9_]+=[a-z0-9_]+(,[a-z0-9_]+=[
 LOOT_CONTAINERS = re.compile(r"minecraft:(chest|trapped_chest|barrel|dispenser|dropper|hopper|crafter|([a-z]+_)?shulker_box|([a-z]+_)*copper_chest)")
 # Words that would give content away if they appeared in a path players can see.
 SAFE_PATH = re.compile(r"^assets/(gm/(textures/(block/s\d{4}(_(top|bottom|front|back|left|right|side|\d))?|item/[is]\d{4}(_[cv]\d+)?)\.png(\.mcmeta)?"
-                       r"|models/(block/s\d{4}(_c?\d+)?|item/[is]\d{4}(_[cv]\d+)?)\.json|items/[is]\d{4}\.json|lang/[a-z]{2}_[a-z]{2}\.json|sounds/[0-9a-f]+\.ogg|sounds\.json|shaders/post/p[0-9a-f]+\.fsh|post_effect/p[0-9a-f]+\.json|textures/gui/p[0-9a-f]+\.png)"
+                       r"|models/(block/s\d{4}(_c?\d+)?|item/[is]\d{4}(_[cv]\d+)?)\.json|items/[is]\d{4}\.json|lang/[a-z]{2}_[a-z]{2}\.json|sounds/[0-9a-f]+\.ogg|sounds\.json|shaders/post/p[0-9a-f]+\.fsh|post_effect/p[0-9a-f]+\.json|textures/gui/p[0-9a-f]+\.png|textures/gui/sprites/mob_effect/fx\d{4}\.png)"
                        r"|companion/patchouli_books/guide/[a-z]{2}_[a-z]{2}/(entries/k[0-9a-f]+|categories/(n[0-9a-f]+|s_[a-z]+(_\d+)?|other))\.json)$")
 
 
@@ -136,6 +140,9 @@ def check_slot_budget(ledger, pool):
     items = len(ledger["items"])
     if items > int(pool["item_count"] * (1 - RESERVE)):
         _fail(f"{items} item slots used, over the limit of {int(pool['item_count'] * (1 - RESERVE))}.")
+    effects = len(ledger.get("effects", {}))
+    if effects > int(pool.get("effect_count", 0) * (1 - RESERVE)):
+        _fail(f"{effects} status effects would be in use, over the limit of {int(pool.get('effect_count', 0) * (1 - RESERVE))}.")
     for category, available in pool["mobs"].items():
         count = sum(1 for entry in ledger.get("mobs", {}).values() if entry["category"] == category)
         if count > int(available * (1 - RESERVE)):
@@ -155,6 +162,10 @@ def check_textures(pack):
                 mode = image.mode
         except Exception as error:  # noqa: BLE001 - Pillow raises many types for a broken file
             _fail(f"{name} isn't a valid PNG: {error}")
+        if path.parent.name == "mob_effect":
+            if (width, height) not in [(size, size) for size in EFFECT_ICON_SIZES]:
+                _fail(f"{name} is {width}x{height}. An effect's icon is 18 by 18, the same as the game's own.")
+            continue
         if path.parent.name == "gui":
             if max(width, height) > MOST_PANEL_IMAGE:
                 _fail(f"{name} is {width}x{height}. A panel's images can be at most {MOST_PANEL_IMAGE} across.")
@@ -771,6 +782,21 @@ def check_machines(features):
                 _fail(f"{label} has outputs {made!r}. Each is like {{\"item\": \"$item:name\", \"count\": 1}}.")
 
 
+def check_effects(features):
+    for feature_id, feature in features.items():
+        effects = feature["manifest"].get("effects", {})
+        if not isinstance(effects, dict):
+            _fail(f"{feature_id} has effects {effects!r}. It's names, each with what it is, like {{\"blessed\": {{\"display\": \"Blessed\", \"icon\": \"blessed\", \"color\": \"#FFCC00\", \"category\": \"beneficial\"}}}}.")
+        for name, effect in effects.items():
+            label = f"Effect {feature_id}/{name}"
+            if not isinstance(effect, dict) or not isinstance(effect.get("display"), str):
+                _fail(f"{label} needs a display, which is the name players see beside it.")
+            if effect.get("category", "neutral") not in EFFECT_CATEGORIES:
+                _fail(f"{label} has category {effect.get('category')!r}. Use one of {sorted(EFFECT_CATEGORIES)}. The game shows beneficial ones first, and it colours a harmful one's frame.")
+            if not EFFECT_COLOUR.fullmatch(str(effect.get("color", "#FFFFFF"))):
+                _fail(f"{label} has color {effect.get('color')!r}. It's the colour of its swirls, like \"#FFCC00\".")
+
+
 def check_mobs(features):
     """A number out of range would just quietly do something odd, and a part that isn't there would just not glow."""
     for feature_id, feature in features.items():
@@ -976,6 +1002,7 @@ def run(features, old_ledger, new_ledger, pool, content):
     check_screen_effects(features)
     check_panels(features)
     check_machines(features)
+    check_effects(features)
     check_mobs(features)
     check_mob_sounds(features)
     check_model_costs(features)

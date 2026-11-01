@@ -328,6 +328,25 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				context.waitTicks(2);
 				context.getInput().holdKeyFor(options -> options.keyJump, 2);
 			}
+			case "effects" -> {
+				String shown = context.computeOnClient(client -> {
+					StringBuilder effects = new StringBuilder("[");
+					for (var effect : client.player.getActiveEffects()) {
+						var kind = effect.getEffect().value();
+						if (kind.getDisplayName().getString().startsWith("Api")) {
+							effects.append(effects.length() > 1 ? "," : "").append(String.format(java.util.Locale.ROOT, "{\"name\":\"%s\",\"level\":%d,\"ticks\":%d,\"harmful\":%b,\"sprite\":\"%s\"}",
+									kind.getDisplayName().getString(), effect.getAmplifier(), effect.getDuration(), kind.getCategory() == net.minecraft.world.effect.MobEffectCategory.HARMFUL, net.minecraft.client.gui.Hud.getMobEffectSprite(effect.getEffect())));
+						}
+					}
+					return effects.append("]").toString();
+				});
+				LOGGER.info("[M8] effects: {}", shown);
+			}
+			case "respawn" -> context.runOnClient(client -> {
+				client.player.respawn();
+				client.gui.setScreen(null);
+			});
+			case "guiwide" -> context.runOnClient(client -> client.options.guiScale().set(2));
 			case "hotbarclick" -> context.runOnClient(client -> client.gameMode.handleContainerInput(client.player.containerMenu.containerId,
 					client.player.containerMenu.slots.size() - 9 + Integer.parseInt(words[1]), LEFT_BUTTON, ContainerInput.PICKUP, client.player));
 			case "oldcompanion" -> rejoinWithout(context, "inventory_hooks");

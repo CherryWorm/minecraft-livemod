@@ -1,6 +1,7 @@
 package gm.feature.moduleapi;
 
 import gm.conduit.api.BlockBehavior;
+import gm.conduit.api.EffectBehavior;
 import gm.conduit.api.ItemBehavior;
 import gm.conduit.api.MachineAttempt;
 import gm.conduit.api.MachineBehavior;
@@ -55,6 +56,27 @@ public final class ModuleApiModule implements ServerModule {
 		bindKiln();
 		bindMobs();
 		bindItems();
+		context.bindEffect("api_blessed", new EffectBehavior() {
+			private int ticks;
+
+			@Override
+			public void tick(LivingEntity entity, int level) {
+				if (++this.ticks == 10) {
+					say("blessed tick level " + level + " on " + entity.getName().getString());
+				}
+			}
+
+			@Override
+			public void started(LivingEntity entity, int level) {
+				this.ticks = 0;
+				say("blessed started level " + level + " has it " + entity.hasEffect(ModuleApiModule.this.context.effect("api_blessed")));
+			}
+
+			@Override
+			public void ended(LivingEntity entity) {
+				say("blessed ended on " + entity.getName().getString());
+			}
+		});
 		// It counts every time this module starts, so a test can tell it's been replaced, and that this came through.
 		context.state().putInt("started", context.state().getIntOr("started", 0) + 1);
 		say("state started " + context.state().getIntOr("started", 0) + " uses " + context.state().getIntOr("uses", 0));

@@ -3,6 +3,7 @@ package gm.conduit.modules;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import gm.conduit.api.BlockBehavior;
+import gm.conduit.api.EffectBehavior;
 import gm.conduit.api.ItemBehavior;
 import gm.conduit.api.MachineAttempt;
 import gm.conduit.api.MachineBehavior;
@@ -29,6 +30,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
@@ -44,6 +46,7 @@ import net.minecraft.sounds.SoundSource;
 import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.Container;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.SimpleMenuProvider;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -101,6 +104,7 @@ public final class ServerModuleHost {
 	private final Map<String, ItemBehavior> items = new HashMap<>();
 	private final Map<String, MachineBehavior> machines = new HashMap<>();
 	private final Map<String, MobBehavior> mobs = new HashMap<>();
+	private final Map<String, EffectBehavior> effects = new HashMap<>();
 	private final List<ServerPlayer> joining = new ArrayList<>();
 	private Map<String, String> slotsByName = Map.of();
 	private MinecraftServer server;
@@ -128,6 +132,10 @@ public final class ServerModuleHost {
 
 	public MobBehavior mobBehavior(String slotId) {
 		return this.mobs.get(slotId);
+	}
+
+	public EffectBehavior effectBehavior(String slotId) {
+		return this.effects.get(slotId);
 	}
 
 	public static void register() {
@@ -349,6 +357,7 @@ public final class ServerModuleHost {
 				this.items.remove(entry.getKey());
 				this.machines.remove(entry.getKey());
 				this.mobs.remove(entry.getKey());
+				this.effects.remove(entry.getKey());
 				return true;
 			}
 			return false;
@@ -454,6 +463,30 @@ public final class ServerModuleHost {
 		@Override
 		public void bindMob(String name, MobBehavior behavior) {
 			ServerModuleHost.this.mobs.put(slot(name), behavior);
+		}
+
+		@Override
+		public void bindEffect(String name, EffectBehavior behavior) {
+			String slot = effectSlot(name);
+			if (name.contains("/")) {
+				throw new IllegalArgumentException("A module can only bind its own effects, not " + name);
+			}
+			ServerModuleHost.this.ownerBySlot.put(slot, this);
+			ServerModuleHost.this.effects.put(slot, behavior);
+		}
+
+		/** Marked as effects in the list of names, so one can share its name with a block or a mob, as a sound can. */
+		private String effectSlot(String name) {
+			String slot = ServerModuleHost.this.slotsByName.get("effect:" + (name.contains("/") ? name : this.moduleId + "/" + name));
+			if (slot == null) {
+				throw new IllegalArgumentException("No effect is called " + name + ". It has to be listed in \"effects\" in feature.json");
+			}
+			return slot;
+		}
+
+		@Override
+		public Holder<MobEffect> effect(String name) {
+			return BuiltInRegistries.MOB_EFFECT.wrapAsHolder(BuiltInRegistries.MOB_EFFECT.getValue(Identifier.fromNamespaceAndPath("gm", effectSlot(name))));
 		}
 
 		@Override

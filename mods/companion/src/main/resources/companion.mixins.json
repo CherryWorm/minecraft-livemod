@@ -5,6 +5,7 @@
 	"client": [
 		"AbstractContainerScreenAccessor",
 		"GameRendererMixin",
+		"HudMixin",
 		"KeyboardHandlerMixin",
 		"PostPassMixin",
 		"ShaderManagerMixin",

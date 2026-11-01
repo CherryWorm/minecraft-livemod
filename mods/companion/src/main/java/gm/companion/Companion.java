@@ -37,6 +37,7 @@ public final class Companion implements ClientModInitializer {
 		ClientPlayNetworking.registerGlobalReceiver(ModulePayloads.InventoryHooksSupported.TYPE, (payload, context) -> {});
 		ClientPlayNetworking.registerGlobalReceiver(KnownRecipes.Part.TYPE, (payload, context) -> KnownRecipes.receive(payload));
 		PanelClient.register();
+		EffectClient.register();
 		if (FabricLoader.getInstance().isModLoaded("patchouli")) {
 			Guide.register();
 		}
@@ -48,6 +49,7 @@ public final class Companion implements ClientModInitializer {
 			HOST.unloadAll();
 			KnownRecipes.forget();
 			PanelClient.forget();
+			EffectClient.forget();
 		});
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> HOST.unloadAll());
 

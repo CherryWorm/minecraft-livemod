@@ -3,7 +3,7 @@
 both ways, comparators, light a module sets, blocks nothing can break, and a model's named parts moved, tinted and scaled. Reuses whatever world is
 there, as long as it has land near the spot, so a run needs no reset. Name the stages to run, or leave them out for all of them.
 
-Usage: python3 -m broker.tests.m40_test [blocks mobs items input ...]
+Usage: python3 -m broker.tests.m40_test [blocks mobs items input effects ...]
 """
 import json
 import pathlib
@@ -22,6 +22,7 @@ SOURCE = runtime.BROKER / "testsrc-m40"
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "moduleapi"
 SPOT = (40, 150, 40)
 COLOURS = {"api_front": (0xCC, 0x22, 0x22), "api_side": (0x22, 0x44, 0xCC), "api_top": (0x22, 0xBB, 0x44)}
+EFFECT_ICON = (0xFF, 0x00, 0xFF, 255)
 results = []
 
 
@@ -51,6 +52,7 @@ def build_source():
         image = Image.new("RGBA", (16, 16), (*colour, 255))
         ImageDraw.Draw(image).rectangle((1, 1, 14, 14), outline=(0xEE, 0xEE, 0xEE, 255))
         image.save(textures / f"{name}.png")
+    Image.new("RGBA", (18, 18), EFFECT_ICON).save(textures / "api_blessed.png")
     models = target / "assets" / "models"
     models.mkdir(parents=True, exist_ok=True)
     make_model(models / "api_statue.bbmodel", "quadruped")
@@ -724,10 +726,84 @@ def play_state(client):
     rcon("setblock", str(x), str(y), str(z), "minecraft:air")
 
 
+def icon_pixels(client, name, box):
+    """How much of a corner of a photograph is the colour nothing else in the game is but that icon."""
+    client.ask(f"shot {name}")
+    shots = sorted((runtime.WORK / "mods" / "companion" / "build" / "run" / "clientGameTest" / "screenshots").glob(f"*m8_{name}*.png"))
+    with Image.open(shots[-1]) as image:
+        rgb = image.convert("RGB")
+        area = rgb.crop((int(box[0] * rgb.width), int(box[1] * rgb.height), int(box[2] * rgb.width), int(box[3] * rgb.height)))
+        return sum(count for count, colour in area.getcolors(maxcolors=1 << 24) if colour[0] > 200 and colour[1] < 60 and colour[2] > 200)
+
+
+def client_effects(client):
+    client.ask("effects")
+    return json.loads(re.findall(r"\[M8\] effects: (.*)$", client.text(), re.MULTILINE)[-1])
+
+
+def play_effects(client):
+    x, y, z = SPOT
+    blessed, cursed = slot("api_blessed", "effects"), slot("api_cursed", "effects")
+    rcon("tp", PLAYER, str(x + 0.5), str(y), str(z + 0.5), "0", "0")
+    rcon("effect", "clear", PLAYER)
+    before = icon_pixels(client, "no_effect", (0.5, 0, 1, 0.3))
+    time.sleep(1)
+    rcon("effect", "give", PLAYER, blessed, "60", "2", "true")
+    check("a module hears an effect start, and at what level", holds(client, "blessed started level 2 has it true"))
+    check("it runs for as long as it lasts", holds(client, f"blessed tick level 2 on {PLAYER}"))
+    time.sleep(1)
+    shown = client_effects(client)
+    check("the client has it", any(effect["name"] == "Api Blessed" and effect["level"] == 2 for effect in shown), str(shown))
+    check("with its time left", any(40 * 20 < effect["ticks"] <= 60 * 20 for effect in shown), str(shown))
+    check("and its own picture", any(effect["sprite"] == f"{blessed.replace(':', ':mob_effect/')}" for effect in shown), str(shown))
+    rcon("effect", "give", PLAYER, cursed, "60", "0", "true")
+    time.sleep(2)
+    shown = client_effects(client)
+    check("two at once both show", len(shown) == 2 and any(effect["name"] == "Api Cursed" and effect["harmful"] for effect in shown), str(shown))
+    hud = icon_pixels(client, "effect_hud", (0.5, 0, 1, 0.3))
+    check("its picture is on the HUD", hud > before + 50, f"{before} then {hud}")
+    client.ask("inventory")
+    time.sleep(1)
+    inventory = icon_pixels(client, "effect_inventory", (0, 0, 1, 1))
+    check("and in the inventory", inventory > 50, str(inventory))
+    client.ask("close")
+    rcon("effect", "clear", PLAYER, cursed)
+    time.sleep(2)
+    shown = client_effects(client)
+    check("one taken away goes", [effect["name"] for effect in shown] == ["Api Blessed"], str(shown))
+    rcon("effect", "clear", PLAYER)
+    check("a module hears it end", holds(client, f"blessed ended on {PLAYER}"))
+    time.sleep(2)
+    check("and the client stops showing it", client_effects(client) == [], str(client_effects(client)))
+    rcon("effect", "give", PLAYER, blessed, "2", "0", "true")
+    check("it can run out", holds(client, f"blessed ended on {PLAYER}", 10))
+    time.sleep(1)
+    check("and the client stops showing that too", client_effects(client) == [], str(client_effects(client)))
+
+    # On a mob, which nothing shows but which still works.
+    tag = spawn("api_calf", x + 2, y, z)
+    rcon("effect", "give", f"@n[tag={tag}]", blessed, "60", "1", "true")
+    check("a mob can have one too", holds(client, "blessed tick level 1 on Api Calf"))
+    rcon("kill", f"@n[tag={tag}]")
+    rcon("kill", "@e[type=item]")
+    # Dying takes it away, and whoever comes back doesn't still seem to have it.
+    rcon("effect", "give", PLAYER, blessed, "60", "0", "true")
+    time.sleep(1)
+    rcon("effect", "clear", PLAYER, "minecraft:resistance")
+    rcon("kill", PLAYER)
+    time.sleep(3)
+    client.ask("respawn")
+    time.sleep(3)
+    check("dying ends it, on the client too", client_effects(client) == [], str(client_effects(client)))
+    rcon("gamemode", "survival", PLAYER)
+    rcon("effect", "give", PLAYER, "minecraft:resistance", "9999", "5", "true")
+
+
 STAGES = {"blocks": (play_facing, play_placing, play_redstone, play_light, play_unbreakable, play_parts, play_machine_slots),
           "mobs": (play_mob_drops, play_flying, play_walking, play_damage),
           "items": (play_bar, play_recipes, play_bench),
-          "input": (play_keys, play_chunks, play_state)}
+          "input": (play_keys, play_chunks, play_state),
+          "effects": (play_effects,)}
 
 
 def main():
@@ -744,6 +820,8 @@ def main():
         client.wait(r"\[M8\] joined as [A-Za-z0-9_]+$", 420)
         time.sleep(5)
         clear_ground()
+        if "effects" in wanted:
+            client.ask("guiwide")
         for stage in wanted:
             for play in STAGES[stage]:
                 print(f"--- {play.__name__}", flush=True)
