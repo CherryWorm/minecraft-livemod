@@ -222,6 +222,8 @@ class TheModule(unittest.TestCase):
             "new_plant": "name display color family kind on per_chunk min_y max_y underground biomes food seed_item seed",
             "new_mob": "name display category behaviour shape primary secondary health damage speed drops spawn seed",
             "new_machine": "name display casing accent recipe_ingredients automation seed",
+            "new_world_effect": "name color seed",
+            "new_blueprint": "name display color layout seed",
         }
         self.assertEqual(set(templates.TEMPLATES), set(wanted))
         for name, function in templates.TEMPLATES.items():
@@ -733,6 +735,50 @@ class Mobs(Case):
         self.release()
 
 
+class DrawingInTheWorld(Case):
+    def test_an_effect_comes_with_a_shader_and_a_module_that_shows_it(self):
+        result = templates.new_world_effect(self.at("rift"), name="shimmer", color="#ff8800")
+        manifest = self.manifest("rift")
+        self.assertEqual(manifest["world_shaders"], ["shimmer"])
+        shader = (self.at("rift") / "assets" / "shaders" / "shimmer.fsh").read_text(encoding="utf-8")
+        self.assertTrue(shader.startswith("#version 330"))
+        self.assertNotIn("@", shader)
+        module = (self.at("rift") / "server/src/main/java/gm/feature/rift/RiftModule.java").read_text(encoding="utf-8")
+        self.assertIn('.shader("shimmer")', module)
+        self.assertNotIn("@ID@", module)
+        self.assertIn("RiftModule", result["summary"])
+        static.check_screen_effects({"rift": {"manifest": manifest, "dir": self.at("rift")}})
+
+    def test_a_second_effect_is_left_for_the_module_thats_there(self):
+        templates.new_world_effect(self.at("rift"), name="shimmer")
+        result = templates.new_world_effect(self.at("rift"), name="glimmer")
+        self.assertEqual(self.manifest("rift")["world_shaders"], ["shimmer", "glimmer"])
+        self.assertIn('shader("glimmer")', result["summary"])
+        with self.assertRaises(TemplateError):
+            templates.new_world_effect(self.at("rift"), name="glimmer")
+
+    def test_a_blueprint_shows_its_layout_with_nothing_placed(self):
+        templates.new_blueprint(self.at("works"), name="kiln_plans", display="Kiln Plans", color="#4466cc", layout=[
+            {"x": 0, "y": 1, "z": 0, "block": "$block:casing"},
+            {"x": 1, "y": 1, "z": 0, "block": "$block:other_feature/thing"},
+            {"x": 0, "y": 2, "z": 0, "block": "minecraft:hopper"}])
+        manifest = self.manifest("works")
+        self.assertEqual(manifest["items"]["kiln_plans"]["display"], "Kiln Plans")
+        module = (self.at("works") / "server/src/main/java/gm/feature/works/WorksModule.java").read_text(encoding="utf-8")
+        self.assertIn('new Part(0, 1, 0, context.block("casing"))', module)
+        self.assertIn('new Part(1, 1, 0, context.block("other_feature/thing"))', module)
+        self.assertIn('new Part(0, 2, 0, BuiltInRegistries.BLOCK.getValue(Identifier.parse("minecraft:hopper")))', module)
+        self.assertIn('context.bindItem("kiln_plans"', module)
+        self.assertIn('"plan_" + player.getUUID()', module)
+        self.assertNotIn("@", module.replace("@Override", ""))
+
+    def test_a_layout_it_cant_read_is_refused(self):
+        for layout in ([], "hopper", [{"x": 0, "y": 1, "block": "minecraft:hopper"}], [{"x": 0, "y": 1, "z": 0, "block": "hopper"}], [{"x": True, "y": 1, "z": 0, "block": "minecraft:hopper"}]):
+            with self.assertRaises(TemplateError):
+                templates.new_blueprint(self.at("works"), name="kiln_plans", display="Kiln Plans", color="#4466cc", layout=layout)
+        self.assertFalse((self.at("works") / "feature.json").exists())
+
+
 class Machines(Case):
     def test_what_it_makes(self):
         result = new_machine(self.at("rune_forge"), name="crucible", display="Rune Crucible", casing="#70707a", accent="#e88e36",
@@ -954,6 +1000,8 @@ class Refusals(Case):
         "new_plant": lambda folder: new_plant(folder, name="moss", display="Moss", color="#d04060", food={"nutrition": 4, "saturation": 2.4}),
         "new_mob": lambda folder: new_mob(folder, name="husk", display="Husk", category="monster", behaviour="hostile", drops={"item": "husk_fang"}, spawn=True),
         "new_machine": lambda folder: new_machine(folder, name="forge", display="Forge", casing="#70707a", accent="#e88e36", recipe_ingredients=["minecraft:furnace"]),
+        "new_world_effect": lambda folder: templates.new_world_effect(folder, name="shimmer"),
+        "new_blueprint": lambda folder: templates.new_blueprint(folder, name="kiln_plans", display="Kiln Plans", color="#4466cc", layout=[{"x": 0, "y": 1, "z": 0, "block": "minecraft:hopper"}]),
     }
 
     def test_every_template_covers_this_table(self):
@@ -1162,6 +1210,8 @@ class NodeAndPhase(Case):
             "new_plant": {"name": "a", "display": "A", "color": "#d04060"},
             "new_mob": {"name": "a", "display": "A", "category": "monster", "behaviour": "hostile"},
             "new_machine": {"name": "a", "display": "A", "casing": "#70707a", "accent": "#e88e36"},
+            "new_world_effect": {"name": "a"},
+            "new_blueprint": {"name": "a", "display": "A", "color": "#4466cc", "layout": [{"x": 0, "y": 1, "z": 0, "block": "minecraft:hopper"}]},
         }
         self.assertEqual(set(calls), set(templates.TEMPLATES))
         for name, arguments in calls.items():

@@ -6,11 +6,14 @@ import gm.companion.api.InventoryHooks;
 import gm.companion.api.InventoryView;
 import gm.companion.api.KeyInput;
 import gm.companion.api.ModuleContext;
+import gm.companion.api.WorldCanvas;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.Identifier;
@@ -57,7 +60,9 @@ public final class ModuleHost {
 	private final Map<String, byte[][]> incoming = new HashMap<>();
 	private final ModuleVerifier verifier = new ModuleVerifier();
 	private final boolean safeMode = Files.exists(RUNNING_MARKER);
+	private final WorldDrawing world = new WorldDrawing();
 	private boolean turnedOff = Files.exists(TURNED_OFF);
+	private ClientLevel lastLevel;
 	private int completedUnloads;
 	private int disabledForErrors;
 	private int refused;
@@ -108,6 +113,7 @@ public final class ModuleHost {
 		}
 		if (off) {
 			unloadAll();
+			this.world.forget();
 		}
 	}
 
@@ -230,9 +236,63 @@ public final class ModuleHost {
 		}
 	}
 
+	public WorldDrawing world() {
+		return this.world;
+	}
+
+	/** A shader from the server can crash a graphics driver as well as a module can, so the same safety nets apply. */
+	void showInWorld(WorldPayloads.Show show) {
+		if (this.turnedOff || this.safeMode) {
+			return;
+		}
+		// It may have come straight after the news of a new level, ahead of the next frame, and this has to be about the new one.
+		noticeLevel();
+		this.world.keep(show.moduleId(), show.key(), WorldPayloads.shapes(show), show.seconds(), show.age(), show.fade(), show.moveX(), show.moveY(), show.moveZ());
+		if (!show.shader().isEmpty()) {
+			markRunning(true);
+		}
+	}
+
+	void shakeFromServer(float strength, float seconds) {
+		if (!this.turnedOff && !this.safeMode) {
+			this.world.shake(strength, seconds);
+		}
+	}
+
+	private void noticeLevel() {
+		ClientLevel level = Minecraft.getInstance().level;
+		if (level != this.lastLevel) {
+			this.lastLevel = level;
+			this.world.levelChanged();
+		}
+	}
+
+	void renderWorld(LevelRenderContext context) {
+		if (this.turnedOff || this.safeMode) {
+			return;
+		}
+		noticeLevel();
+		this.world.render(() -> dispatch(LoadedModule::drawsInWorld, module -> module.drawWorld(this.world)), context.gameRenderer().mainRenderTarget(), context.levelState().cameraRenderState);
+	}
+
+	void disconnected() {
+		unloadAll();
+		this.world.forget();
+		this.lastLevel = null;
+		markRunning(false);
+	}
+
 	private void dispatch(Consumer<LoadedModule> call) {
+		dispatch(module -> true, call);
+	}
+
+	/** Only those it's about, so that calling everything that has nothing to do doesn't water down the average that says who's too slow. */
+	private void dispatch(Predicate<LoadedModule> which, Consumer<LoadedModule> call) {
 		List<String> broken = new ArrayList<>();
 		for (LoadedModule module : this.modules.values()) {
+			if (!which.test(module)) {
+				continue;
+			}
 			long started = System.nanoTime();
 			call.accept(module);
 			if (module.failures >= MAX_FAILURES) {
@@ -258,6 +318,7 @@ public final class ModuleHost {
 		private final List<Consumer<Minecraft>> ticks = new ArrayList<>();
 		private final List<InventoryHooks> inventoryHooks = new ArrayList<>();
 		private final List<Consumer<KeyInput>> keyHooks = new ArrayList<>();
+		private final List<Consumer<WorldCanvas>> worldHooks = new ArrayList<>();
 		private ClientModule module;
 		private Identifier screenEffect;
 		private int failures;
@@ -318,6 +379,27 @@ public final class ModuleHost {
 		@Override
 		public MutableComponent text(String name, Object... args) {
 			return Component.translatable("text.gm.t" + hashed(name.contains("/") ? name : this.moduleId + "/" + name), args);
+		}
+
+		@Override
+		public void onWorld(Consumer<WorldCanvas> draw) {
+			this.worldHooks.add(draw);
+		}
+
+		@Override
+		public void shakeCamera(float strength, float seconds) {
+			Companion.host().world().shake(strength, seconds);
+		}
+
+		boolean drawsInWorld() {
+			return !this.worldHooks.isEmpty();
+		}
+
+		void drawWorld(WorldDrawing drawing) {
+			WorldCanvas canvas = drawing.canvas(this.moduleId);
+			for (Consumer<WorldCanvas> hook : this.worldHooks) {
+				guarded(() -> hook.accept(canvas));
+			}
 		}
 
 		/** The name it has in the resource pack, which the broker works out the same way, so that it gives nothing away. */
@@ -394,6 +476,7 @@ public final class ModuleHost {
 			this.ticks.clear();
 			this.inventoryHooks.clear();
 			this.keyHooks.clear();
+			this.worldHooks.clear();
 			this.screenEffect = null;
 			this.module = null;
 		}

@@ -15,6 +15,7 @@ import gm.conduit.api.PropBehavior;
 import gm.conduit.api.VehicleBehavior;
 import gm.conduit.api.ServerModule;
 import gm.conduit.api.ServerModuleContext;
+import gm.conduit.api.WorldEffect;
 import gm.conduit.api.WorldEvents;
 import gm.conduit.api.MenuBehavior;
 import gm.conduit.api.PanelBehavior;
@@ -379,6 +380,7 @@ public final class ServerModuleHost {
 		module.removeBeams();
 		guard(module, module.module::disable);
 		this.states.save(moduleId);
+		WorldEffects.clear(moduleId, "");
 		this.ownerBySlot.entrySet().removeIf(entry -> {
 			if (entry.getValue() == module) {
 				this.blocks.remove(entry.getKey());
@@ -832,6 +834,31 @@ public final class ServerModuleHost {
 				throw new IllegalArgumentException("No dimension is called " + name + ". It has to be in \"dimensions\" in feature.json");
 			}
 			return slot;
+		}
+
+		@Override
+		public void showEffect(ServerLevel level, WorldEffect effect) {
+			WorldEffects.show(this.moduleId, level, null, effect);
+		}
+
+		@Override
+		public void showEffect(ServerPlayer player, WorldEffect effect) {
+			WorldEffects.show(this.moduleId, player.level(), player, effect);
+		}
+
+		@Override
+		public void clearEffect(String key) {
+			WorldEffects.clear(this.moduleId, key);
+		}
+
+		@Override
+		public void shakeCamera(ServerPlayer player, float strength, float seconds) {
+			WorldEffects.shake(player, strength, seconds);
+		}
+
+		@Override
+		public int clientBlockId(BlockState state) {
+			return WorldEffects.clientBlockId(state);
 		}
 	}
 }

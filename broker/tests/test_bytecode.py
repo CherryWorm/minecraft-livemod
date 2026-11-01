@@ -208,6 +208,9 @@ class ClientRefusals(JarCase):
     def test_an_inventory_helper_can_use_all_of_its_hooks(self):
         self.assert_passes(self.fixture("inventory_helper", "HelperModule"), "client", "inventory_helper")
 
+    def test_a_module_can_draw_in_the_world_with_nothing_but_our_own_api(self):
+        self.assert_passes(self.fixture("world_drawer", "DrawerModule"), "client", "world_drawer")
+
     def test_a_stack_in_a_menu_is_only_for_looking_at(self):
         self.assert_refused(self.fixture("stack_changing"), "client", "stack_changing", "net/minecraft/world/item/ItemStack.setCount")
 

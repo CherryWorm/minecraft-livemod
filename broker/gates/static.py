@@ -127,7 +127,7 @@ BLOCK_WITH_STATE = re.compile(r"[^\[\]\s]+(\[[a-z0-9_]+=[a-z0-9_]+(,[a-z0-9_]+=[
 LOOT_CONTAINERS = re.compile(r"minecraft:(chest|trapped_chest|barrel|dispenser|dropper|hopper|crafter|([a-z]+_)?shulker_box|([a-z]+_)*copper_chest)")
 # Words that would give content away if they appeared in a path players can see.
 SAFE_PATH = re.compile(r"^assets/(gm/(textures/(block/fb\d{4}|block/s\d{4}(_(top|bottom|front|back|left|right|side|\d))?|item/[is]\d{4}(_[cv]\d+)?)\.png(\.mcmeta)?"
-                       r"|models/(block/s\d{4}(_c?\d+)?|block/fb\d{4}|item/[is]\d{4}(_[cv]\d+)?)\.json|items/[is]\d{4}\.json|lang/[a-z]{2}_[a-z]{2}\.json|sounds/[0-9a-f]+\.ogg|sounds\.json|shaders/post/p[0-9a-f]+\.fsh|post_effect/p[0-9a-f]+\.json|textures/gui/p[0-9a-f]+\.png|textures/gui/sprites/mob_effect/fx\d{4}\.png)"
+                       r"|models/(block/s\d{4}(_c?\d+)?|block/fb\d{4}|item/[is]\d{4}(_[cv]\d+)?)\.json|items/[is]\d{4}\.json|lang/[a-z]{2}_[a-z]{2}\.json|sounds/[0-9a-f]+\.ogg|sounds\.json|shaders/(post|world)/p[0-9a-f]+\.fsh|post_effect/p[0-9a-f]+\.json|textures/(gui|world)/p[0-9a-f]+\.png|textures/gui/sprites/mob_effect/fx\d{4}\.png)"
                        r"|companion/patchouli_books/guide/[a-z]{2}_[a-z]{2}/(entries/k[0-9a-f]+|categories/(n[0-9a-f]+|s_[a-z]+(_\d+)?|other))\.json)$")
 
 
@@ -207,9 +207,9 @@ def check_textures(pack):
             if (width, height) not in [(size, size) for size in EFFECT_ICON_SIZES]:
                 _fail(f"{name} is {width}x{height}. An effect's icon is 18 by 18, the same as the game's own.")
             continue
-        if path.parent.name == "gui":
+        if path.parent.name in ("gui", "world"):
             if max(width, height) > MOST_PANEL_IMAGE:
-                _fail(f"{name} is {width}x{height}. A panel's images can be at most {MOST_PANEL_IMAGE} across.")
+                _fail(f"{name} is {width}x{height}. A panel's or a world image can be at most {MOST_PANEL_IMAGE} across.")
             continue
         # A raw picture has whatever size the game wants for what it's a picture of, like armour, which is 64 by 32.
         if rawpack.RAW_NAME.fullmatch(path.name.split(".")[0]):
@@ -734,23 +734,31 @@ def check_panels(features):
         _fail("\n".join(problems))
 
 
+def _check_shader(label, feature, name, guide):
+    path = feature["dir"] / "assets" / "shaders" / f"{name}.fsh"
+    if not path.exists():
+        _fail(f"{label} needs assets/shaders/{name}.fsh.")
+    text = path.read_text(encoding="utf-8")
+    if len(text) > MOST_SHADER_CHARACTERS:
+        _fail(f"{label} is {len(text)} characters long, over the limit of {MOST_SHADER_CHARACTERS}. It runs for every pixel of every frame, so keep it simple.")
+    if not text.lstrip().startswith("#version 330"):
+        _fail(f"{label} has to start with #version 330, which is what the game's own are. See '{guide}' in docs/content-types.md.")
+    if "#moj_import" in text:
+        _fail(f"{label} uses #moj_import, which this version of the game doesn't have. Use #include <minecraft:globals.glsl>.")
+    if re.search(r"\b(while|do)\b", text):
+        _fail(f"{label} uses a while or do loop, which could never finish and hang a player's graphics card. Use a for loop with a fixed count.")
+
+
 def check_screen_effects(features):
     """A shader runs for every pixel of every frame on friends' computers, and one that never finishes can hang a graphics card."""
     for feature_id, feature in features.items():
         for name in feature["manifest"].get("screen_effects", []):
-            label = f"Screen effect {feature_id}/{name}"
-            path = feature["dir"] / "assets" / "shaders" / f"{name}.fsh"
-            if not path.exists():
-                _fail(f"{label} needs assets/shaders/{name}.fsh.")
-            text = path.read_text(encoding="utf-8")
-            if len(text) > MOST_SHADER_CHARACTERS:
-                _fail(f"{label} is {len(text)} characters long, over the limit of {MOST_SHADER_CHARACTERS}. It runs for every pixel of every frame, so keep it simple.")
-            if not text.lstrip().startswith("#version 330"):
-                _fail(f"{label} has to start with #version 330, which is what the game's own are. See 'Screen effects' in docs/content-types.md.")
-            if "#moj_import" in text:
-                _fail(f"{label} uses #moj_import, which this version of the game doesn't have. Use #include <minecraft:globals.glsl>.")
-            if re.search(r"\b(while|do)\b", text):
-                _fail(f"{label} uses a while or do loop, which could never finish and hang a player's graphics card. Use a for loop with a fixed count.")
+            _check_shader(f"Screen effect {feature_id}/{name}", feature, name, "Screen effects")
+        for name in feature["manifest"].get("world_shaders", []):
+            _check_shader(f"World shader {feature_id}/{name}", feature, name, "Drawing in the world")
+        for name in feature["manifest"].get("world_images", []):
+            if not (feature["dir"] / "assets" / "world" / f"{name}.png").exists():
+                _fail(f"World image {feature_id}/{name} needs assets/world/{name}.png.")
 
 
 def _check_carry(label, recipe, feature_id):

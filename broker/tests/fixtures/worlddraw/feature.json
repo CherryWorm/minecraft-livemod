@@ -1,0 +1,10 @@
+{
+  "id": "worlddraw",
+  "phase": 1,
+  "summary": "Test fixture for drawing in the world: a client module drawing every kind of shape, and a server module showing effects with no client module, each set off by a tag from the test.",
+  "blocks": {
+    "wd_block": {"family": "stone", "display": "World Draw Block", "texture": "wd_block", "tool": "pickaxe", "retired": true}
+  },
+  "world_shaders": ["swirl", "warp"],
+  "world_images": ["ring"]
+}

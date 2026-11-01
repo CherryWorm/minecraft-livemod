@@ -46,4 +46,16 @@ public interface ModuleContext {
 	 * that can't run it, it just doesn't appear.
 	 */
 	void screenEffect(String name);
+
+	/**
+	 * Draws in the world, once for every frame. Keep it quick, because a module that slows the game down is switched off, and don't
+	 * draw what's far away or behind a wall if you can tell. It all goes by itself when this module unloads.
+	 */
+	void onWorld(Consumer<WorldCanvas> draw);
+
+	/**
+	 * Shakes this player's view for a while, fading out, with no effect on where they're really facing. A strength of 1 is about a
+	 * degree, and 5 is the most. Their "Distortion Effects" setting scales it, and at 0 there's none.
+	 */
+	void shakeCamera(float strength, float seconds);
 }

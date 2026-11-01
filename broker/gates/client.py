@@ -149,6 +149,14 @@ def check_screen_effects(log, process):
         if f"[SCENE] effect gm:{path.stem} failed" in text:
             errors = [line.split("Couldn't parse GLSL: ")[-1] for line in text.splitlines() if f"gm:post/{path.stem}:" in line and "error:" in line]
             _fail("A screen effect won't compile on a real client, with its line numbers:\n" + "\n".join(errors[:10]))
+    folder = runtime.RUNTIME / "shadow" / "live-assets" / "assets" / "gm" / "shaders" / "world"
+    for path in sorted(folder.glob("*.fsh")) if folder.exists() else []:
+        _tell(f"SCENE worldshader gm:world/{path.stem}")
+        _wait_log(log, rf"\[SCENE\] worldshader gm:world/{path.stem} (works|failed)$", SHOT_TIMEOUT, process)
+        text = log.read_text(encoding="utf-8", errors="replace")
+        if f"[SCENE] worldshader gm:world/{path.stem} failed" in text:
+            errors = [line for line in text.splitlines() if f"world/{path.stem}" in line and "error" in line.lower()]
+            _fail("A world shader won't compile on a real client, with its line numbers:\n" + "\n".join(errors[:10]))
 
 
 def motion_sheet(slot, rows, shots_dir, out):

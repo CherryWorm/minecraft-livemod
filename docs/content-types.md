@@ -555,7 +555,7 @@ Showing it takes the companion, because a game client can only be told about eff
 
 ## Screen effects
 
-A client module can put a shader over everything a player sees, for something like the air warping near a tear. It covers the whole screen and there's no way to limit it to one place, so turn it on as they come near. It's about the most expensive thing that can be done to a player's computer, so save it for something that matters, and don't leave it on.
+A client module can put a shader over everything a player sees. It covers the whole screen and there's no way to limit it to one place, so turn it on as they come near. It's about the most expensive thing that can be done to a player's computer, so save it for something that matters, and don't leave it on. For one spot in the world, see 'Drawing in the world', which needs no client module.
 
 List names in `"screen_effects": ["warp"]`, with `assets/shaders/warp.fsh`:
 
@@ -584,6 +584,80 @@ context.screenEffect(null);
 ```
 
 It goes by itself when the module unloads. Needing a client module, it won't show for anyone without the companion. The release gates compile it on a real client, and one that won't compile is refused. If someone's graphics card ever can't run one that passed, it just doesn't appear for them. Test clients render in software, so it hasn't been seen on a real graphics card until a real player sees it.
+
+## Drawing in the world
+
+Sheets, boxes, beams, pictures that face the camera and see-through copies of blocks can be drawn at any place in the world, each with a colour, a picture or a shader of its own. It's how to do a shader on one spot, a portal's shimmering surface, a planned layout before it's built, beams and streaks across the sky. A server module can do it with no client module at all, and that's the place to start, because nothing then runs on anyone's computer but the drawing.
+
+```java
+// For everyone within 64 blocks, and anyone who comes near while it lasts.
+context.showEffect(level, WorldEffect.beam(x, y, z, x, y + 40, z, 0.6F).color(0xC0FF8800).glowing().seconds(10).fade(2));
+
+// A surface that shimmers, until it's taken away.
+context.showEffect(level, WorldEffect.sheet(x, y, z, 3, 0, 0, 0, 4, 0).shader("shimmer").seconds(0).key("portal"));
+context.clearEffect("portal");
+
+// How something is to be built, for the one player holding the plans, with nobody else seeing it.
+WorldEffect plan = WorldEffect.blocks().color(0xA0FFFFFF).seconds(0).key("plan");
+plan.block(pos.above(), context.block("kiln_casing").defaultBlockState());
+plan.block(pos.above(2), Blocks.HOPPER.defaultBlockState());
+context.showEffect(player, plan);
+
+// A streak crossing the sky, which players' computers keep moving by themselves.
+context.showEffect(level, WorldEffect.beam(x, 220, z, x + 20, 210, z, 1.5F).glowing().moving(-30, -5, 0).seconds(6).fade(2).range(1024));
+```
+
+- **The shapes** are `box` between two corners, `sheet` from a corner along two edges at any angle, `beam` between two points that turns to face the camera, `billboard` that always faces the camera, and `blocks` for see-through copies of blocks. `.and(other)` puts several in one, all with the same look.
+- **The look.** `.color(0xAARRGGBB)` tints it, so `0x80FF0000` is half see-through red. `.image("ring")` puts a picture on it, and `.shader("shimmer")` runs a shader of yours. `.glowing()` adds to what's behind it and takes no fog, so it shows from far away, but it's faint against a bright sky. `.throughWalls()` shows through whatever's in front of it.
+- **How long.** `.seconds(n)` is how long it stays, 5 if you leave it out, and `.fade(n)` is how long before the end it starts to fade. `.seconds(0)` keeps it there until `context.clearEffect(key)`, so it needs a `.key("name")`. Showing another with the same key replaces it. A module being unloaded takes away all of its effects.
+- **Who sees it.** `context.showEffect(level, effect)` is everyone within `.range(blocks)` of its first point, 64 if you leave it out, including anyone who comes near or comes back while it lasts. `context.showEffect(player, effect)` is that one player and nobody else.
+- **Shaking the view.** `context.shakeCamera(player, strength, seconds)` shakes a player's view, fading out. A strength of 1 is about a degree, and 5 is the most. Where they're really facing doesn't change, and their "Distortion Effects" setting scales it, down to nothing.
+
+Everything's drawn after the world, see-through, with no effect on the game. It's drawn after water and tinted glass as well, so something behind those doesn't show through them. Someone with no companion, or one too old for this, sees nothing at all, and everything else carries on, so nothing a player needs can depend on seeing it: anything that tells them what to do has to be said some other way too.
+
+A client module can draw the same things, for anything that has to follow what the player does from frame to frame. It draws every frame, and nothing is kept:
+
+```java
+private static final WorldLook HALO = WorldLook.of(0xFFFFFFFF).image("ring").glowing();
+
+public void enable(ModuleContext context) {
+    context.onWorld(canvas -> canvas.billboard(HALO, x, y, z, 2, 2));
+}
+```
+
+`canvas` has `box`, `edges`, `sheet`, `beam`, `billboard` and `block`, and where the camera is, with `cameraX`, `cameraY` and `cameraZ`. `context.shakeCamera(strength, seconds)` is the same as the server's. `canvas.block` takes a vanilla block by name, or a number from `context.clientBlockId(state)` on the server for one of this world's. Keep it quick, because it runs every frame on friends' computers, and a module that slows the game down is switched off.
+
+There's a limit of about 16,000 faces drawn in a frame, for everything together, and 8 different shaders, and past that the rest just doesn't appear. A box is 6 faces, and a block is as many as its model has. Don't leave things on that nobody is near, and don't use this for hundreds of something that stays put: use blocks for that.
+
+List pictures in `"world_images": ["ring"]`, with `assets/world/ring.png`. They can be any size up to 1024 across. List shaders in `"world_shaders": ["shimmer"]`, with `assets/shaders/shimmer.fsh`:
+
+```glsl
+#version 330
+#extension GL_ARB_separate_shader_objects : require
+
+#include <minecraft:globals.glsl>
+
+uniform sampler2D Sampler0;
+
+layout(location = 0) in vec2 texCoord;
+layout(location = 1) in vec4 vertexColor;
+layout(location = 2) in vec3 fromCamera;
+
+layout(location = 0) out vec4 fragColor;
+
+void main() {
+    float wave = 0.5 + 0.5 * sin(texCoord.y * 30.0 + GameTime * 12000.0);
+    fragColor = vec4(0.2, 0.5 + 0.5 * wave, 1.0, 0.8) * vertexColor;
+}
+```
+
+`texCoord` runs from 0 to 1 across each face, along a beam, and across a picture. `vertexColor` is what `.color` said, faded as it fades. `fromCamera` is where this pixel is, in blocks from the camera. `Sampler0` is its `.image`. `GameTime` goes from 0 to 1 over a game day, so multiply it up for anything that moves, and leave out whatever you don't use, along with its line above. Fog isn't applied for you. For that, add `#include <minecraft:fog.glsl>` and finish with `fragColor = apply_fog(fragColor, fog_spherical_distance(fromCamera), fog_cylindrical_distance(fromCamera), FogEnvironmentalStart, FogEnvironmentalEnd, FogRenderDistanceStart, FogRenderDistanceEnd, FogColor);`, which you'll want for anything that isn't glowing.
+
+To bend what's behind a surface, like air warping or a look through a portal, a shader can see the world so far, by having `uniform sampler2D SceneSampler;` and using `texture(SceneSampler, gl_FragCoord.xy / ScreenSize)`. That costs a copy of the whole picture each frame there's one on screen, so use it for what matters.
+
+The rules are the same as for screen effects: it has to start with `#version 330`, it can't use `while` or `do`, and it has to be short. The release gates compile each one on a real client and refuse one that won't compile. If someone's graphics card ever can't run one that passed, that shape just doesn't appear for them. Test clients render in software, so it hasn't been seen on a real graphics card until a real player sees it, and its speed hasn't been measured there either.
+
+The templates `new_world_effect` and `new_blueprint` write working versions of the first and third of these to start from.
 
 ## Panels
 
@@ -854,4 +928,4 @@ It can be seen from anywhere in a player's render distance, and that's a real li
 
 ## What the engine doesn't do yet
 
-Structures larger than a chunk. A vehicle has one rider, on the middle of it, and can't respond to its rider's keys any faster than the connection allows. A fluid can only flow and swim as water or lava does on a player's computer, though a still pool can have a picture of its own. A panel can only draw vanilla's mobs moving, so one of this world's is a picture there. A screen effect covers the whole screen, so there's no drawing a shader on one thing in the world. Armor trims and new villager trades can't be added yet. Build the closest thing that works, and say what you wanted in `host_requests`.
+Structures larger than a chunk. A vehicle has one rider, on the middle of it, and can't respond to its rider's keys any faster than the connection allows. A fluid can only flow and swim as water or lava does on a player's computer, though a still pool can have a picture of its own. A panel can only draw vanilla's mobs moving, so one of this world's is a picture there. Armor trims and new villager trades can't be added yet. Build the closest thing that works, and say what you wanted in `host_requests`.

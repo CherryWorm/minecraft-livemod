@@ -211,4 +211,25 @@ public interface ServerModuleContext {
 
 	/** Sends a player back to where they entered a dimension from, or to wherever they'd respawn if that isn't known. Does nothing for someone who isn't in one. */
 	void leaveDimension(ServerPlayer player);
+
+	/**
+	 * Draws something at a place in the world for everyone close enough, with no client module. Anyone who comes near while it lasts gets
+	 * it too. Someone with no companion, or one too old for this, just doesn't see it, so nothing can depend on it being seen.
+	 */
+	void showEffect(ServerLevel level, WorldEffect effect);
+
+	/** The same, for only this player, who's the only one who'll ever see it. */
+	void showEffect(ServerPlayer player, WorldEffect effect);
+
+	/** Takes away an effect of this feature's by its key, for everyone. */
+	void clearEffect(String key);
+
+	/**
+	 * Shakes a player's view for a while, fading out, with no effect on where they're really facing. A strength of 1 is about a degree,
+	 * and 5 is the most. Their "Distortion Effects" setting scales it, and at 0 there's none.
+	 */
+	void shakeCamera(ServerPlayer player, float strength, float seconds);
+
+	/** The number a client module can draw a block by, with canvas.block, which is the only way it can name one of this world's. */
+	int clientBlockId(BlockState state);
 }

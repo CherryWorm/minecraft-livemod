@@ -385,6 +385,11 @@ public final class KnowledgeTest implements FabricClientGameTest {
 					client.player.containerMenu.slots.size() - 9 + Integer.parseInt(words[1]), LEFT_BUTTON, ContainerInput.PICKUP, client.player));
 			case "oldcompanion" -> rejoinWithout(context, "inventory_hooks");
 			case "nopanels" -> rejoinWithout(context, "panel");
+			case "noworld" -> rejoinWithout(context, "world_show");
+			case "facing" -> {
+				String facing = context.computeOnClient(client -> client.player.getYRot() + " " + client.player.getXRot());
+				LOGGER.info("[M8] looking {}", facing);
+			}
 			case "type" -> context.getInput().typeChars(words[1]);
 			case "panelmouse" -> panelMouse(context, Integer.parseInt(words[1]), Integer.parseInt(words[2]));
 			case "guisize" -> {

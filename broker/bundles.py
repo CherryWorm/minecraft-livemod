@@ -708,6 +708,24 @@ def _machine_grid(recipe, feature_id, ledger):
     return {"width": width, "cells": [key.get(mark, "") for row in shape for mark in row.ljust(width)]}
 
 
+def _copy_world_art(feature, feature_id, pack):
+    """What's drawn at a place in the world: shaders a client finds by the same hash, and pictures to go on it. The companion has the rest of the pipeline."""
+    for name in feature["manifest"].get("world_shaders", []):
+        source = feature["dir"] / "assets" / "shaders" / f"{name}.fsh"
+        if not source.exists():
+            raise BundleError(f"{feature_id}: world shader {name}.fsh is missing")
+        target = pack / "assets/gm/shaders/world" / f"{_effect_id(feature_id, name)}.fsh"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+    for name in feature["manifest"].get("world_images", []):
+        source = feature["dir"] / "assets" / "world" / f"{name}.png"
+        if not source.exists():
+            raise BundleError(f"{feature_id}: world image {name}.png is missing")
+        target = pack / "assets/gm/textures/world" / f"{_effect_id(feature_id, name)}.png"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+
+
 def _machine_home(features, feature_id, machine):
     """Whose list a machine recipe goes on. A machine's module only asks for what's on its own feature's list, so a recipe for
     another feature's machine has to go there, or it never fires even though recipe viewers show it. A feature can name a
@@ -1064,6 +1082,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
         _copy_sounds(feature, feature_id, pack, sounds_json)
         _copy_screen_effects(feature, feature_id, pack)
         kept_raw.update(_render_raw(feature, feature_id, ledger, pack, datapack, vanilla_tags))
+        _copy_world_art(feature, feature_id, pack)
         panels.update(_render_panels(feature, feature_id, ledger, pack))
         # Marked as sounds, so one can share its name with a block or a mob, which are all in here by bare name.
         bindings.update({f"sound:{feature_id}/{name}": _sound_id(feature_id, name) for name in manifest.get("sounds", [])})

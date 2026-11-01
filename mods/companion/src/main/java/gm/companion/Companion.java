@@ -10,6 +10,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.loader.api.FabricLoader;
@@ -38,15 +39,17 @@ public final class Companion implements ClientModInitializer {
 		ClientPlayNetworking.registerGlobalReceiver(KnownRecipes.Part.TYPE, (payload, context) -> KnownRecipes.receive(payload));
 		PanelClient.register();
 		EffectClient.register();
+		WorldPayloads.register(HOST);
 		if (FabricLoader.getInstance().isModLoaded("patchouli")) {
 			Guide.register();
 		}
 
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("gm", "modules"), HOST::renderHud);
+		LevelRenderEvents.END_MAIN.register(HOST::renderWorld);
 		ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> InventoryScreens.attach(HOST, screen));
 		ClientTickEvents.END_CLIENT_TICK.register(HOST::tick);
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
-			HOST.unloadAll();
+			HOST.disconnected();
 			KnownRecipes.forget();
 			PanelClient.forget();
 			EffectClient.forget();

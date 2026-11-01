@@ -13,6 +13,7 @@ import gm.conduit.mobs.Minds;
 import gm.conduit.entities.SlotEntities;
 import gm.conduit.mobs.SlotMobs;
 import gm.conduit.modules.ModulePush;
+import gm.conduit.modules.WorldEffects;
 import gm.conduit.modules.ServerModuleHost;
 import gm.conduit.pack.LiveAssets;
 import gm.conduit.pack.PackStatus;
@@ -69,6 +70,7 @@ public final class Conduit implements ModInitializer {
 		BiomePatch.registerPlacements();
 		ServerModuleHost.register();
 		ModulePush.register();
+		WorldEffects.register();
 		Bridge.register();
 		Board.register();
 		ConduitCommands.register();

@@ -1083,5 +1083,172 @@ def new_machine(folder, *, name, display, casing, accent, recipe_ingredients=Non
                         f"Left to decide: its recipes, with \"machine\": \"{name}\", and what its tick does. If it does anything by itself, declare that in automation.")
 
 
+WORLD_SHADER = """#version 330
+#extension GL_ARB_separate_shader_objects : require
+
+#include <minecraft:globals.glsl>
+
+layout(location = 0) in vec2 texCoord;
+layout(location = 1) in vec4 vertexColor;
+
+layout(location = 0) out vec4 fragColor;
+
+// A starting point: rings moving out from the middle of whatever it's drawn on. Make it your own.
+void main() {
+    float away = length(texCoord - 0.5) * 2.0;
+    if (away > 1.0) {
+        discard;
+    }
+    float wave = 0.5 + 0.5 * sin(away * @RINGS@.0 - GameTime * 12000.0);
+    fragColor = vec4(vec3(@RED@, @GREEN@, @BLUE@) * (0.5 + 0.5 * wave), (1.0 - away) * 0.9) * vertexColor;
+}
+"""
+
+WORLD_EFFECT_MODULE = """package gm.feature.@ID@;
+
+import gm.conduit.api.ServerModule;
+import gm.conduit.api.ServerModuleContext;
+import gm.conduit.api.WorldEffect;
+import gm.conduit.api.WorldEvents;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+
+/** A starting point: the shader shows for a few seconds on the spot where a player breaks a block. Show it from whatever should really set it off. */
+public final class @CLASS@ implements ServerModule {
+	private ServerModuleContext context;
+
+	@Override
+	public void enable(ServerModuleContext context) {
+		this.context = context;
+		context.listen(new WorldEvents() {
+			@Override
+			public void blockBroken(ServerPlayer player, ServerLevel level, BlockPos pos, BlockState state, BlockEntity blockEntity) {
+				show(level, pos);
+			}
+		});
+	}
+
+	private void show(ServerLevel level, BlockPos pos) {
+		this.context.showEffect(level, WorldEffect.billboard(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 3, 3).shader("@MACHINE@").seconds(4).fade(1));
+	}
+}
+"""
+
+BLUEPRINT_MODULE = """package gm.feature.@ID@;
+
+import gm.conduit.api.ItemBehavior;
+import gm.conduit.api.ServerModule;
+import gm.conduit.api.ServerModuleContext;
+import gm.conduit.api.WorldEffect;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.level.block.Block;
+
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+
+/** A starting point: using the plans on a block shows that one player a ghost of what's to be built there, and using them again takes it away. */
+public final class @CLASS@ implements ServerModule {
+	private static final int ALPHA = 0xA0FFFFFF;
+	// How far along each axis from the block they used it on, and what goes there.
+	private record Part(int x, int y, int z, Block block) {}
+
+	private final Set<UUID> showing = new HashSet<>();
+	private ServerModuleContext context;
+	private List<Part> layout;
+
+	@Override
+	public void enable(ServerModuleContext context) {
+		this.context = context;
+		this.layout = List.of(@LAYOUT@);
+		context.bindItem("@MACHINE@", new ItemBehavior() {
+			@Override
+			public InteractionResult useOn(UseOnContext use) {
+				if (use.getPlayer() instanceof ServerPlayer player) {
+					toggle(player, use.getClickedPos());
+				}
+				return InteractionResult.SUCCESS;
+			}
+		});
+	}
+
+	private void toggle(ServerPlayer player, BlockPos at) {
+		// A key of their own, because clearing one takes it away for everyone who has it.
+		String key = "plan_" + player.getUUID();
+		if (this.showing.remove(player.getUUID())) {
+			this.context.clearEffect(key);
+			return;
+		}
+		this.showing.add(player.getUUID());
+		WorldEffect plan = WorldEffect.blocks().color(ALPHA).seconds(0).key(key);
+		for (Part part : this.layout) {
+			plan.block(at.offset(part.x(), part.y(), part.z()), part.block().defaultBlockState());
+		}
+		this.context.showEffect(player, plan);
+	}
+}
+"""
+
+
+def new_world_effect(folder, *, name, color="#66ccff", seed=1, node=None, phase=None):
+    """A shader drawn at a spot in the world with no client module: rings moving out from the middle in this colour, at assets/shaders/<name>.fsh, listed in world_shaders, and a
+    server module under server/ that shows it wherever a player breaks a block. Change the shader and what sets it off. See 'Drawing in the world' in docs/content-types.md for beams, surfaces, how long it lasts and who sees it."""
+    draft = _Draft(folder, node, phase)
+    _check_name(name)
+    _check_color(color, "color")
+    if name in draft.manifest.get("world_shaders", []):
+        raise TemplateError(f"This feature already has a world shader called {name}.")
+    red, green, blue = (channel / 255 for channel in tx.rgb(color))
+    draft.manifest.setdefault("world_shaders", []).append(name)
+    draft.added.append(name)
+    draft.file(f"assets/shaders/{name}.fsh", WORLD_SHADER.replace("@RED@", f"{red:.3f}").replace("@GREEN@", f"{green:.3f}").replace("@BLUE@", f"{blue:.3f}").replace("@RINGS@", str(20 + seed % 5 * 4)).encode())
+    if (draft.folder / "server" / "src").exists():
+        module = f"The module that's already in server/ needs its own context.showEffect(level, WorldEffect...shader(\"{name}\"))."
+    else:
+        module = f"{_module_files(draft, name, name, WORLD_EFFECT_MODULE)} is its module, in server/, showing it wherever a block is broken, which is only there to start from."
+    return draft.commit(f"{name}: a shader on a spot in the world.", f"Added the world shader {name}. {module} Left to decide: what it looks like, what it's drawn on and what sets it off.")
+
+
+def new_blueprint(folder, *, name, display, color, layout, seed=1, node=None, phase=None):
+    """An item that shows one player a see-through ghost of what's to be built, wherever they use it, with nothing placed and nobody else seeing it. layout is a list of
+    {"x": 0, "y": 1, "z": 0, "block": "$block:casing"}, where x, y and z are from the block they used it on, and a block is $block:name or minecraft:name. It needs a recipe or some other source
+    before it can pass. To check what's really been built, and to take the ghost away once it has been, the module is yours to change."""
+    draft = _Draft(folder, node, phase)
+    _check_name(name)
+    _check_text(display, "display")
+    _check_color(color, "color")
+    if not isinstance(layout, (list, tuple)) or not layout:
+        raise TemplateError(f"layout must be a list like [{{\"x\": 0, \"y\": 1, \"z\": 0, \"block\": \"minecraft:hopper\"}}], not {layout!r}.")
+    parts = []
+    for part in layout:
+        if not isinstance(part, dict) or not all(isinstance(part.get(axis), int) and not isinstance(part.get(axis), bool) for axis in "xyz") or not isinstance(part.get("block"), str):
+            raise TemplateError(f"Each part of a layout must be like {{\"x\": 0, \"y\": 1, \"z\": 0, \"block\": \"minecraft:hopper\"}}, not {part!r}.")
+        found = TOKEN.fullmatch(part["block"])
+        if found and found.group(1) == "block":
+            block = f"context.block(\"{found.group(2)}{'/' + found.group(3) if found.group(3) else ''}\")"
+        elif VANILLA.fullmatch(part["block"]) and not part["block"].startswith("#"):
+            block = f"BuiltInRegistries.BLOCK.getValue(Identifier.parse(\"{part['block']}\"))"
+        else:
+            raise TemplateError(f"A layout's block is $block:name or minecraft:name, not {part['block']!r}.")
+        parts.append(f"new Part({part['x']}, {part['y']}, {part['z']}, {block})")
+    draft.thing("items", name, {"display": display, "texture": name})
+    draft.texture(name, tx.gem(color, seed=seed))
+    if (draft.folder / "server" / "src").exists():
+        module = f"The module that's already in server/ needs its own context.bindItem(\"{name}\", ...), which shows a WorldEffect.blocks() to the player."
+    else:
+        class_name = _module_files(draft, name, display, BLUEPRINT_MODULE.replace("@LAYOUT@", ", ".join(parts)))
+        module = f"{class_name} is its module, in server/."
+    return draft.commit(f"{display}: plans that show a ghost of a layout.", f"Added {display}. {module} It needs a source before it can pass, so add a recipe, and replace its texture with something of your own.")
+
+
 TEMPLATES = {"new_ore": new_ore, "new_tool_set": new_tool_set, "new_armor_set": new_armor_set, "new_plant": new_plant,
-             "new_mob": new_mob, "new_machine": new_machine}
+             "new_mob": new_mob, "new_machine": new_machine, "new_world_effect": new_world_effect, "new_blueprint": new_blueprint}

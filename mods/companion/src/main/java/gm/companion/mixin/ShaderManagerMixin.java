@@ -1,5 +1,6 @@
 package gm.companion.mixin;
 
+import gm.companion.Companion;
 import net.minecraft.client.renderer.PostChain;
 import net.minecraft.client.renderer.ShaderManager;
 import net.minecraft.resources.Identifier;
@@ -36,5 +37,11 @@ abstract class ShaderManagerMixin {
 		if (this.companion$loading != null && this.companion$loading.getNamespace().equals("gm")) {
 			info.cancel();
 		}
+	}
+
+	/** Every compiled shader has just gone, and the pack may now have new ones. */
+	@Inject(method = "apply", at = @At("TAIL"))
+	private void companion$reloaded(CallbackInfo info) {
+		Companion.host().world().resourcesReloaded();
 	}
 }

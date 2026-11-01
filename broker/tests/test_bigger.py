@@ -326,6 +326,56 @@ class ScreenEffects(unittest.TestCase):
         self.assertEqual(bundles._effect_id("hooks", "hook_warp"), "p" + hashlib.sha256(b"hooks/hook_warp").hexdigest()[:16])
 
 
+class WorldArt(unittest.TestCase):
+    GOOD = "#version 330\nvoid main() { }\n"
+
+    def feature(self, shader=GOOD, image=True):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        root = pathlib.Path(folder.name)
+        (root / "assets" / "shaders").mkdir(parents=True)
+        (root / "assets" / "world").mkdir(parents=True)
+        (root / "assets" / "shaders" / "shimmer.fsh").write_text(shader, encoding="utf-8")
+        if image:
+            Image.new("RGBA", (32, 8), (1, 2, 3, 255)).save(root / "assets" / "world" / "ring.png")
+        return {"f": {"manifest": {"world_shaders": ["shimmer"], "world_images": ["ring"]}, "dir": root}}
+
+    def test_a_plain_one_is_fine(self):
+        static.check_screen_effects(self.feature())
+
+    def test_a_shader_answers_to_the_same_rules_as_a_screen_effect(self):
+        refused(static.check_screen_effects, "World shader f/shimmer", "#version 330", features=self.feature("void main() { }\n"))
+        refused(static.check_screen_effects, "hang", features=self.feature("#version 330\nvoid main() { while (true) { } }\n"))
+        refused(static.check_screen_effects, "keep it simple", features=self.feature("#version 330\n" + "// " * 8000))
+        refused(static.check_screen_effects, "needs assets/shaders", features={"f": {"manifest": {"world_shaders": ["gone"]}, "dir": pathlib.Path("does-not-exist")}})
+
+    def test_a_picture_has_to_be_there(self):
+        refused(static.check_screen_effects, "World image f/ring", "assets/world/ring.png", features=self.feature(image=False))
+
+    def test_they_go_in_the_pack_under_names_that_give_nothing_away(self):
+        found = self.feature()
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        pack = pathlib.Path(folder.name)
+        bundles._copy_world_art(found["f"], "f", pack)
+        shader = f"assets/gm/shaders/world/{bundles._effect_id('f', 'shimmer')}.fsh"
+        image = f"assets/gm/textures/world/{bundles._effect_id('f', 'ring')}.png"
+        self.assertTrue((pack / shader).exists())
+        self.assertTrue((pack / image).exists())
+        self.assertTrue(static.SAFE_PATH.match(shader))
+        self.assertTrue(static.SAFE_PATH.match(image))
+
+    def test_a_picture_can_be_any_size_a_panel_could(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        pack = pathlib.Path(folder.name)
+        (pack / "assets/gm/textures/world").mkdir(parents=True)
+        Image.new("RGBA", (32, 8), (1, 2, 3, 255)).save(pack / "assets/gm/textures/world/p0.png")
+        static.check_textures(pack)
+        Image.new("RGBA", (2048, 8), (1, 2, 3, 255)).save(pack / "assets/gm/textures/world/p0.png")
+        refused(lambda features: static.check_textures(pack), "at most")
+
+
 class AReleaseThatStopsTheServerStarting(unittest.TestCase):
     def test_it_is_refused_with_what_the_server_said(self):
         said = "[10:45:02] [main/ERROR]: Errors in registry minecraft:loot_table:\n>> Errors in element gm:blocks/s2200:\n"

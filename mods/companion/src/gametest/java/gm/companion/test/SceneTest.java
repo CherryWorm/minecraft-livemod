@@ -1,5 +1,6 @@
 package gm.companion.test;
 
+import gm.companion.Companion;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
@@ -70,6 +71,11 @@ public final class SceneTest implements FabricClientGameTest {
 				Identifier effect = Identifier.parse(request.substring(7));
 				boolean works = context.computeOnClient(client -> client.getShaderManager().getPostChain(effect, LevelTargetBundle.MAIN_TARGETS) != null);
 				LOGGER.info("[SCENE] effect {} {}", effect, works ? "works" : "failed");
+			}
+			if (request.startsWith("worldshader ")) {
+				Identifier shader = Identifier.parse(request.substring(12));
+				boolean works = context.computeOnClient(client -> Companion.host().world().compiles(shader));
+				LOGGER.info("[SCENE] worldshader {} {}", shader, works ? "works" : "failed");
 			}
 			if (request.startsWith("shot ")) {
 				String name = request.substring(5);
