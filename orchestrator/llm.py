@@ -25,6 +25,7 @@ ROLES = {
     "director_quick": {"model": "claude-sonnet-5-5", "effort": "low"},
     "small_builder": {"model": "claude-sonnet-5-5", "effort": "medium"},
     "news": {"model": "claude-haiku-5-5", "effort": "low"},
+    "teaser": {"model": "claude-haiku-5-5", "effort": "low"},
     "mind": {"model": "claude-haiku-5-5", "effort": "low"},
     "icon": {"model": "claude-opus-5-5", "effort": "medium"},
 }

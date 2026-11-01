@@ -1,6 +1,7 @@
 package gm.conduit;
 
 import eu.pb4.polymer.resourcepack.api.PolymerResourcePackUtils;
+import gm.conduit.bridge.Board;
 import gm.conduit.bridge.Bridge;
 import gm.conduit.knowledge.Codex;
 import gm.conduit.knowledge.Knowledge;
@@ -19,6 +20,10 @@ import gm.conduit.slots.NeutralSlots;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
+
+import java.util.List;
 
 public final class Conduit implements ModInitializer {
 	public static final String MOD_ID = "conduit";
@@ -44,6 +49,7 @@ public final class Conduit implements ModInitializer {
 		BiomePatch.registerPlacements();
 		ModulePush.register();
 		Bridge.register();
+		Board.register();
 		ConduitCommands.register();
 		KillSwitch.register();
 		Chaos.register();
@@ -53,5 +59,12 @@ public final class Conduit implements ModInitializer {
 			ModulePush.loadOnStart();
 		});
 		ServerTickEvents.END_SERVER_TICK.register(server -> ServerModuleHost.instance().tick(server));
+		// The game's own loop over players skips the next one each time someone leaves the list, and whoever's skipped just
+		// loses the connection. The proxy can only hold someone who's been told it's a restart, so everyone gets told here.
+		ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+			for (ServerPlayer player : List.copyOf(server.getPlayerList().getPlayers())) {
+				player.connection.disconnect(Component.translatable("multiplayer.disconnect.server_shutdown"));
+			}
+		});
 	}
 }

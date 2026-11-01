@@ -32,6 +32,7 @@ DIRECTOR_REST_SECONDS = 30 * 60
 FEEDBACK_PLAN_SECONDS = 10 * 60  # How long new requests can wait for the director, however much is being built.
 REQUEST_FEATURES_PER_PLAN = 2  # However many people ask, most of what gets built comes from the world's own plan.
 PLAN_SHOWN = 12
+BOARD_SECONDS = 20
 DECISIONS_REMEMBERED = 150
 STOP_AFTER_RELEASES = os.environ.get("AGENT_STOP_AFTER_RELEASES")  # Lets a test spend a known amount.
 
@@ -203,7 +204,7 @@ class Agent:
         shown = ", ".join(waiting[:PLAN_SHOWN]) + (f", and {len(waiting) - PLAN_SHOWN} more" if len(waiting) > PLAN_SHOWN else "")
         await self.tell(player, f"§7Being built right now: §f{', '.join(now) or 'nothing'}")
         await self.tell(player, f"§7Up next, in order: §f{shown or 'nothing yet'}" + (" §7(more being planned)" if self.planning else ""))
-        await self.tell(player, f"§7Out so far: §f{self.state.get('release_count', 0)} §7things. Ask about any of it with §f/dm§7.", reply_click=True)
+        await self.tell(player, f"§7Out so far: §f{self.state.get('release_count', 0)} §7things. Ask about any of it with §f/dm§7, or keep the numbers on screen with §f/board§7.", reply_click=True)
 
     async def deliver(self, player, text):
         """They may have logged off, in which case it waits for them."""
@@ -714,6 +715,31 @@ class Agent:
                 if event:
                     await self.speak_if_worthwhile(event, player)
 
+    async def name_what_is_being_built(self, graph):
+        """Once each, and only for what's really being built, so that this stays cheap."""
+        for feature in list(self.building.values()):
+            if feature.get("small") or "teaser" in feature or self.governor.why_not_speak():
+                continue
+            node = graph.get("nodes", {}).get(feature.get("node"), {})
+            feature["teaser"] = await voice.teaser(self.governor, feature, feedback.STAGE_WORDS.get(node.get("stage"), "unknown"))
+            self.save()
+
+    async def board_loop(self):
+        """Keeps the sidebar current for whoever has it on. Plain code does the counting, and if this stops, the game says so."""
+        problem = None
+        while True:
+            graph = progression.read(PROGRESSION)
+            await self.name_what_is_being_built(graph)
+            try:
+                await self.bridge.call("board", shipped=self.state.get("release_count", 0), building=len(self.building), queued=len(self.queue),
+                                       now=[feedback.board_line(feature, graph) for feature in self.building.values()])
+                problem = None
+            except (RuntimeError, ConnectionError, TimeoutError) as error:
+                if str(error) != problem:
+                    print(f"couldn't update the build board: {error}", flush=True)
+                problem = str(error)
+            await asyncio.sleep(BOARD_SECONDS)
+
     async def run(self):
         workshop.setup_repo()
         await self.bridge.connect()
@@ -724,7 +750,7 @@ class Agent:
             await self.bridge.events.put({"event": "join", "player": name})
         print("agent running", flush=True)
         await asyncio.gather(readers, self.event_loop(), self.chat_loop(), self.build_loop(), self.sort_loop(), self.opening_loop(),
-                             self.status_loop(), self.watch_loop())
+                             self.status_loop(), self.watch_loop(), self.board_loop())
 
 
 if __name__ == "__main__":

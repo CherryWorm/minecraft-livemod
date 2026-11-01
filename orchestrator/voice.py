@@ -81,6 +81,7 @@ PRIVATE_SCHEMA = {
     "required": ["reply", "intents"],
 }
 
+TEASER_SCHEMA = {"type": "object", "properties": {"teaser": {"type": "string"}}, "required": ["teaser"]}
 NEWS_SCHEMA = {"type": "object", "properties": {"reply": {"type": "string"}}, "required": ["reply"]}
 
 NO_CHARACTER_YET = ("You don't have one yet, because this world's theme hasn't been chosen. Speak plainly as the AI that's going to build it, "
@@ -211,6 +212,21 @@ async def request_news(governor, items, briefs):
                            schema=NEWS_SCHEMA, max_turns=3)
     data = result.structured if isinstance(result.structured, dict) and not result.is_error else {}
     return guard(data.get("reply"), briefs, HELP_LIMIT)
+
+
+async def teaser(governor, feature, stage):
+    """A few words for the sidebar about one thing being built. Returns None if they can't be said safely, and the sidebar
+    then shows what /plan would. A second try is worth it, because a good line is often only just too long. Story is all
+    spoiler, so no model gets to describe it."""
+    if feature.get("category") == "story":
+        return "more of the story"
+    brief = llm.untrusted("brief", json.dumps({"stage": stage, "category": feature.get("category"), "spec": feature.get("spec")}))
+    for _ in range(2):
+        result = await llm.ask(governor, "teaser", brief, schema=TEASER_SCHEMA, max_turns=3)
+        text = feedback.safe_teaser(result.structured.get("teaser") if isinstance(result.structured, dict) and not result.is_error else None, feature)
+        if text:
+            return text
+    return None
 
 
 class Watcher:

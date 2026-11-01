@@ -11,14 +11,19 @@ import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.network.chat.numbers.BlankFormat;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.scores.DisplaySlot;
+import net.minecraft.world.scores.Objective;
+import net.minecraft.world.scores.Scoreboard;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Comparator;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
@@ -105,6 +110,12 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				LOGGER.info("[M8] block light: {}", light);
 			}
 			case "say" -> context.runOnClient(client -> client.player.connection.sendChat(request.substring(4)));
+			case "command" -> context.runOnClient(client -> client.player.connection.sendCommand(request.substring(8)));
+			case "sidebar" -> {
+				context.waitTicks(10);
+				String sidebar = context.computeOnClient(client -> sidebar(client.level.getScoreboard()));
+				LOGGER.info("[M8] sidebar: {}", sidebar);
+			}
 			case "rightclick" -> context.getInput().holdKeyFor(options -> options.keyUse, 2);
 			case "mine" -> {
 				String target = context.computeOnClient(client -> String.valueOf(client.hitResult == null ? null : client.hitResult.getLocation()));
@@ -118,6 +129,19 @@ public final class KnowledgeTest implements FabricClientGameTest {
 			default -> LOGGER.warn("[M8] unknown request {}", request);
 		}
 		context.waitTicks(10);
+	}
+
+	private static String sidebar(Scoreboard scoreboard) {
+		Objective objective = scoreboard.getDisplayObjective(DisplaySlot.SIDEBAR);
+		if (objective == null) {
+			return "none";
+		}
+		StringBuilder shown = new StringBuilder(objective.getDisplayName().getString());
+		scoreboard.listPlayerScores(objective).stream()
+				.sorted(Comparator.comparingInt(entry -> -entry.value()))
+				.forEach(entry -> shown.append(" | ").append(entry.ownerName().getString())
+						.append(" = ").append(entry.formatValue(objective.numberFormatOrDefault(BlankFormat.INSTANCE)).getString()));
+		return shown.toString();
 	}
 
 	/** Puts one of the held stack into each of two grid squares, reads the result, and takes them back out. */

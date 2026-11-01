@@ -46,6 +46,7 @@ final class Operations {
 			case "open_world" -> new JsonPrimitive(Opening.open(server));
 			case "progress" -> Knowledge.instance().progress();
 			case "mob_act" -> Minds.act(request);
+			case "board" -> Board.update(request);
 			default -> throw new IllegalArgumentException("Unknown operation " + op);
 		};
 	}
