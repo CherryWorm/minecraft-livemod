@@ -35,10 +35,11 @@ WENT_OUT = ("released", "nothing_to_release")
 MOST_IN_A_RELEASE = 8  # Finding a bad one takes longer the more there are. Anything over this goes in the next release, straight after.
 # Turns and usage for one attempt, and how many attempts. A feature is everything that has to arrive together, so these leave
 # room for that, and most use far less. The later a stage is, the bigger its features can be, and
-# nobody's waiting on them, because they're built in the background while people play.
-STAGE_LIMITS = {"early": (100, 14.0, 3), "mid": (160, 24.0, 4), "end": (240, 40.0, 5)}
-SMALL_LIMITS = (40, 3.0, 2)
-FIX_LIMITS = (60, 6.0, 3)
+# nobody's waiting on them, because they're built in the background while people play. There's no limit on turns (the owner's
+# call), because running out threw away the whole build. Usage only limits builders on Claude, so nothing limits one on another model.
+STAGE_LIMITS = {"early": (None, 14.0, 3), "mid": (None, 24.0, 4), "end": (None, 40.0, 5)}
+SMALL_LIMITS = (None, 3.0, 2)
+FIX_LIMITS = (None, 6.0, 3)
 FEATURE_ID = others.FEATURE_ID
 STALE = "is in the ledger but no feature declares it"
 STALE_RETRIES = 4
