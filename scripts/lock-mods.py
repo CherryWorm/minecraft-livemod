@@ -17,6 +17,7 @@ MODS = [
     ("server", "spark", "1.10.187-fabric"),
     ("server", "blockbench-import-library", "2.2.0+26.3-rc-3"),
     ("server", "biolith", "3.8.0-beta.2"),
+    ("server", "jei", "31.17.0.108"),
     ("shadow", "carpet", "26.3"),
     ("velocity", "Ri89j7v5", "1.1.0"),
 ]
