@@ -17,7 +17,8 @@ services:
       - no-new-privileges:true
     read_only: true
     tmpfs:
-      - /run/tinyproxy
+      # Docker only makes this writable the first time unless it's told. After a restart in place the proxy couldn't start.
+      - /run/tinyproxy:mode=1777
       - /var/log/tinyproxy
     networks:
       - public
