@@ -463,6 +463,19 @@ def _copy_screen_effects(feature, feature_id, pack):
         ]})
 
 
+def _machine_home(features, feature_id, machine):
+    """Whose list a machine recipe goes on. A machine's module only asks for what's on its own feature's list, so a recipe for
+    another feature's machine has to go there, or it never fires even though recipe viewers show it. A feature can name a
+    machine with no block of that name, so that's only taken to be another feature's if exactly one other feature has one."""
+    if "/" in machine:
+        return machine
+    if machine not in features[feature_id]["manifest"].get("blocks", {}):
+        owners = [other for other, feature in features.items() if machine in feature["manifest"].get("blocks", {})]
+        if len(owners) == 1:
+            return f"{owners[0]}/{machine}"
+    return f"{feature_id}/{machine}"
+
+
 def _link_knowledge(entries, gated, recipe_routes):
     """A recipe names the knowledge that unlocks it. Done last, because that may be in a later feature."""
     for recipe_id, source, route in recipe_routes:
@@ -600,7 +613,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
                                             "machine": recipe.get("machine"), "type": recipe.get("json", {}).get("type")}
             if isinstance(recipe.get("machine"), str):
                 route = recipe.get("route")
-                machines.setdefault(f"{feature_id}/{recipe['machine']}", []).append({
+                machines.setdefault(_machine_home(features, feature_id, recipe["machine"]), []).append({
                     "id": source,
                     "mode": recipe.get("mode"),
                     "inputs": _resolve_tokens(recipe["inputs"], feature_id, ledger),

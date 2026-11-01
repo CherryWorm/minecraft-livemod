@@ -61,6 +61,8 @@ Declared in `recipes`, with `machine` naming the machine rather than using `json
 }
 ```
 
+A recipe can be for another feature's machine, which is how a new material gets made at a machine that's already out. Name the machine as usual, or as `other_feature/machine` if more than one feature has one of that name, and it goes on that machine's list, so its module finds it with no changes.
+
 Your module asks whether what a player offered matches. Order doesn't matter.
 
 ```java
