@@ -175,8 +175,9 @@ def play_placing(client):
     check("and can give way when it's happy to", holds(client, "gate gives way") and is_block(x + 2, y, z, "minecraft:air"))
 
     rcon("setblock", str(x + 2), str(y), str(z), "minecraft:gold_block")
+    rcon("tp", PLAYER, str(x + 2.5), str(y + 1), str(z + 0.5), "0", "90")
     rcon("item", "replace", "entity", PLAYER, "weapon.mainhand", "with", "minecraft:netherite_pickaxe", "1")
-    time.sleep(1)
+    time.sleep(2)
     client.ask("mine 60")
     check("a module can refuse any block being broken", holds(client, "no breaking gold") and is_block(x + 2, y, z, "minecraft:gold_block"))
     rcon("setblock", str(x + 2), str(y), str(z), "minecraft:air")
@@ -186,11 +187,11 @@ def play_placing(client):
 def play_redstone(client):
     x, y, z = SPOT
     post = slot("api_post")
-    rcon("setblock", str(x), str(y), str(z), post)
     east = (x + 1, y, z)
     west = (x - 1, y, z)
     rcon("setblock", *map(str, east), "minecraft:redstone_lamp")
     rcon("setblock", *map(str, west), "minecraft:redstone_lamp")
+    rcon("setblock", str(x), str(y), str(z), post)
     time.sleep(1)
     check("a block gives redstone out of the side it says", is_block(*east, "minecraft:redstone_lamp[lit=true]"))
     check("and not out of the others", is_block(*west, "minecraft:redstone_lamp[lit=false]"))
@@ -391,11 +392,16 @@ def play_machine_slots(client):
     rcon("kill", "@e[type=item]")
 
 
-def spawn(name, x, y, z):
+def spawn(name, x, y, z, still=False):
+    """One that's still stays where it's put until it's woken, so a player can be sure of hitting it."""
     tag = name
-    rcon("summon", slot(name, "mobs"), str(x + 0.5), str(y), str(z + 0.5), json.dumps({"Tags": [tag], "PersistenceRequired": True}))
-    time.sleep(1)
+    rcon("summon", slot(name, "mobs"), str(x + 0.5), str(y), str(z + 0.5), json.dumps({"Tags": [tag], "PersistenceRequired": True, "NoAI": still}))
+    time.sleep(2 if still else 1)
     return tag
+
+
+def wake(tag, awake=True):
+    rcon("data", "merge", "entity", f"@n[tag={tag}]", json.dumps({"NoAI": not awake}))
 
 
 def mob_data(tag, path):
@@ -410,7 +416,8 @@ def aim(tag, x, y, z):
     """Puts a mob right in front of the player, with their crosshair on it, the way someone really would use something on it."""
     rcon("tp", f"@n[tag={tag}]", str(x + 0.5), str(y), str(z + 0.5))
     rcon("tp", PLAYER, str(x + 0.5), str(y), str(z + 2.5), "facing", "entity", f"@n[tag={tag}]", "eyes")
-    time.sleep(0.5)
+    # What the crosshair's on is only worked out when a frame is drawn, and test clients draw few of them.
+    time.sleep(2)
 
 
 def on_ground(item):
@@ -441,15 +448,14 @@ def play_mob_drops(client):
 
 def play_flying(client):
     x, y, z = SPOT
-    tag = spawn("api_bat", x, y + 3, z)
-    time.sleep(4)
-    height = number(mob_data(tag, "Pos[1]"))
-    check("a flying mob stays up instead of falling", height > y + 0.5, str(height))
-    check("and has no gravity", "1b" in mob_data(tag, "NoGravity") or "true" in mob_data(tag, "NoGravity"), mob_data(tag, "NoGravity"))
+    tag = spawn("api_bat", x, y + 1, z, still=True)
+    check("a flying mob has no gravity", "1b" in mob_data(tag, "NoGravity") or "true" in mob_data(tag, "NoGravity"), mob_data(tag, "NoGravity"))
     aim(tag, x, y + 1, z)
     client.ask("rightclick")
     check("it's told to fly somewhere", holds(client, "bat flying true at"), client.text()[-200:])
+    wake(tag)
     check("and gets there, through the air", holds(client, "bat arrived in the air true", 40), mob_data(tag, "Pos"))
+    check("which it couldn't have got to on foot", number(mob_data(tag, "Pos[1]")) > y + 3, mob_data(tag, "Pos"))
     place = [int(float(number)) for number in re.findall(r"(-?\d+\.\d+)d", mob_data(tag, "Pos"))]
     near = client_parts(client, *place)
     check("a part named as glowing on a mob reaches the client", len([part for part in near if part["brightness"] == 15]) == 1, str(near)[:400])
@@ -459,18 +465,21 @@ def play_flying(client):
 
 def play_walking(client):
     x, y, z = SPOT
-    tag = spawn("api_ox", x - 6, y, z)
+    tag = spawn("api_ox", x - 6, y, z, still=True)
     aim(tag, x - 6, y, z)
     client.ask("rightclick")
     check("a module sends a mob to a block", holds(client, "ox sets off for"))
+    wake(tag)
     check("and hears when it's there", holds(client, "ox arrived at true", 30))
     check("its walk animation plays on the way", holds(client, "ox legs moving", 1))
     # Being told to go somewhere else while walking counts as not having got to the first place.
+    wake(tag, False)
     aim(tag, x - 6, y, z)
     client.ask("rightclick")
-    aim(tag, x - 6, y, z)
+    time.sleep(1)
     client.ask("rightclick")
     check("and when it's sent elsewhere instead", holds(client, "ox gave up at", 20))
+    wake(tag)
     arrivals = client.text().count("chat: API ox arrived")
     deadline = time.monotonic() + 30
     while client.text().count("chat: API ox arrived") == arrivals and time.monotonic() < deadline:
@@ -499,11 +508,11 @@ def play_damage(client):
     rcon("gamemode", "survival", PLAYER)
     rcon("effect", "give", PLAYER, "minecraft:instant_health", "1", "5", "true")
     time.sleep(1)
-    rcon("damage", PLAYER, "8", "minecraft:generic")
-    check("a module hears damage coming to a player", holds(client, "player would take 8.0"))
-    time.sleep(1)
+    # More than they have, so they'd be dead if it hadn't been halved. Being on peaceful, they're healing all the time, so the exact number's no use.
+    rcon("damage", PLAYER, "30", "minecraft:generic")
+    check("a module hears damage coming to a player", holds(client, "player would take 30.0"))
     left = number(rcon("data", "get", "entity", PLAYER, "Health"))
-    check("and can change how much it is", 15.5 <= left <= 16.5, str(left))
+    check("and can change how much it is", 4 <= left <= 14, str(left))
     rcon("item", "replace", "entity", PLAYER, "armor.head", "with", "minecraft:air")
 
     # A hit that would kill, and a module saying it doesn't.
@@ -521,12 +530,14 @@ def play_damage(client):
 
     # A real hit, from a real player, on two mobs with different ideas about being pushed.
     rcon("effect", "give", PLAYER, "minecraft:resistance", "9999", "5", "true")
-    tag = spawn("api_calf", x, y, z)
+    tag = spawn("api_calf", x, y, z, still=True)
     aim(tag, x, y, z)
     before = number(mob_data(tag, "Pos[2]"))
     client.ask("mine 2")
     check("a module hears a mob pushed by a hit", holds(client, "calf pushed 0.4"))
-    time.sleep(1)
+    # Something with no mind of its own doesn't get moved at all, and it keeps the push until it can.
+    wake(tag)
+    time.sleep(2)
     far = abs(number(mob_data(tag, "Pos[2]")) - before)
     check("and can push it harder", far > 1.5, str(far))
     rcon("kill", f"@n[tag={tag}]")
@@ -771,7 +782,7 @@ def play_effects(client):
     rcon("effect", "clear", PLAYER)
     before = icon_pixels(client, "no_effect", (0.5, 0, 1, 0.3))
     time.sleep(1)
-    rcon("effect", "give", PLAYER, blessed, "60", "2", "true")
+    rcon("effect", "give", PLAYER, blessed, "60", "2")
     check("a module hears an effect start, and at what level", holds(client, "blessed started level 2 has it true"))
     check("it runs for as long as it lasts", holds(client, f"blessed tick level 2 on {PLAYER}"))
     time.sleep(1)
@@ -779,7 +790,7 @@ def play_effects(client):
     check("the client has it", any(effect["name"] == "Api Blessed" and effect["level"] == 2 for effect in shown), str(shown))
     check("with its time left", any(40 * 20 < effect["ticks"] <= 60 * 20 for effect in shown), str(shown))
     check("and its own picture", any(effect["sprite"] == f"{blessed.replace(':', ':mob_effect/')}" for effect in shown), str(shown))
-    rcon("effect", "give", PLAYER, cursed, "60", "0", "true")
+    rcon("effect", "give", PLAYER, cursed, "60", "0")
     time.sleep(2)
     shown = client_effects(client)
     check("two at once both show", len(shown) == 2 and any(effect["name"] == "Api Cursed" and effect["harmful"] for effect in shown), str(shown))
@@ -800,7 +811,7 @@ def play_effects(client):
     check("and the client stops showing it", client_effects(client) == [], str(client_effects(client)))
     rcon("effect", "give", PLAYER, blessed, "2", "0", "true")
     check("it can run out", holds(client, f"blessed ended on {PLAYER}", 10))
-    time.sleep(1)
+    time.sleep(3)
     check("and the client stops showing that too", client_effects(client) == [], str(client_effects(client)))
 
     # On a mob, which nothing shows but which still works.
@@ -889,10 +900,14 @@ STAGES = {"blocks": (play_facing, play_placing, play_redstone, play_light, play_
 
 
 def main():
-    wanted = sys.argv[1:] or list(STAGES)
-    build_source()
-    print("building and releasing the test feature", flush=True)
-    release()
+    # A stage, or one part of one by name. With --again it uses the release that's out, for when only this file has changed.
+    arguments = [word for word in sys.argv[1:] if word != "--again"]
+    by_name = {play.__name__: (play,) for plays in STAGES.values() for play in plays}
+    wanted = arguments or list(STAGES)
+    if "--again" not in sys.argv:
+        build_source()
+        print("building and releasing the test feature", flush=True)
+        release()
     with sign._locked():
         sign._load_key()
     runtime.REPORTS.mkdir(parents=True, exist_ok=True)
@@ -902,10 +917,8 @@ def main():
         client.wait(r"\[M8\] joined as [A-Za-z0-9_]+$", 420)
         time.sleep(5)
         clear_ground()
-        if "effects" in wanted:
-            client.ask("guiwide")
         for stage in wanted:
-            for play in STAGES[stage]:
+            for play in {**STAGES, **by_name}[stage]:
                 print(f"--- {play.__name__}", flush=True)
                 # A slot to run in can take an hour to get, so one thing going wrong shouldn't lose the rest of the run.
                 try:

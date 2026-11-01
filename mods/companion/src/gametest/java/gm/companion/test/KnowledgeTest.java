@@ -323,7 +323,6 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				client.player.respawn();
 				client.gui.setScreen(null);
 			});
-			case "guiwide" -> context.runOnClient(client -> client.options.guiScale().set(2));
 			case "inwater" -> {
 				boolean wet = context.computeOnClient(client -> client.player.isInWater());
 				LOGGER.info("[M8] in water: {}", wet);
