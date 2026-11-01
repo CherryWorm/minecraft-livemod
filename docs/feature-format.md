@@ -12,6 +12,9 @@ Each feature is one folder, `mods/genesis/features/<id>/`, where `<id>` is lower
     textures/<name>.png.mcmeta only for animation
     models/<block_name>.json   optional custom block model
     lang.json                  rarely needed. Use "texts" in feature.json instead
+  raw/                         optional vanilla data and resource pack files. See 'Raw files' in docs/content-types.md
+    data/gm/..., data/minecraft/tags/...
+    assets/gm/...
   server/                      optional Java module, on the server
     src/main/java/...
     src/main/resources/module.properties   contains entry=<class>
@@ -152,6 +155,7 @@ A family fixes what can't change on a live block. `stone`, `ore`, `deep_ore`, `m
 | `glow_ore` | A deep ore that gives off a little light, level 4, so it can be spotted across a cave. Only 20 exist |
 | `crop` | One crop with all four growth stages in one block. See below. Only 7 exist |
 | `connected` | A thin line that grows arms toward its neighbours, like a cable. See below. Only 2 exist |
+| `ladder` | Something to climb, on a wall. See below. Only 10 exist |
 
 Families are limited, and a name stays assigned to its slot forever, so don't create blocks casually. A block's family can never change once it's been released.
 
@@ -194,6 +198,16 @@ Plant it with an item that has `"places": {"block": "$block:weald_wheat", "on": 
 
 It's a small cube with an arm toward each neighbour that's the same block, any machine or `model` block, or anything in `connects`, and that keeps up by itself as things around it change. Players can place these by the hundred, because it's an ordinary block, unlike a `model` block. To everyone it's half a block high and solid, whichever way its arms go. Its texture is used as it comes for the cube and all the arms, so a plain or lightly patterned one looks best.
 
+### Ladders
+
+```json
+"rope_ladder": {"family": "ladder", "display": "Rope Ladder", "texture": "rope_ladder"}
+```
+
+It goes on the wall a player clicks, and goes if that wall does, and players climb it just as fast as vanilla's. Its `texture` is drawn flat against the wall, so see-through pixels show the wall behind, and it's what it looks like in an inventory too. For another shape, give it a model at `assets/models/<name>.json`, drawn against the south side, because that's the wall when it faces north, and it's turned for each other way it faces.
+
+A player's game works out climbing for itself, from what it takes a block to be, so nothing but this family can be climbed: `minecraft:climbable` on any other block is refused. To their game it's a vine, so what they can aim at is a thin column in the middle of the block, not the whole of what's drawn. Each takes four of a small number of client block states, so there are only 10.
+
 ### More about a block
 
 - **`"hardness": 0`** sets how long it takes to break, from 0, which is at once, to 5, which is an iron block. Leave it out for what its family says. Unlike a family, this can change later. The right tool is still what its family says.
@@ -203,7 +217,7 @@ It's a small cube with an arm toward each neighbour that's the same block, any m
 
 ## Names
 
-Use `$block:name` and `$item:name` in recipes and models. For another feature's content, use `$item:other_feature/name`. Never write a slot ID yourself.
+Use `$block:name` and `$item:name` in recipes and models. For another feature's content, use `$item:other_feature/name`. Never write a slot ID yourself. `$biome:name` is a biome of this world's, and raw files have tokens of their own: see 'Raw files' in `docs/content-types.md`.
 
 `display` is the only readable name players can see. Everything else in the pack and data pack is renamed to meaningless IDs automatically. Write it in English, and see "Text" for how it reaches players in other languages.
 
@@ -252,7 +266,8 @@ Things to watch for:
 - Attribute modifiers add to a base: `attack_damage` to 1 and `attack_speed` to 4. So an iron sword's are +5 and -2.4. Use `add_value`, and `mainhand` for weapon stats or an armor slot for armor stats, because anything else stacks with what a player already has.
 - Raising any other attribute, such as `max_health` or `movement_speed`, is refused, because vanilla gear has no curve for it. Lowering one as a drawback is fine.
 - `minecraft:unbreakable`, a `damage_per_block` of 0 and an `item_damage_per_attack` of 0 all count as infinite durability, which no tier allows.
-- `minecraft:enchantments`, `stored_enchantments`, `death_protection`, `blocks_attacks`, `kinetic_weapon`, `piercing_weapon`, `attack_range`, `minimum_attack_charge`, `damage_type` and `glider` are refused on a recipe result. They add power with nothing to measure it against. Give the effect through a server module.
+- `minecraft:enchantments`, `stored_enchantments`, `death_protection`, `blocks_attacks`, `kinetic_weapon`, `piercing_weapon`, `attack_range`, `minimum_attack_charge`, `damage_type` and `glider` are refused on a recipe result. They add power with nothing to measure it against. Give the effect through a server module. An enchantment of your own can go on gear at a table or in loot: see 'Raw files' in `docs/content-types.md`.
+- For worn armour with its own art rather than vanilla's, and for tools that can be enchanted, see 'Raw files' in `docs/content-types.md`.
 
 ## Recipes and discovery
 

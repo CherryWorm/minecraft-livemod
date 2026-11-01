@@ -10,6 +10,7 @@ import math
 from collections import Counter
 from fractions import Fraction
 
+from broker import rawpack
 from broker.bundles import TOKEN
 from broker.gates import GateFailed
 
@@ -189,15 +190,62 @@ def _outputs(body, feature_id):
     return outputs
 
 
+def _raw_json(feature):
+    """A feature's raw files with what's in them, skipping what can't be read, which other checks refuse."""
+    try:
+        files = rawpack.files(feature["dir"]) if feature.get("dir") else []
+    except rawpack.Refused:
+        return
+    for raw in files:
+        if raw.is_json:
+            try:
+                yield raw, json.loads(raw.path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+
+
+def _item_tags(features):
+    """What raw files add to item tags. A recipe that takes a tag takes whatever's in it, so the checks on recipes have to see that too."""
+    tags = {}
+    for feature_id, feature in features.items():
+        for raw, contents in _raw_json(feature):
+            if raw.registry == "tags/item" and isinstance(contents, dict):
+                name = f"#minecraft:{raw.name}" if raw.is_vanilla_tag else f"#$tag:{feature_id}/{raw.name}"
+                for value in contents.get("values", []):
+                    value = value.get("id") if isinstance(value, dict) else value
+                    tags.setdefault(name, []).append(_own_tag(str(value), feature_id) if str(value).startswith("#$tag:") else _node(str(value), feature_id))
+    return tags
+
+
+def _own_tag(option, feature_id):
+    return f"#$tag:{_key(feature_id, option.split(':', 1)[1])}"
+
+
+def _with_tag_members(alternatives, feature_id, tags):
+    """Adds what's in any tags among these, and takes out this world's own tags, which aren't anything by themselves."""
+    found, waiting, seen = [], list(alternatives), set()
+    while waiting:
+        option = waiting.pop(0)
+        option = _own_tag(option, feature_id) if option.startswith("#$tag:") else option
+        if option in seen:
+            continue
+        seen.add(option)
+        waiting += tags.get(option, [])
+        if not option.startswith("#$tag:"):
+            found.append(option)
+    return found
+
+
 def _read_recipes(features):
     recipes = []
+    tags = _item_tags(features)
     for feature_id, feature in features.items():
         for name, recipe in feature["manifest"].get("recipes", {}).items():
             # A named machine's recipe has its inputs and output at the top level, not in Minecraft's own json.
             is_machine = isinstance(recipe.get("machine"), str)
             body = {"inputs": recipe.get("inputs", []), "results": recipe.get("outputs") or [recipe.get("output")]} if is_machine else recipe.get("json", {})
-            recipes.append({"source": f"{feature_id}/{name}", "tier": recipe.get("tier"),
-                            "inputs": _inputs(body, feature_id), "outputs": _outputs(body, feature_id)})
+            inputs = [(_with_tag_members(alternatives, feature_id, tags), count) for alternatives, count in _inputs(body, feature_id)]
+            recipes.append({"source": f"{feature_id}/{name}", "tier": recipe.get("tier"), "inputs": inputs, "outputs": _outputs(body, feature_id)})
     return recipes
 
 
@@ -504,6 +552,14 @@ def drops_of(thing):
     return found
 
 
+def _used_loot(feature):
+    """A feature's own loot tables that something points at, because one that nothing does gives nobody anything."""
+    files = list(_raw_json(feature))
+    text = json.dumps([feature["manifest"], *(contents for _, contents in files)])
+    used = {found.group(2) for found in rawpack.TOKEN.finditer(text) if found.group(1) == "loot_table"}
+    return [contents for raw, contents in files if raw.registry == "loot_table" and raw.name in used]
+
+
 def _natural_sources(features):
     """What exists without crafting: blocks the world places, and what mobs and ruin chests hand out."""
     placed, handed_out = set(), set()
@@ -519,6 +575,8 @@ def _natural_sources(features):
             placed.update(_node(part_block(part), feature_id) for layout in ruin_layouts(ruin) for part in layout if part_block(part).startswith("$block:"))
             handed_out.update(f"{found.group(1)}:{_key(feature_id, found.group(2))}"
                               for found in TOKEN.finditer(json.dumps(ruin_loot(ruin))))
+        handed_out.update(f"{found.group(1)}:{_key(feature_id, found.group(2))}"
+                          for found in TOKEN.finditer(json.dumps([addition.get("pools") for addition in manifest.get("loot_additions", [])] + _used_loot(feature))))
     return placed, handed_out
 
 

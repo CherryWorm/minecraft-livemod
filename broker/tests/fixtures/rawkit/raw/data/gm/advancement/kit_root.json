@@ -1,0 +1,11 @@
+{
+  "criteria": {"anything": {"trigger": "minecraft:tick"}},
+  "display": {
+    "icon": {"id": "$item:kit_token"},
+    "title": {"text": "Kit Beginnings"},
+    "description": {"text": "Where the kit's advancements start"},
+    "background": "minecraft:gui/advancements/backgrounds/stone",
+    "show_toast": false,
+    "announce_to_chat": false
+  }
+}

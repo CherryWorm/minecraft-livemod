@@ -78,6 +78,7 @@ public final class NeutralSlots {
 			case MODEL -> new ModelSlotBlock(properties, family, model, path);
 			case CROP -> new CropSlotBlock(properties, family, model, path);
 			case CONNECTED -> new ConnectedSlotBlock(properties, family, model, path);
+			case LADDER -> new LadderSlotBlock(properties, family, model, path);
 			default -> new SlotBlock(properties, family, model, path);
 		};
 		Registry.register(BuiltInRegistries.BLOCK, id, block);

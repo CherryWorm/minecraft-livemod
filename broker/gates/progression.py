@@ -6,6 +6,8 @@ All of the numbers here are starting values, to be tuned in playtests.
 import hashlib
 import json
 
+from broker import rawpack
+from broker.bundles import TOKEN
 from broker.gates import GateFailed, balance
 from orchestrator import progression as graph
 
@@ -111,6 +113,25 @@ def _check_tiers(features, doc, recipes):
         check(thing.split(":", 1)[1], definition.get("tier"), _node_of(thing, features))
     for recipe in recipes:
         check(f"Recipe {recipe['source']}", recipe["tier"], features[recipe["source"].split("/")[0]]["manifest"].get("node"))
+    for feature_id, feature in features.items():
+        for name, enchantment in feature["manifest"].get("enchantments", {}).items():
+            check(f"Enchantment {feature_id}/{name}", enchantment.get("tier"), feature["manifest"].get("node"))
+    return problems
+
+
+def _check_loot_additions(features, doc):
+    """Vanilla's loot can be found at any time, so at least it can't give out what this feature's own step hasn't reached."""
+    problems = []
+    for feature_id, feature in features.items():
+        node = feature["manifest"].get("node")
+        if node not in doc["nodes"]:
+            continue
+        allowed = graph.before(doc, node) | {node}
+        for found in TOKEN.finditer(json.dumps(feature["manifest"].get("loot_additions", []))):
+            thing = f"{found.group(1)}:{balance._key(feature_id, found.group(2))}"
+            other = _node_of(thing, features)
+            if other and other not in allowed:
+                problems.append(f"{feature_id} adds {found.group(0)} to vanilla's loot, and that's from node {other}, which doesn't come before {node}.")
     return problems
 
 
@@ -186,6 +207,7 @@ def _check_knowledge_follows_graph(features, doc):
 def _mythic_without_a_place(features, recipes):
     """Unlimited power is only fair at the end of a progression, so it can't exist in a world without one."""
     tiers = [thing.get("tier") for thing in balance._things(features).values()] + [recipe["tier"] for recipe in recipes]
+    tiers += [enchantment.get("tier") for feature in features.values() for enchantment in feature["manifest"].get("enchantments", {}).values()]
     return ["Tier mythic needs an endgame node, but this world has no bible/progression.json."] if balance.UNLIMITED in tiers else []
 
 
@@ -216,8 +238,35 @@ def snapshot(features):
                 for path in art:
                     if path.exists():
                         digest.update(path.read_bytes())
+                # What it's worn as, or what plays when it's in a jukebox, is as much its art as its texture is.
+                digest.update(_raw_art(feature_id, feature, definition, features))
                 prints[f"{feature_id}/{name}"] = digest.hexdigest()
     return prints
+
+
+def _raw_art(feature_id, feature, definition, features):
+    """Everything in raw/ that a thing's own definition points at, and what that points at in turn, as bytes."""
+    found = b""
+    waiting, seen = [json.dumps(definition)], set()
+    while waiting:
+        for match in rawpack.TOKEN.finditer(waiting.pop()):
+            owner, _, name = match.group(2).rpartition("/")
+            for raw in _raw_files(features.get(owner) if owner else feature):
+                key = (owner or feature_id, raw.name, raw.token)
+                if raw.name == name and raw.token == match.group(1) and key not in seen:
+                    seen.add(key)
+                    data = raw.path.read_bytes()
+                    found += data
+                    if raw.is_json:
+                        waiting.append(data.decode("utf-8", "replace"))
+    return found
+
+
+def _raw_files(feature):
+    try:
+        return rawpack.files(feature["dir"]) if feature and feature.get("dir") else []
+    except rawpack.Refused:
+        return []
 
 
 def reached_slots(knowledge_file):
@@ -258,6 +307,6 @@ def run(features, bible, ledger, old_prints, knowledge_file, new_prints):
         problems += (_check_features(features, doc) + _check_recipes_follow_graph(features, doc, recipes)
                      + _check_gating(features, doc, recipes) + _check_tiers(features, doc, recipes)
                      + _check_mobs(features, doc) + _check_automation(features, doc) + _check_minds(features, doc)
-                     + _check_knowledge_follows_graph(features, doc))
+                     + _check_knowledge_follows_graph(features, doc) + _check_loot_additions(features, doc))
     if problems:
         raise GateFailed(GATE, "\n".join(problems))

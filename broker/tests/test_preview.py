@@ -331,6 +331,12 @@ class References(unittest.TestCase):
         self.assertEqual(written, ["block/stone.png", "item/apple.png"])
         self.assertIn("block/deepslate.png", result["missing"])
 
+    def test_the_examples_for_raw_files_go_in_a_folder_of_their_own(self):
+        with zipfile.ZipFile(self.jar, "a") as jar:
+            jar.writestr("data/minecraft/enchantment/sharpness.json", b"{}")
+        reference_textures.extract(self.jar, self.target)
+        self.assertEqual((self.target / "vanilla/data/minecraft/enchantment/sharpness.json").read_bytes(), b"{}")
+
     def test_skips_files_already_there(self):
         reference_textures.extract(self.jar, self.target)
         (self.target / "block" / "stone.png").write_bytes(b"kept")
@@ -340,9 +346,10 @@ class References(unittest.TestCase):
         self.assertEqual(sorted(result["skipped"]), ["block/stone.png", "item/apple.png"])
 
     def test_jar_is_not_needed_once_everything_is_there(self):
-        names = [f"block/{name}" for name in reference_textures.BLOCKS] + [f"item/{name}" for name in reference_textures.ITEMS]
+        names = [f"block/{name}.png" for name in reference_textures.BLOCKS] + [f"item/{name}.png" for name in reference_textures.ITEMS]
+        names += [f"vanilla/{path}" for path in reference_textures.RAW_EXAMPLES]
         for name in names:
-            path = self.target / f"{name}.png"
+            path = self.target / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"x")
         result = reference_textures.extract(self.root / "no_such.jar", self.target)
@@ -352,7 +359,7 @@ class References(unittest.TestCase):
         self.jar.write_bytes(b"PK not really a zip")
         result = reference_textures.extract(self.jar, self.target)
         self.assertEqual(result["copied"], [])
-        self.assertEqual(len(result["missing"]), len(reference_textures.BLOCKS) + len(reference_textures.ITEMS))
+        self.assertEqual(len(result["missing"]), len(reference_textures.BLOCKS) + len(reference_textures.ITEMS) + len(reference_textures.RAW_EXAMPLES))
 
     def test_preview_reads_what_extract_writes(self):
         buffer = self.root / "stone.png"

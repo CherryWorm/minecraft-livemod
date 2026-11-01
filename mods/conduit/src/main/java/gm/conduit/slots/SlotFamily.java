@@ -33,7 +33,9 @@ public enum SlotFamily {
 	GLOW_ORE(2500, 20, BlockModelType.FULL_BLOCK, () -> base(4.5f, 3.0f, SoundType.DEEPSLATE).requiresCorrectToolForDrops().lightLevel(state -> 4)),
 	/** These choose a client block state for each stage or shape, so they ask for those themselves. See CropSlotBlock and ConnectedSlotBlock. */
 	CROP(2200, 7, null, () -> base(0.0f, 0.0f, SoundType.CROP).noCollision().randomTicks()),
-	CONNECTED(2600, 2, null, () -> base(0.5f, 0.5f, SoundType.COPPER).noOcclusion());
+	CONNECTED(2600, 2, null, () -> base(0.5f, 0.5f, SoundType.COPPER).noOcclusion()),
+	/** See LadderSlotBlock. Each takes 4 of the 50 or so vines states Polymer can spare, and nothing else can be climbed on a client. */
+	LADDER(2700, 10, null, () -> base(0.4f, 0.4f, SoundType.LADDER).noCollision().noOcclusion());
 
 	private final int firstId;
 	private final int count;

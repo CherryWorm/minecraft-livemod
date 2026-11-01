@@ -242,6 +242,17 @@ def reload_content(server):
     rcon(server, "conduit", "module", "reload")
 
 
+def vanilla_file(path):
+    """A data file from the game's own jar, or KeyError if there's no such thing."""
+    import zipfile
+
+    for folder in ("prod", "shadow"):
+        for jar in (RUNTIME / folder).glob("versions/*/server-*.jar"):
+            with zipfile.ZipFile(jar) as archive:
+                return json.loads(archive.read(path))
+    raise RuntimeError("No server jar found. Start prod once first.")
+
+
 def _vanilla_data(folder_in_jar, kind, name):
     """A definition read from the game's own jar, so what's made from it starts from what's really there."""
     import zipfile

@@ -1,0 +1,11 @@
+{
+  "parent": "$advancement:kit_root",
+  "criteria": {"got": {"trigger": "minecraft:inventory_changed", "conditions": {"items": [{"items": "$item:kit_token"}]}}},
+  "display": {
+    "icon": {"id": "$item:kit_token"},
+    "title": {"text": "Kit Collector"},
+    "description": {"text": "Hold a kit token"},
+    "frame": "goal"
+  },
+  "rewards": {"experience": 7, "loot": ["$loot_table:kit_reward"]}
+}

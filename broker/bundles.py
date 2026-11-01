@@ -10,7 +10,7 @@ import pathlib
 import re
 import shutil
 
-from broker import guide
+from broker import guide, rawpack
 from orchestrator import others
 from orchestrator import wording
 
@@ -20,7 +20,7 @@ TOOL_TAGS = {"pickaxe": "pickaxe", "axe": "axe", "shovel": "shovel", "hoe": "hoe
 LEVEL_TAGS = {"stone": "needs_stone_tool", "iron": "needs_iron_tool", "diamond": "needs_diamond_tool"}
 ORE_FAMILIES = {"ore", "deep_ore", "glow_ore"}
 # Not cubes, so like vanilla's flowers, what these look like in an inventory is a flat picture of the texture. A sculpted block's texture is a picture of it for just that.
-FLAT_ICON_FAMILIES = {"model", "plant", "glow_plant", "tinted_plant", "crop"}
+FLAT_ICON_FAMILIES = {"model", "plant", "glow_plant", "tinted_plant", "crop", "ladder"}
 # What vanilla's grasses are coloured by when they're held, away from any biome.
 HELD_PLANT_TINT = {"type": "minecraft:grass", "temperature": 0.5, "downfall": 1.0}
 # How a block sits in an inventory or a hand. A model with no parent has none of this, so it's drawn flat on and too big.
@@ -127,7 +127,7 @@ def load_features(features_dir):
 
 
 def empty_ledger():
-    return {"blocks": {}, "items": {}, "mobs": {}, "dimensions": {}, "patches": []}
+    return {"blocks": {}, "items": {}, "mobs": {}, "dimensions": {}, "patches": [], "raw": []}
 
 
 def assign_slots(features, ledger, pool):
@@ -205,8 +205,7 @@ def _sound_id(feature_id, name):
     return hashlib.sha256(f"{feature_id}/{name}".encode()).hexdigest()[:16]
 
 
-def _biome_id(feature_id, name):
-    return "b" + hashlib.sha256(f"{feature_id}/{name}".encode()).hexdigest()[:10]
+_biome_id = rawpack.biome_id
 
 
 def _resolver(feature_id, ledger):
@@ -225,12 +224,14 @@ def _resolver(feature_id, ledger):
 
 
 def _resolve_tokens(value, feature_id, ledger):
+    """Keys too, because what gear is enchanted with is written as a key."""
     if isinstance(value, str):
-        return TOKEN.sub(_resolver(feature_id, ledger), value)
+        found = TOKEN.sub(_resolver(feature_id, ledger), value)
+        return rawpack.TOKEN.sub(lambda match: rawpack.resolve(match, feature_id), found)
     if isinstance(value, list):
         return [_resolve_tokens(item, feature_id, ledger) for item in value]
     if isinstance(value, dict):
-        return {key: _resolve_tokens(item, feature_id, ledger) for key, item in value.items()}
+        return {_resolve_tokens(key, feature_id, ledger): _resolve_tokens(item, feature_id, ledger) for key, item in value.items()}
     return value
 
 
@@ -321,6 +322,8 @@ def _block_model(feature, feature_id, name, block, slot, ledger):
         return {"parent": "minecraft:block/cube", "textures": {
             "particle": face("side", "front"), "up": face("top", "side"), "down": face("bottom", "top", "side"),
             "north": face("front", "side"), "south": face("back", "side"), "east": face("right", "side"), "west": face("left", "side")}}
+    if block["family"] == "ladder":
+        return {"parent": "minecraft:block/ladder", "textures": {"particle": f"gm:block/{slot}", "texture": f"gm:block/{slot}"}}
     # Only tinted_cross takes the biome's colour. On plain cross a tinted plant would stay the grey it's drawn in.
     parents = {"plant": "minecraft:block/cross", "glow_plant": "minecraft:block/cross", "tinted_plant": "minecraft:block/tinted_cross", "crop": "minecraft:block/cross"}
     parent = parents.get(block["family"], "minecraft:block/cube_all")
@@ -437,7 +440,10 @@ def _render_biome(feature_id, name, biome, vanilla_biome, datapack):
     base = biome.get("base")
     if not base or vanilla_biome is None:
         raise BundleError(f"{feature_id}/{name}: a biome needs a 'base' vanilla biome to start from")
-    merged = json.loads(json.dumps(vanilla_biome(base)))
+    try:
+        merged = json.loads(json.dumps(vanilla_biome(base)))
+    except ValueError as error:
+        raise BundleError(f"{feature_id}/{name}: {error}. Use one of vanilla's, like minecraft:plains.") from error
     merged.setdefault("effects", {}).update(biome.get("effects", {}))
     climate_changed = False
     for field in ("temperature", "downfall", "has_precipitation", "features", "carvers"):
@@ -634,6 +640,57 @@ def _knowledge_routes(entry, feature_id, name, ledger):
     return routes
 
 
+def _render_raw(feature, feature_id, ledger, pack, datapack, vanilla_tags):
+    """A feature's own vanilla files, under names that give nothing away. Additions to vanilla's tags are saved up, because several features can
+    add to one. Returns what's now in the world for good, because it's only read when the server starts, and items and worlds hold on to it."""
+    try:
+        files = rawpack.files(feature["dir"])
+    except rawpack.Refused as error:
+        raise BundleError(f"{feature_id}: {error}") from error
+    kept = []
+    for raw in files:
+        relative = raw.target(feature_id)
+        target = (pack if raw.kind == "assets" else datapack) / relative
+        if raw.kind == "data" and not raw.is_vanilla_tag and rawpack.needs_restart(relative):
+            kept.append(f"{raw.registry}/{feature_id}/{raw.name}")
+        if not raw.is_json:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(raw.path, target)
+            continue
+        try:
+            contents = json.loads(raw.path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            raise BundleError(f"{feature_id}: raw/{raw.relative} isn't valid JSON: {error}") from error
+        resolved = _resolve_tokens(contents, feature_id, ledger)
+        if raw.is_vanilla_tag:
+            values = resolved.get("values", []) if isinstance(resolved, dict) else []
+            vanilla_tags.setdefault(f"{raw.registry}/{raw.name}", []).extend(values)
+        else:
+            _write_json(target, resolved)
+    return kept
+
+
+def _render_loot_additions(features, ledger, vanilla_file, datapack):
+    """Vanilla's table with what features add on the end of it. It's read from the game's own jar for each release, so vanilla's part of it can't
+    go stale, and nothing in the world remembers it. Several features can add to one, in the order the features are in."""
+    added = {}
+    for feature_id, feature in features.items():
+        for addition in feature["manifest"].get("loot_additions", []):
+            table = str(addition.get("table", ""))
+            if not table.startswith("minecraft:"):
+                raise BundleError(f"{feature_id}: loot_additions is for vanilla's tables, like minecraft:chests/simple_dungeon, not {table!r}. Your own go in raw/data/gm/loot_table/.")
+            added.setdefault(table, []).extend(_resolve_tokens(addition.get("pools", []), feature_id, ledger))
+    for table, pools in added.items():
+        path = f"data/minecraft/loot_table/{table.split(':', 1)[1]}.json"
+        try:
+            original = vanilla_file(path) if vanilla_file else None
+        except KeyError:
+            original = None
+        if original is None:
+            raise BundleError(f"loot_additions: vanilla has no loot table called {table}.")
+        _write_json(datapack / path, {**original, "pools": [*original.get("pools", []), *pools]})
+
+
 def _link_knowledge(entries, gated, recipe_routes):
     """A recipe names the knowledge that unlocks it. Done last, because that may be in a later feature."""
     for recipe_id, source, route in recipe_routes:
@@ -695,7 +752,7 @@ def _write_book(features, ledger, entries, machines, names, nodes, pack, lang):
                     _write_json(pack / path.replace(f"/{language}/", f"/{variant}/"), contents)
 
 
-def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared", nodes=None, vanilla_type=None, languages=None):
+def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared", nodes=None, vanilla_type=None, languages=None, vanilla_file=None):
     """Writes pack/, datapack/ and config/ under out. Returns nothing: out is the release's content. Languages are what wording.load_languages
     gives, and everything's written in English as well, for any game set to a language that isn't one of them."""
     pack = out / "pack"
@@ -727,6 +784,8 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
     machine_inventories = {}
     block_settings = {}
     panels = {}
+    vanilla_tags = {}
+    kept_raw = set(ledger.get("raw", []))
 
     for feature_id, feature in features.items():
         manifest = feature["manifest"]
@@ -753,6 +812,8 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
                     _copy_texture(feature, "block", f"{slot}_{stage}", texture, pack)
                     _write_json(pack / f"assets/gm/models/block/{slot}_{stage}.json", {"parent": "minecraft:block/cross", "textures": {"cross": f"gm:block/{slot}_{stage}"}})
                 tags.setdefault("maintains_farmland", []).append(f"gm:{slot}")
+            if block["family"] == "ladder":
+                tags.setdefault("climbable", []).append(f"gm:{slot}")
             if block["family"] == "connected":
                 for shape in range(1 << len(CONNECTED_ARMS)):
                     _write_json(pack / f"assets/gm/models/block/{slot}_c{shape}.json", _connected_model(slot, shape))
@@ -849,6 +910,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
             ruin_patches.append(_render_ruin(feature_id, name, ruin, ledger, datapack))
         _copy_sounds(feature, feature_id, pack, sounds_json)
         _copy_screen_effects(feature, feature_id, pack)
+        kept_raw.update(_render_raw(feature, feature_id, ledger, pack, datapack, vanilla_tags))
         panels.update(_render_panels(feature, feature_id, ledger, pack))
         # Marked as sounds, so one can share its name with a block or a mob, which are all in here by bare name.
         bindings.update({f"sound:{feature_id}/{name}": _sound_id(feature_id, name) for name in manifest.get("sounds", [])})
@@ -885,8 +947,12 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
     lang.write(pack)
     if sounds_json:
         _write_json(pack / "assets/gm/sounds.json", sounds_json)
+    _render_loot_additions(features, ledger, vanilla_file, datapack)
     for tag, values in tags.items():
-        _write_json(datapack / f"data/minecraft/tags/block/{tag}.json", {"replace": False, "values": sorted(values)})
+        vanilla_tags.setdefault(f"tags/block/{tag}", []).extend(values)
+    for tag, values in vanilla_tags.items():
+        unique = {json.dumps(value, sort_keys=True): value for value in values}
+        _write_json(datapack / f"data/minecraft/{tag}.json", {"replace": False, "values": [unique[key] for key in sorted(unique)]})
     _write_json(datapack / "pack.mcmeta", {
         "pack": {"description": "Living Mod", "min_format": data_format, "max_format": data_format},
     })
@@ -905,6 +971,7 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
     _write_json(config / "knowledge.json", {"scope": scope, "entries": entries, "gated": gated, "open": sorted(open_recipes),
                                             "machines": machines, "names": names})
     _write_json(out / "recipes.json", recipe_modes)
+    ledger["raw"] = sorted(kept_raw)
     ledger["patches"] = sorted(set(ledger.get("patches", []))
                                | {patch["id"] for patch in patches + surface_patches + biome_patches + ruin_patches})
 

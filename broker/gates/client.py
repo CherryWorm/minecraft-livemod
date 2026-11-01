@@ -22,6 +22,8 @@ FILMED_PHASES = (0.0, 0.25, 0.5, 0.75)
 EYE_HEIGHT = 1.62
 # Again each is a real screenshot, and it's rare for a release to change more than this at once.
 MOST_PANEL_SHOTS = 8
+MOST_WORN_SHOWN = 4
+WORN_PLACES = {"head", "chest", "legs", "feet"}
 
 
 def _fail(message):
@@ -45,6 +47,14 @@ def _wait_log(log, pattern, seconds, process):
             _fail(f"The test client stopped while waiting for {pattern}:\n{text[-1200:]}")
         time.sleep(0.25)
     _fail(f"Timed out waiting for the test client: {pattern}")
+
+
+def _wearable(items):
+    """Which of these can be worn, and where, from what the release says about them."""
+    file = runtime.RUNTIME / "shadow" / "config" / "conduit" / "item_defaults.json"
+    defaults = json.loads(file.read_text(encoding="utf-8")) if file.exists() else {}
+    worn = ((slot, (defaults.get(f"gm:{slot}", {}).get("components") or {}).get("minecraft:equippable", {}).get("slot")) for slot in items)
+    return [(slot, place) for slot, place in worn if place in WORN_PLACES]
 
 
 def build_scene(blocks, items, mobs=()):
@@ -78,6 +88,10 @@ def build_scene(blocks, items, mobs=()):
         runtime.rcon("shadow", "summon", "minecraft:item_display", str(x), "123.4", "1", data, check=False)
     for index, slot in enumerate(mobs[:5]):
         runtime.rcon("shadow", "summon", f"gm:{slot}", str(index * 2 - 4), "120", "-1", "{NoAI:1b,PersistenceRequired:1b}", check=False)
+    # What armor looks like on someone is what's new about it, and an item floating in the air doesn't show that.
+    for index, (slot, worn) in enumerate(_wearable(shown)[:MOST_WORN_SHOWN]):
+        data = '{NoGravity:1b,Rotation:[180f,0f],equipment:{%s:{id:"gm:%s",count:1}}}' % (worn, slot)
+        runtime.rcon("shadow", "summon", "minecraft:armor_stand", str(index * 1.5 - 1.5), "120", "-1", data, check=False)
 
 
 def check_image(path):

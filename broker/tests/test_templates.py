@@ -30,7 +30,7 @@ POOL = {"families": {"stone": {"first": 1000, "count": 150}, "ore": {"first": 12
                      "glow": {"first": 1800, "count": 40}, "machine": {"first": 1900, "count": 80}, "cutout": {"first": 2000, "count": 40},
                      "plant": {"first": 2100, "count": 5}, "glow_plant": {"first": 2110, "count": 2}, "tinted_plant": {"first": 2150, "count": 12},
                      "model": {"first": 2300, "count": 200}, "glow_ore": {"first": 2500, "count": 20}, "crop": {"first": 2200, "count": 7},
-                     "connected": {"first": 2600, "count": 2}},
+                     "connected": {"first": 2600, "count": 2}, "ladder": {"first": 2700, "count": 10}},
         "item_count": 1200, "mobs": {"monster": 240, "creature": 480}}
 DATA_FORMAT = 88
 TIERS = balance.TIERS
@@ -492,7 +492,7 @@ class Armor(Case):
         self.assertEqual(components["minecraft:damage"], 0)
         self.assertEqual(components["minecraft:max_stack_size"], 1)
         self.assertEqual(components["minecraft:equippable"],
-                         {"slot": "chest", "asset_id": "minecraft:diamond", "equip_sound": "minecraft:item.armor.equip_diamond"})
+                         {"slot": "chest", "asset_id": "$equipment:tin", "equip_sound": "minecraft:item.armor.equip_diamond"})
         amounts = {modifier["type"]: modifier["amount"] for modifier in components["minecraft:attribute_modifiers"]}
         self.assertEqual(amounts, {"minecraft:armor": 8, "minecraft:armor_toughness": 2})
         for modifier in components["minecraft:attribute_modifiers"]:
@@ -505,18 +505,25 @@ class Armor(Case):
         ids = [item["components"]["minecraft:attribute_modifiers"][0]["id"] for item in self.manifest()["items"].values()]
         self.assertEqual(len(set(ids)), 4)
 
-    def test_it_says_the_worn_look_is_borrowed_and_asks_for_the_real_thing(self):
+    def test_it_draws_what_it_looks_like_worn(self):
         result = new_armor_set(self.at(), material="tin", display="Tin", tier="iron", ingredient=INGOT, color="#d8c8a0")
         manifest = self.manifest()
-        self.assertIn("host_requests", manifest)
-        self.assertTrue(any("worn" in line for line in manifest["host_requests"]))
-        self.assertIn("host_requests", result["summary"])
-        self.assertIn("iron look", result["summary"])
+        self.assertEqual(manifest["items"]["tin_boots"]["components"]["minecraft:equippable"]["asset_id"], "$equipment:tin")
+        self.assertNotIn("host_requests", manifest)
+        self.assertIn("raw/assets/gm/textures/entity/equipment/", result["summary"])
+        root = self.at()
+        with Image.open(root / "raw/assets/gm/textures/entity/equipment/humanoid/tin.png") as image:
+            self.assertEqual(image.size, (64, 32))
+        with Image.open(root / "raw/assets/gm/textures/entity/equipment/humanoid_leggings/tin.png") as image:
+            self.assertEqual(image.size, (64, 32))
+        self.assertEqual(json.loads((root / "raw/assets/gm/equipment/tin.json").read_text(encoding="utf-8"))["layers"]["humanoid"], [{"texture": "$texture:tin"}])
+        self.release()
 
-    def test_a_second_set_asks_for_it_once_per_set(self):
+    def test_a_second_call_for_more_pieces_keeps_the_same_art(self):
         new_armor_set(self.at(), material="tin", display="Tin", tier="iron", ingredient=INGOT, color="#d8c8a0", slots=["head"])
         new_armor_set(self.at(), material="tin", display="Tin", tier="iron", ingredient=INGOT, color="#d8c8a0", slots=["feet"])
-        self.assertEqual(len(self.manifest()["host_requests"]), 1)
+        self.assertEqual(self.manifest()["items"]["tin_boots"]["components"]["minecraft:equippable"]["asset_id"], "$equipment:tin")
+        self.release()
 
     def test_worn_look_can_be_chosen(self):
         new_armor_set(self.at("gold"), material="tin", display="Tin", tier="iron", ingredient=INGOT, color="#d8c8a0", worn_look="minecraft:gold")
@@ -1227,7 +1234,8 @@ class Art(Case):
     def test_textures_are_valid_and_keep_to_a_small_palette(self):
         for name, make in Refusals.TEMPLATES.items():
             make(self.at(name))
-        pictures = list(self.features.rglob("*.png"))
+        # Worn armour has a shape of its own, which test_it_draws_what_it_looks_like_worn looks at.
+        pictures = [path for path in self.features.rglob("*.png") if "raw" not in path.parts]
         self.assertGreater(len(pictures), 15)
         for path in pictures:
             with self.subTest(path.name):

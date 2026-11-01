@@ -10,12 +10,26 @@ ITEMS = ("iron_ingot", "gold_ingot", "diamond", "raw_iron", "iron_pickaxe", "iro
          "stick")
 
 
+# The game's own files, for builders writing raw ones in a format that changed in Minecraft 26. See 'Raw files' in docs/content-types.md.
+RAW_EXAMPLES = ("data/minecraft/enchantment/sharpness.json", "data/minecraft/enchantment/protection.json", "data/minecraft/enchantment/fire_aspect.json",
+                "data/minecraft/enchantment/efficiency.json", "data/minecraft/enchantment/unbreaking.json", "data/minecraft/advancement/story/root.json",
+                "data/minecraft/advancement/story/mine_stone.json", "data/minecraft/loot_table/chests/simple_dungeon.json", "data/minecraft/jukebox_song/5.json",
+                "data/minecraft/painting_variant/alban.json", "data/minecraft/banner_pattern/creeper.json", "data/minecraft/instrument/admire_goat_horn.json",
+                "data/minecraft/damage_type/arrow.json", "data/minecraft/wolf_variant/ashen.json", "data/minecraft/cow_variant/cold.json",
+                "data/minecraft/tags/block/climbable.json", "data/minecraft/tags/enchantment/in_enchanting_table.json", "data/minecraft/tags/item/enchantable/sharp_weapon.json",
+                "assets/minecraft/equipment/iron.json", "assets/minecraft/textures/entity/equipment/humanoid/iron.png",
+                "assets/minecraft/textures/entity/equipment/humanoid_leggings/iron.png", "assets/minecraft/models/block/ladder.json")
+
+
 def extract(jar, target):
-    """Writes target/block/<name>.png and target/item/<name>.png, skipping files already there. Returns the paths under
-    target that were copied, were already there, and that this jar doesn't have, since a later game version may move one.
+    """Writes target/block/<name>.png and target/item/<name>.png, and the raw examples under target/vanilla/, skipping files already there. Returns the paths
+    under target that were copied, were already there, and that this jar doesn't have, since a later game version may move one.
     The preview says what it lacks and carries on, so a half-downloaded jar isn't worth stopping the caller for."""
     target = pathlib.Path(target)
-    wanted = [f"block/{name}.png" for name in BLOCKS] + [f"item/{name}.png" for name in ITEMS]
+    members = {f"block/{name}.png": f"assets/minecraft/textures/block/{name}.png" for name in BLOCKS}
+    members.update({f"item/{name}.png": f"assets/minecraft/textures/item/{name}.png" for name in ITEMS})
+    members.update({f"vanilla/{path}": path for path in RAW_EXAMPLES})
+    wanted = list(members)
     todo = [path for path in wanted if not (target / path).exists()]
     result = {"copied": [], "skipped": [path for path in wanted if path not in todo], "missing": []}
     if not todo:
@@ -28,7 +42,7 @@ def extract(jar, target):
     with archive:
         present = set(archive.namelist())
         for path in todo:
-            member = f"assets/minecraft/textures/{path}"
+            member = members[path]
             if member not in present:
                 result["missing"].append(path)
                 continue

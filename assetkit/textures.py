@@ -604,6 +604,34 @@ def machine(face="side", casing=(112, 112, 122), accent=(232, 142, 54), on=False
 
 # ---------------------------------------------------------------- item sprites
 
+# Where each part of a person is on a 64 by 32 picture of what they're wearing, as left, top, right and bottom, in the order the game unfolds a box.
+_WORN_HEAD = (0, 0, 32, 16)
+_WORN_BODY = (16, 16, 40, 32)
+_WORN_ARM = (40, 16, 56, 32)
+_WORN_LEG = (0, 16, 16, 32)
+
+
+def worn_armor(color=(176, 176, 184), seed=0):
+    """What armor looks like on someone, as the two pictures the game wants: humanoid, for everything but the legs, and humanoid_leggings, for the legs.
+
+    Save each as raw/assets/gm/textures/entity/equipment/<layer>/<name>.png. It's a plain plate, to paint over. See 'Raw files' in docs/content-types.md."""
+    rng = _rng(seed, 53)
+    pal = _item_ramp(rgb(color) if isinstance(color, str) else color)
+
+    def plate(boxes):
+        image = Image.new("RGBA", (64, 32), (0, 0, 0, 0))
+        pixels = image.load()
+        for left, top, right, bottom in boxes:
+            for y in range(top, bottom):
+                for x in range(left, right):
+                    edge = x in (left, right - 1) or y in (top, bottom - 1)
+                    shade = 3 if edge else 1 + (rng.random() < 0.18) + ((y - top) * 2 >= bottom - top)
+                    pixels[x, y] = (*pal[min(shade, len(pal) - 1)], 255)
+        return image
+
+    return plate((_WORN_HEAD, _WORN_BODY, _WORN_ARM, _WORN_LEG)), plate((_WORN_LEG, _WORN_BODY))
+
+
 def panel_back(width=176, height=166, slots=(), inventory=(8, 84)):
     """The game's own container background, pixel for pixel, at any size, to paint trims and details over: its grey, its bevelled edge and a
     sunken frame for each slot, for where the item goes at (x, y) in the panel. The frames for a player's inventory go at inventory, unless that's None."""

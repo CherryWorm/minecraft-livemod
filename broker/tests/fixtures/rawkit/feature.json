@@ -1,0 +1,48 @@
+{
+  "id": "rawkit",
+  "phase": 1,
+  "summary": "Test fixture for the vanilla files a feature ships in raw/: an advancement, an enchantment, loot added to vanilla's, tags, a ladder, worn armour, a music disc, a painting and a biome by its token.",
+  "sounds": ["kit_song"],
+  "blocks": {
+    "kit_rung": {"family": "ladder", "display": "Kit Rung", "texture": "kit_rung"},
+    "kit_vine": {"family": "plant", "display": "Kit Vine", "texture": "kit_vine", "retired": true},
+    "kit_stone": {"family": "stone", "display": "Kit Stone", "texture": "kit_stone", "tool": "pickaxe"}
+  },
+  "items": {
+    "kit_token": {"display": "Kit Token", "texture": "kit_token"},
+    "kit_gift": {"display": "Kit Gift", "texture": "kit_token"},
+    "kit_plate": {
+      "display": "Kit Plate", "texture": "kit_token", "tier": "iron",
+      "components": {
+        "minecraft:max_damage": 240,
+        "minecraft:equippable": {"slot": "chest", "asset_id": "$equipment:kit_plate"},
+        "minecraft:attribute_modifiers": [{"type": "minecraft:armor", "id": "minecraft:kit_plate", "amount": 6, "operation": "add_value", "slot": "chest"}]
+      }
+    },
+    "kit_disc": {
+      "display": "Kit Disc", "texture": "kit_token",
+      "components": {"minecraft:jukebox_playable": "$jukebox_song:kit_song", "minecraft:max_stack_size": 1}
+    },
+    "kit_blade": {
+      "display": "Kit Blade", "texture": "kit_token", "tier": "iron", "handheld": true,
+      "components": {"minecraft:max_damage": 200, "minecraft:enchantable": {"value": 14}}
+    }
+  },
+  "recipes": {
+    "kit_token": {"mode": "open", "json": {"type": "minecraft:crafting_shapeless", "ingredients": ["minecraft:paper", "minecraft:stick"], "result": {"id": "$item:kit_token"}}},
+    "kit_plate": {"mode": "open", "json": {"type": "minecraft:crafting_shapeless", "ingredients": ["$item:kit_token", "minecraft:iron_ingot"], "result": {"id": "$item:kit_plate"}}},
+    "kit_disc": {"mode": "open", "json": {"type": "minecraft:crafting_shapeless", "ingredients": ["$item:kit_token", "minecraft:paper"], "result": {"id": "$item:kit_disc"}}},
+    "kit_blade": {"mode": "open", "json": {"type": "minecraft:crafting_shapeless", "ingredients": ["$item:kit_token", "minecraft:iron_ingot", "minecraft:stick"], "result": {"id": "$item:kit_blade"}}},
+    "kit_rung": {"mode": "open", "json": {"type": "minecraft:crafting_shapeless", "ingredients": ["$item:kit_token", "minecraft:ladder"], "result": {"id": "$block:kit_rung"}}},
+    "kit_stone": {"mode": "open", "json": {"type": "minecraft:crafting_shapeless", "ingredients": ["$item:kit_token", "minecraft:stone"], "result": {"id": "$block:kit_stone"}}}
+  },
+  "loot_additions": [
+    {"table": "minecraft:chests/simple_dungeon", "pools": [{"rolls": 1, "entries": [{"type": "minecraft:item", "name": "$item:kit_token"}]}]}
+  ],
+  "biomes": {
+    "kit_meadow": {"base": "minecraft:plains", "effects": {"grass_color": "#2e8b57"}, "proportion": 0.25}
+  },
+  "plants": [
+    {"id": "kit_vine_v1", "block": "kit_vine", "on": ["minecraft:grass_block"], "perChunk": 0.2, "minY": 40, "maxY": 200, "underground": false, "biomes": ["$biome:kit_meadow", "minecraft:plains"]}
+  ]
+}

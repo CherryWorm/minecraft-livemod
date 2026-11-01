@@ -1,0 +1,3 @@
+{"type": "minecraft:chest", "pools": [{"rolls": 1, "entries": [
+  {"type": "minecraft:item", "name": "minecraft:book", "modifier": [{"type": "minecraft:set_enchantments", "enchantments": {"$enchantment:kit_edge": 2}}]}
+]}]}

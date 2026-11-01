@@ -18,6 +18,7 @@ NAME = re.compile(r"[a-z0-9_]+")
 TOKEN = re.compile(r"\$(block|item):([a-z0-9_]+)(?:/([a-z0-9_]+))?")
 VANILLA = re.compile(r"#?minecraft:[a-z0-9_./-]+")
 PLAIN_ID = re.compile(r"[a-z0-9_.-]+:[a-z0-9_./-]+")
+OWN_BIOME = re.compile(r"\$biome:[a-z0-9_]+(/[a-z0-9_]+)?")
 THINGS = ("blocks", "items", "mobs")
 
 # These are a copy of the numbers in broker/gates/balance.py, because broker/ isn't in the agent's container.
@@ -90,11 +91,14 @@ ARMOR_PIECES = {
               "...544....332...", "...544....332...", "...543....322...", "...443....322...", "..5443....3321..",
               ".54443....33221.", ".44332....22211.", "................", "................", "................", "................"]),
 }
-# Vanilla's worn looks, by tier, with the sound each one makes. A feature can't ship its own yet.
+# Vanilla's worn looks, by tier, with the sound each one makes. A set draws its own unless it's told to borrow one of these.
 WORN_LOOK = {"wood": "leather", "stone": "chainmail", "iron": "iron", "diamond": "diamond", "netherite": "netherite",
              "beyond": "netherite", "mythic": "netherite"}
 EQUIP_SOUNDS = {"leather": "leather", "copper": "copper", "chainmail": "chain", "iron": "iron", "gold": "gold", "diamond": "diamond",
                 "turtle_scute": "turtle", "netherite": "netherite"}
+
+OWN_LOOK = "own"
+WORN_LAYERS = ("humanoid", "humanoid_leggings")
 
 PLANT_FAMILIES = ("plant", "glow_plant", "tinted_plant")
 PLANT_KINDS = ("flower", "tulip", "grass", "sapling", "mushroom", "crystal")
@@ -331,6 +335,8 @@ def _exact_ids(values, label):
     if not isinstance(values, (list, tuple)) or not values:
         raise TemplateError(f"{label} must be a list of ids, not {values!r}.")
     for value in values:
+        if label == "biomes" and isinstance(value, str) and OWN_BIOME.fullmatch(value):
+            continue
         if not isinstance(value, str) or not PLAIN_ID.fullmatch(value):
             raise TemplateError(f"{label} takes exact ids like minecraft:stone, not tags or names: {value!r}.")
     return list(values)
@@ -613,17 +619,31 @@ def armor_numbers(tier, slot):
 
 
 def _armor_look(worn_look, tier):
+    if worn_look == OWN_LOOK:
+        return OWN_LOOK
     if worn_look == "auto":
         return WORN_LOOK[tier]
     if worn_look is None:
         return None
     look = str(worn_look).removeprefix("minecraft:")
     if look not in EQUIP_SOUNDS:
-        raise TemplateError(f"worn_look must be one of vanilla's, {', '.join(EQUIP_SOUNDS)}, or \"auto\", or null for nothing at all, not {worn_look!r}.")
+        raise TemplateError(f"worn_look must be \"own\", which draws it, or one of vanilla's, {', '.join(EQUIP_SOUNDS)}, or \"auto\" for vanilla's at this tier, or null for nothing at all, not {worn_look!r}.")
     return look
 
 
-def _armor_item(slot, display, texture, tier, look, repair):
+def _draw_worn_art(draft, material, color, seed):
+    """What it looks like on someone, in the raw/ files for that. One set of art does for every piece, so a second call for more pieces finds it there already."""
+    equipment = f"raw/assets/gm/equipment/{material}.json"
+    if equipment in draft.files or (draft.folder / equipment).exists():
+        return
+    draft.file(equipment, json.dumps({"layers": {layer: [{"texture": f"$texture:{material}"}] for layer in WORN_LAYERS}}, indent=2).encode("utf-8"))
+    for layer, image in zip(WORN_LAYERS, tx.worn_armor(color, seed=seed)):
+        buffer = io.BytesIO()
+        image.save(buffer, "PNG")
+        draft.file(f"raw/assets/gm/textures/entity/equipment/{layer}/{material}.png", buffer.getvalue())
+
+
+def _armor_item(slot, display, texture, tier, look, repair, material):
     durability, armor, toughness, knockback = armor_numbers(tier, slot)
     _, modifier_id, _, _ = ARMOR_PIECES[slot]
     modifiers = [_modifier("armor", modifier_id, armor, slot)]
@@ -632,7 +652,9 @@ def _armor_item(slot, display, texture, tier, look, repair):
     if knockback:
         modifiers.append(_modifier("knockback_resistance", modifier_id, knockback, slot))
     equippable = {"slot": slot}
-    if look:
+    if look == OWN_LOOK:
+        equippable.update(asset_id=f"$equipment:{material}", equip_sound=f"minecraft:item.armor.equip_{EQUIP_SOUNDS[WORN_LOOK[tier]]}")
+    elif look:
         equippable.update(asset_id=f"minecraft:{look}", equip_sound=f"minecraft:item.armor.equip_{EQUIP_SOUNDS[look]}")
     return {"display": display, "texture": texture, "tier": tier,
             "components": {"minecraft:max_damage": durability, "minecraft:damage": 0, "minecraft:max_stack_size": 1,
@@ -646,10 +668,11 @@ def _fill_gap(pattern):
 
 
 def new_armor_set(folder, *, material, display, tier, ingredient, color, slots=ARMOR_SLOTS, mode="open", route=None, seed=1,
-                  extra_ingredient=None, worn_look="auto", node=None, phase=None):
+                  extra_ingredient=None, worn_look=OWN_LOOK, node=None, phase=None):
     """Armor pieces with vanilla's numbers for the tier, each with its art and crafting recipe, named <material>_helmet, _chestplate,
     _leggings and _boots. ingredient is like $item:tin_ingot. Past a progression's first nodes, give extra_ingredient something from an
-    earlier node, so the recipes are gated. A feature can't ship its own worn look yet, so worn_look borrows one of vanilla's."""
+    earlier node, so the recipes are gated. What it looks like when worn is drawn from color, in raw/assets/gm/textures/entity/equipment/, for you
+    to paint over if you like. worn_look can name one of vanilla's to borrow instead."""
     draft = _Draft(folder, node, phase)
     _check_name(material)
     _check_text(display, "display")
@@ -668,7 +691,7 @@ def new_armor_set(folder, *, material, display, tier, ingredient, color, slots=A
     for slot in slots:
         word, _, pattern, icon = ARMOR_PIECES[slot]
         name = f"{material}_{word}"
-        draft.thing("items", name, _armor_item(slot, f"{display} {word.capitalize()}", name, tier, look, repair))
+        draft.thing("items", name, _armor_item(slot, f"{display} {word.capitalize()}", name, tier, look, repair, material))
         draft.texture(name, tx._sprite(icon, tint))
         key = {"X": ingredient}
         if extra:
@@ -679,11 +702,11 @@ def new_armor_set(folder, *, material, display, tier, ingredient, color, slots=A
         draft.note(f"Whatever ore makes {ingredient} now counts as feeding tier {tier}, so keep the two matched.")
     if sum(armor_numbers(tier, slot)[1] for slot in ARMOR_SLOTS) > 30:
         draft.note("The game caps total armor at 30, so a full set wastes the rest.")
-    worn = f"borrow vanilla's {look} look" if look else "show nothing"
-    draft.ask_host(f"Let a feature ship its own worn armor art. {display} armor has to {worn} when worn, because equipment assets aren't allowed in the pack.")
+    if look == OWN_LOOK:
+        _draw_worn_art(draft, material, color, seed)
+    worn = f"show the art in raw/assets/gm/textures/entity/equipment/, drawn from its color for you to paint over" if look == OWN_LOOK else f"borrow vanilla's {look} look" if look else "show nothing"
     return draft.commit(f"{display} armor at tier {tier}.",
-                        f"Added {', '.join(slots)} in {display} at tier {tier}, with {_strength(tier)}. Worn, they {worn}, because a feature can't ship its own "
-                        "worn art yet, and that's now in host_requests. Left to decide: what makes these more than a reskin.")
+                        f"Added {', '.join(slots)} in {display} at tier {tier}, with {_strength(tier)}. Worn, they {worn}. Left to decide: what makes these more than a reskin.")
 
 
 # Plants
@@ -776,7 +799,7 @@ def _mob_spawn(spawn, category):
     if filled["light"] not in LIGHTS:
         raise TemplateError(f"spawn light must be one of {', '.join(LIGHTS)}, not {filled['light']!r}.")
     for biome in filled["biomes"]:
-        if not isinstance(biome, str) or not PLAIN_ID.fullmatch(biome.removeprefix("#")):
+        if not isinstance(biome, str) or not (PLAIN_ID.fullmatch(biome.removeprefix("#")) or OWN_BIOME.fullmatch(biome)):
             raise TemplateError(f"spawn biomes must be ids or #tags, not {biome!r}.")
     return filled
 

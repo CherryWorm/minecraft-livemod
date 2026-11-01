@@ -9,9 +9,9 @@ import re
 
 from PIL import Image
 
-from broker import bundles
+from broker import bundles, rawpack
 from broker.bundles import TOKEN
-from broker.gates import GateFailed, balance, mixins, progression
+from broker.gates import GateFailed, balance, mixins, progression, raw
 from orchestrator import others
 
 GATE = "static"
@@ -45,7 +45,8 @@ MACHINE_FAMILIES = {"machine", "model"}
 MOST_MACHINE_SLOTS = 27
 MOST_HARDNESS = 5
 CROP_STAGES = 4
-NOT_CUBES = {"plant", "glow_plant", "tinted_plant", "crop", "connected", "model", "cutout"}
+NOT_CUBES = {"plant", "glow_plant", "tinted_plant", "crop", "connected", "model", "cutout", "ladder"}
+EQUIP_SLOTS = {"head", "chest", "legs", "feet", "body", "saddle", "mainhand", "offhand"}
 MOST_USE_SECONDS = 60
 USE_ANIMATIONS = {"none", "eat", "drink", "block", "bow", "trident", "crossbow", "spyglass", "toot_horn", "brush", "bundle", "spear"}
 MOST_SHADER_CHARACTERS = 16000
@@ -151,6 +152,14 @@ def check_textures(pack):
             if max(width, height) > MOST_PANEL_IMAGE:
                 _fail(f"{name} is {width}x{height}. A panel's images can be at most {MOST_PANEL_IMAGE} across.")
             continue
+        # A raw picture has whatever size the game wants for what it's a picture of, like armour, which is 64 by 32.
+        if rawpack.RAW_NAME.fullmatch(path.name.split(".")[0]):
+            shape = rawpack.texture_shape(path.parent.as_posix())
+            if max(width, height) > MOST_PANEL_IMAGE:
+                _fail(f"{name} is {width}x{height}. A raw picture can be at most {MOST_PANEL_IMAGE} across.")
+            if shape and not shape[0](width, height):
+                _fail(f"{name} is {width}x{height}. It has to be {shape[1]}, or the game stretches it over what it's drawn on.")
+            continue
         if width not in (16, 32, 64) or height % width != 0:
             _fail(f"{name} is {width}x{height}. Textures must be 16, 32 or 64 wide, "
                   "with a height that's a multiple of the width for animations.")
@@ -164,7 +173,7 @@ def check_spoilers(pack):
     """Everything in the pack must use meaningless names. Display names live only in the language file."""
     for path in sorted(file for file in pack.rglob("*") if file.is_file()):
         relative = path.relative_to(pack).as_posix()
-        if not SAFE_PATH.match(relative):
+        if not SAFE_PATH.match(relative) and not rawpack.safe_path(relative):
             _fail(f"The pack contains {relative}, whose path could give content away. "
                   "Pack files must use slot IDs only.")
 
@@ -408,6 +417,8 @@ def check_block_kinds(features):
                 _fail(f"{label} is emissive, but only a plain cube can be, and a {family} block isn't one.")
             if block.get("drops") == "nothing" and family == "crop":
                 _fail(f"{label} is a crop that drops nothing, so nobody could ever harvest it.")
+            if family == "ladder" and block.get("faces"):
+                _fail(f"{label} is a ladder, which has one picture on a wall, so it can't have faces. For another shape, give it a model at assets/models/{name}.json.")
 
 
 def check_items(features):
@@ -428,6 +439,9 @@ def check_items(features):
             compass = item.get("compass")
             if compass is not None and not (isinstance(compass, list) and MIN_COMPASS_FRAMES <= len(compass) <= MAX_COMPASS_FRAMES and all(isinstance(frame, str) for frame in compass)):
                 _fail(f"{label} has compass {compass!r}. It's a list of {MIN_COMPASS_FRAMES} to {MAX_COMPASS_FRAMES} textures, the first pointing straight ahead and the rest going round clockwise.")
+            equippable = (item.get("components") or {}).get("minecraft:equippable")
+            if equippable is not None and not (isinstance(equippable, dict) and equippable.get("slot") in EQUIP_SLOTS):
+                _fail(f"{label} has minecraft:equippable {equippable!r}. It needs a slot, one of {sorted(EQUIP_SLOTS)}.")
             variants = item.get("variants")
             if variants is not None and not (isinstance(variants, dict) and variants and all(isinstance(texture, str) for texture in variants.values())):
                 _fail(f"{label} has variants {variants!r}. It's names and the texture for each, like {{\"gilded\": \"ledger_gilded\"}}.")
@@ -824,4 +838,5 @@ def run(features, old_ledger, new_ledger, pool, content):
     check_minds(features)
     check_no_build_scripts(features)
     check_mixins(features)
+    raw.run(features, old_ledger)
     balance.run(features)

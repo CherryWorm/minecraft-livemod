@@ -10,23 +10,28 @@ import net.fabricmc.fabric.api.client.gametest.v1.TestInput;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.BookViewScreen;
 import net.minecraft.client.gui.screens.recipebook.RecipeCollection;
+import net.minecraft.client.multiplayer.ClientAdvancements;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.numbers.BlankFormat;
 import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.util.context.ContextMap;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.world.inventory.EnchantmentMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.display.RecipeDisplayEntry;
@@ -324,6 +329,63 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				});
 				LOGGER.info("[M8] menu names {}", shown);
 			}
+			case "position" -> {
+				String where = context.computeOnClient(KnowledgeTest::where);
+				LOGGER.info("[M8] position {}", where);
+			}
+			// A client works out climbing for itself, so this is what shows whether it thinks a block can be climbed.
+			case "climb" -> {
+				String before = context.computeOnClient(KnowledgeTest::where);
+				context.getInput().holdKeyFor(options -> options.keyUp, Integer.parseInt(words[1]));
+				String after = context.computeOnClient(KnowledgeTest::where);
+				LOGGER.info("[M8] climbed from {} to {}", before, after);
+			}
+			case "useon" -> context.runOnClient(client -> {
+				BlockPos pos = new BlockPos(Integer.parseInt(words[1]), Integer.parseInt(words[2]), Integer.parseInt(words[3]));
+				Direction face = Direction.byName(words[4]);
+				client.gameMode.useItemOn(client.player, InteractionHand.MAIN_HAND, new BlockHitResult(Vec3.atCenterOf(pos).relative(face, 0.5), face, pos, false));
+			});
+			case "registry" -> {
+				String names = context.computeOnClient(client -> client.level.registryAccess().lookupOrThrow(ResourceKey.<Object>createRegistryKey(Identifier.parse(words[1])))
+						.keySet().stream().filter(id -> id.getNamespace().equals("gm")).map(Identifier::toString).sorted().toList().toString());
+				LOGGER.info("[M8] registry {} has {}", words[1], names);
+			}
+			case "advancements" -> {
+				String known = context.computeOnClient(KnowledgeTest::advancements);
+				LOGGER.info("[M8] advancements: {}", known);
+			}
+			case "advancementscreen" -> {
+				context.getInput().pressKey(options -> options.keyAdvancements);
+				context.waitFor(client -> client.gui.screen() != null, TICKS_PER_MINUTE);
+				context.waitTicks(20);
+				context.takeScreenshot("m8_" + words[1]);
+				context.runOnClient(client -> client.gui.setScreen(null));
+			}
+			case "menubutton" -> context.runOnClient(client -> client.gameMode.handleInventoryButtonClick(client.player.containerMenu.containerId, Integer.parseInt(words[1])));
+			case "enchantoffer" -> {
+				context.waitTicks(10);
+				String offer = context.computeOnClient(client -> {
+					EnchantmentMenu menu = (EnchantmentMenu) client.player.containerMenu;
+					var enchantments = client.level.registryAccess().lookupOrThrow(Registries.ENCHANTMENT);
+					List<String> offers = new ArrayList<>();
+					for (int place = 0; place < menu.costs.length; place++) {
+						offers.add(menu.costs[place] + " levels: " + (menu.enchantClue[place] < 0 ? "nothing" : enchantments.getKey(enchantments.byId(menu.enchantClue[place]))));
+					}
+					return offers.toString();
+				});
+				LOGGER.info("[M8] the table offers {}", offer);
+			}
+			case "worn" -> {
+				String worn = context.computeOnClient(client -> {
+					var equippable = client.player.getMainHandItem().get(DataComponents.EQUIPPABLE);
+					return equippable == null ? "nothing" : equippable.slot().getName() + " " + equippable.assetId().map(asset -> asset.identifier().toString()).orElse("no art");
+				});
+				LOGGER.info("[M8] worn as {}", worn);
+			}
+			case "soundknown" -> {
+				String known = context.computeOnClient(client -> client.getSoundManager().getSoundEvent(Identifier.parse(words[1])) == null ? "doesn't have" : "has");
+				LOGGER.info("[M8] the pack {} {}", known, words[1]);
+			}
 			default -> LOGGER.warn("[M8] unknown request {}", request);
 		}
 		context.waitTicks(10);
@@ -343,6 +405,24 @@ public final class KnowledgeTest implements FabricClientGameTest {
 		} catch (IllegalAccessException error) {
 			throw new IllegalStateException(error);
 		}
+	}
+
+	private static String where(Minecraft client) {
+		return client.player.getX() + " " + client.player.getY() + " " + client.player.getZ() + " climbing " + client.player.onClimbable() + " on the ground " + client.player.onGround();
+	}
+
+	/** What a client has been told of this world's advancements, and which it knows are done. */
+	private static String advancements(Minecraft client) {
+		ClientAdvancements known = client.player.connection.getAdvancements();
+		List<String> found = new ArrayList<>();
+		known.tree().nodes().stream().filter(node -> node.holder().id().getNamespace().equals("gm")).forEach(node -> {
+			var progress = known.progress().get(node.holder());
+			String title = node.advancement().display().map(display -> display.title().getString()).orElse("");
+			String icon = node.advancement().display().map(display -> String.valueOf(display.icon().create().get(DataComponents.ITEM_MODEL))).orElse("");
+			found.add(node.holder().id() + "=" + title + "|" + icon + "|" + (progress != null && progress.isDone()));
+		});
+		found.sort(Comparator.naturalOrder());
+		return found.toString();
 	}
 
 	private static String sidebar(Scoreboard scoreboard) {

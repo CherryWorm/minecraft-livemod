@@ -212,6 +212,8 @@ A `plant` or `tinted_plant` block placed in the world, old and new, but not in a
 
 `underground` true means cave floors rather than the open surface. An `id` is permanent, like an ore's: chunks remember which ids they've had.
 
+`biomes`, here and on ores, ruins and a mob's `spawn`, takes vanilla's by their full name, or `$biome:rune_meadow` for one of this world's. Anything else is refused at the instant check.
+
 A `glow_plant` block is a plant that gives light at level 10. There are only 2, so spend them on something that matters.
 
 ## What an item is
@@ -435,10 +437,138 @@ It goes by itself when the module unloads. Needing a client module, it won't sho
 
 A machine, an item or a mob can have a screen of its own, with drawn art, item slots placed anywhere, bars that move while it's open, buttons, tabs, scrolling lists, a mob and somewhere to type. Mob conversation and trading are built from these too. It looks like the game's own screens unless you draw it otherwise, and it should stay that way, just nicer. It's all described in `"panels"` in `feature.json`, and a server module opens it and runs it. Nothing runs on anyone's computer. Someone with no companion gets the same thing as a plain chest. See 'Panels' in `docs/feature-format.md`. For a few buttons with no art, a menu made of chest slots is less work.
 
+## Raw files
+
+Anything Minecraft does with data files, a feature can do by shipping those same files, with no new engine work. They go in a `raw/` folder, laid out the way a data pack and a resource pack are. What goes in them is the 26.3 format, which isn't what older guides say, so go by `/workspace/reference-textures/vanilla/`, which has some of the game's own to start from.
+
+```
+<id>/raw/
+  data/gm/advancement/first_ember.json
+  data/gm/enchantment/ember_edge.json
+  data/gm/tags/item/ember_tools.json
+  data/minecraft/tags/item/piglin_loved.json
+  assets/gm/equipment/ember_plate.json
+  assets/gm/textures/entity/equipment/humanoid/ember_plate.png
+```
+
+`data/gm/` and `assets/gm/` are for your own, under your own readable names. Each is renamed for release to something that gives nothing away, so nothing a player can see in `/enchant`, `/give` or the pack says what's coming. Put a file straight in its folder, with no folders of your own. Never write a `gm:` id yourself. Refer to things with a token, in any raw file and in `feature.json`, including as a key, as for an enchantment's level:
+
+| Token | Is |
+|---|---|
+| `$item:`, `$block:`, `$mob:`, `$sound:` | What you declared in `feature.json` |
+| `$enchantment:`, `$advancement:`, `$loot_table:`, `$jukebox_song:`, `$painting_variant:`, and so on | A raw file, by the last part of its folder's name |
+| `$biome:` | A biome in `"biomes"` |
+| `$tag:` | One of your own tags in `data/gm/tags/`. Write `#$tag:name` for it as a tag |
+| `$equipment:`, `$texture:` | Your own art, by its file's name |
+| `$name:` | Just the new name with no `gm:`, for ids with a path in them, like `gm:entity/cow/$name:my_cow` |
+
+Another feature's goes as `$enchantment:other_feature/name`. A token that doesn't match a file fails the checks.
+
+**What needs a restart.** A release works this out for itself, and a restart holds players for a moment, so these go out in batches.
+
+| Folder | When it takes effect |
+|---|---|
+| `advancement`, `loot_table`, `predicate`, `item_modifier`, and `tags/` of anything but worldgen | At once, with no restart |
+| `enchantment`, `jukebox_song`, `painting_variant`, `banner_pattern`, `instrument`, `decorated_pot_pattern`, `damage_type`, the mob variants like `wolf_variant`, and `tags/worldgen/biome` | Only on a restart |
+
+Art in `assets/gm/` goes out at once, as a new pack. Anything that's only read on a restart is also there for good once it's out, because items and the world hold on to it by name, and the game throws away whatever refers to something that's gone. So it can change, but its file can't go.
+
+**What can't ship.** Recipes go in `"recipes"`, so they're balanced. Functions, `run_command` anywhere, and `click_event` in text are refused, because each can run any command at all. So are dialogs, villager trades, worldgen, anything that replaces part of vanilla, shaders, fonts and language files. Worldgen could place any ore in any amount, so that goes through `"ores"`, `"plants"`, `"ruins"` and `"biomes"`, whose numbers are checked. Text goes straight in a file as `{"text": "Ember Edge"}`, and unlike the rest of a feature's words it stays in English for everyone, so keep it short. The instant checks hold each file to the fields vanilla's have, because the game ignores a field it doesn't know without saying so, and stops at boot for one that's missing. What only the game's own parser can find, it finds on the test server, which never reaches the live one.
+
+**Advancements**
+
+```json
+{
+  "parent": "$advancement:ember_root",
+  "criteria": {"got": {"trigger": "minecraft:inventory_changed", "conditions": {"items": [{"items": "$item:ember"}]}}},
+  "display": {"icon": {"id": "$item:ember"}, "title": {"text": "Warm Hands"}, "description": {"text": "Hold an ember"}, "frame": "goal"},
+  "rewards": {"experience": 50, "loot": ["$loot_table:ember_gift"]}
+}
+```
+
+A first one with no `parent` starts its own tab, and needs `"background": "minecraft:gui/advancements/backgrounds/stone"` or similar. What's in one shows as soon as the one before it is done, so write it the way you would anything players can see, and use `"hidden": true` for what shouldn't show until it's earned. A reward can be experience, up to 1000, and your own loot tables. It can't be recipes: those are learned through `"knowledge"`, so they can't be got around.
+
+**Enchantments**
+
+```json
+{
+  "description": {"text": "Ember Edge"},
+  "supported_items": "#$tag:ember_tools",
+  "primary_items": "#$tag:ember_tools",
+  "weight": 5, "max_level": 3, "anvil_cost": 2, "slots": ["mainhand"],
+  "min_cost": {"base": 1, "per_level_above_first": 11},
+  "max_cost": {"base": 21, "per_level_above_first": 11},
+  "effects": {"minecraft:damage": [{"effect": {"type": "minecraft:add", "value": {"type": "minecraft:linear", "base": 1.0, "per_level_above_first": 0.5}}}]}
+}
+```
+
+To go on gear, it has to reach some:
+
+- **At an enchanting table:** add it to `data/minecraft/tags/enchantment/in_enchanting_table.json`. The table offers what's in that tag for an item in its `primary_items` that has `"minecraft:enchantable": {"value": 14}` in its components. This is how your own tools can be enchanted too, with vanilla's enchantments as well, by adding them to vanilla's tags, like `data/minecraft/tags/item/enchantable/sharp_weapon.json`.
+- **In loot:** `{"type": "minecraft:set_enchantments", "enchantments": {"$enchantment:ember_edge": 2}}` as a `modifier`, up to its `max_level`, on gear or a `minecraft:book`, which then goes on with an anvil.
+- **As it comes from a recipe or by default:** only at tier `mythic`, as with vanilla's, because a recipe has no cost to weigh it against.
+
+An enchantment is held to vanilla's best at its highest level, up to level 5. Say `"enchantments": {"ember_edge": {"tier": "beyond"}}` in `feature.json` for half as much again, or `mythic` for no limit and any effect at all. Both have to fit the stage of the feature's node.
+
+| Effect | The most it can do |
+|---|---|
+| `minecraft:damage` (with `add`) | 3, or 12.5 with `requirements`, like Smite |
+| `minecraft:damage_protection` (with `add`) | 4, or 12 for one kind of damage, like Feather Falling |
+| `minecraft:knockback` | 2 |
+| `minecraft:item_damage` (with `remove_binomial`) | A chance of 0.75 |
+| `minecraft:armor_effectiveness` | -0.6 |
+| `minecraft:repair_with_xp`, `fishing_luck_bonus`, `fishing_time_reduction`, `projectile_piercing`, `equipment_drops`, `smash_damage_per_fallen_block`, `mob_experience`, `block_experience`, `trident_return_acceleration` | What vanilla's strongest does |
+| `minecraft:attributes` | `mining_efficiency`, `oxygen_bonus`, `submerged_mining_speed`, `water_movement_efficiency`, `sneaking_speed`, `sweeping_damage_ratio`, `explosion_knockback_resistance` and `burning_time`, up to vanilla's strongest |
+| `minecraft:post_attack`, `hit_block`, `post_piercing_attack`, `projectile_spawned` | `play_sound`, `spawn_particles`, `apply_mob_effect` up to amplifier 3, and `ignite` up to 8 seconds |
+| `minecraft:prevent_armor_change`, `prevent_equipment_drop`, `crossbow_charging_sounds`, `trident_sound` | No limit, as they aren't strength |
+
+Anything else is refused below `mythic`, because it has nothing to measure it against. For more than these, use a server module.
+
+**Adding to vanilla's loot tables.** This goes in `feature.json`, and adds pools to a table without replacing what's there. Several features can add to one.
+
+```json
+"loot_additions": [
+  {"table": "minecraft:chests/simple_dungeon",
+   "pools": [{"rolls": 1, "entries": [{"type": "minecraft:item", "name": "$item:rune_shard", "weight": 3}, {"type": "minecraft:empty", "weight": 7}]}]}
+]
+```
+
+This counts as a source of what's in it. Anyone can find vanilla's loot from the start, so nothing above tier `iron` can go in, and nothing from a node that doesn't come before this feature's. Anything that sets numbers on an item, with `set_components`, answers to the tier curve like anything else, and vanilla's gear says which with `"tier": "iron"` on its entry. A raw loot table of your own is held to the same, and it only counts as a source if something points at it, like a reward or a ruin.
+
+**Tags.** A file in `data/minecraft/tags/` adds to vanilla's, with `{"values": ["$block:rune_stone", "minecraft:stone"]}`. It never replaces them, so `"replace": true` is refused, and several features can add to one. A tag in `data/gm/tags/` is your own, and a recipe can take it as `#$tag:name`. What's in a tag counts as an input to any recipe that takes that tag, in the checks too. The tags a feature can add to are `block`, `item`, `entity_type`, `fluid`, `game_event`, `enchantment`, `damage_type`, `banner_pattern`, `painting_variant`, `instrument` and `worldgen/biome`.
+
+Things that are what something in vanilla costs can't take more: `*_tool_materials`, `repairs_*`, `beacon_payment_items`, `beacon_base_blocks` and `enchantment_power_provider`. And a tag that changes how a player moves does nothing on their screen, because their game takes your block for something else: `minecraft:climbable` on anything but a `ladder` block is refused for that. See 'Ladders' in `docs/feature-format.md`.
+
+**Armour with its own look.** Worn art is an equipment file and a picture for each layer. `humanoid` is everything but the legs, and `humanoid_leggings` is the legs. Each is 64 by 32, laid out the way vanilla's are. `textures.worn_armor(color)` in `assetkit` draws a plain plate of each to paint over, and `new_armor_set` does all of this for you.
+
+```json
+{"layers": {"humanoid": [{"texture": "$texture:ember_plate"}], "humanoid_leggings": [{"texture": "$texture:ember_plate"}]}}
+```
+
+That's `raw/assets/gm/equipment/ember_plate.json`, with `raw/assets/gm/textures/entity/equipment/humanoid/ember_plate.png` and `.../humanoid_leggings/ember_plate.png`. The item says so:
+
+```json
+"ember_plate": {"display": "Ember Plate", "texture": "ember_plate", "tier": "iron",
+  "components": {"minecraft:max_damage": 240, "minecraft:equippable": {"slot": "chest", "asset_id": "$equipment:ember_plate"},
+                 "minecraft:attribute_modifiers": [{"type": "minecraft:armor", "id": "minecraft:ember_plate", "amount": 6, "operation": "add_value", "slot": "chest"}]}}
+```
+
+Art goes out at once, with no restart. The other layers are `humanoid_baby`, `wings`, `wolf_body`, `horse_body`, `llama_body`, `happy_ghast_body`, `nautilus_body` and the saddles.
+
+**Music discs**
+
+```json
+{"sound_event": {"sound_id": "$sound:ember_song"}, "description": {"text": "Ember Song"}, "length_in_seconds": 90, "comparator_output": 7}
+```
+
+That's `raw/data/gm/jukebox_song/ember_song.json`, with `"sounds": ["ember_song"]` in `feature.json` and its `assets/sounds/ember_song.ogg`. A sound of this world's has to be written with `sound_id` like this, because it isn't in the game's own list. The disc is an item with `"components": {"minecraft:jukebox_playable": "$jukebox_song:ember_song", "minecraft:max_stack_size": 1}`.
+
+**Paintings and the rest.** `raw/data/gm/painting_variant/view.json` is `{"asset_id": "$texture:view", "width": 2, "height": 1, "title": {"text": "The View"}}`, with `raw/assets/gm/textures/painting/view.png`. Add it to `data/minecraft/tags/painting_variant/placeable.json` to have paintings pick it by themselves. A `banner_pattern` needs a picture in both `textures/entity/banner` and `textures/entity/shield`. A `damage_type` is for a module to hurt things with. Mob variants, like `cow_variant`, take their art from `textures/entity/cow/` and friends, and name it as `gm:entity/cow/$name:my_cow`. Give one `"spawn_conditions": []` for something only a module or a command makes, because otherwise it can turn up among vanilla's cows, and vanilla stays vanilla.
+
 ## Using your content from a module
 
 `context.block("name")`, `context.item("name")`, `context.mob("name")` and `context.sound("name")` give you the real objects for names in `feature.json`, or `"other_feature/name"` for another feature's.
 
 ## What the engine doesn't do yet
 
-Structures larger than a chunk. A panel can only draw vanilla's mobs moving, so one of this world's is a picture there. A screen effect covers the whole screen, so there's no drawing a shader on one thing in the world. Armor can only look like vanilla's when worn, and custom tools can't take enchantments at an enchanting table. Build the closest thing that works, and say what you wanted in `host_requests`.
+Structures larger than a chunk. A panel can only draw vanilla's mobs moving, so one of this world's is a picture there. A screen effect covers the whole screen, so there's no drawing a shader on one thing in the world. Armor trims and new villager trades can't be added yet. Build the closest thing that works, and say what you wanted in `host_requests`.

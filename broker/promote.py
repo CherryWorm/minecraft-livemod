@@ -14,7 +14,7 @@ import shutil
 import sys
 import time
 
-from broker import bundles, deploy, runtime, sign
+from broker import bundles, deploy, rawpack, runtime, sign
 from broker.gates import GateFailed, advice, balance, bytecode, client, mixins, progression, shadow, static
 from orchestrator import wording
 
@@ -69,7 +69,7 @@ def compile_content(source, mods, content):
     new_ledger = bundles.assign_slots(features, json.loads(json.dumps(old_ledger)), pool)
     if content.exists():
         shutil.rmtree(content)
-    bundles.render(features, new_ledger, content, runtime.data_format(), runtime.vanilla_biome, discovery_scope(source), progression_nodes(source), runtime.vanilla_dimension_type, wording.load_languages(source))
+    bundles.render(features, new_ledger, content, runtime.data_format(), runtime.vanilla_biome, discovery_scope(source), progression_nodes(source), runtime.vanilla_dimension_type, wording.load_languages(source), runtime.vanilla_file)
     return features, pool, old_ledger, new_ledger
 
 
@@ -186,8 +186,9 @@ def choose_tier(content, jars):
     old_jars = sorted(path.name + ":" + bundles.hashlib.sha256(path.read_bytes()).hexdigest()
                       for path in (current / "jars").glob("*.jar")) if current.exists() else []
     new_jars = sorted(path.name + ":" + bundles.hashlib.sha256(path.read_bytes()).hexdigest() for path in jars)
-    # The game only reads these when it starts. A dimension that needs neither opens with no restart.
-    registries = changed("datapack/data/gm/worldgen") or changed("datapack/data/gm/dimension_type")
+    # Enchantments, music discs, biomes and dimension types, among others, are only read when the server starts. See rawpack.needs_restart.
+    # A dimension that needs none of those opens with no restart.
+    registries = rawpack.startup_files(content / "datapack") != rawpack.startup_files(old_content / "datapack")
     if old_jars != new_jars or registries or not current.exists():
         return "T3"
     # Only the jars count in modules/. The last release's signatures sit beside its jars and this one has none
