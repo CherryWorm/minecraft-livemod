@@ -17,6 +17,7 @@ CATEGORIES = ["mob", "boss fight", "character", "gear", "tool", "upgrade", "mach
 STAGE_WORDS = {"early": "early game", "mid": "mid game", "end": "late game"}
 BOARD_TAGS = {"early": "early", "mid": "mid", "end": "late"}
 BOARD_WIDTH = 34  # The sidebar grows with its longest line and never wraps, so this is about how much of the screen it takes.
+MOST_NAMED_IN_A_RELEASE = 3
 
 
 def describe(feature, graph):
@@ -28,6 +29,20 @@ def describe(feature, graph):
     stage = STAGE_WORDS.get(node["stage"]) if node else None
     category = feature.get("category") if feature.get("category") in CATEGORIES else None
     return " ".join(word for word in (stage, category) if word) or "something new"
+
+
+def about(feature, graph):
+    """A few words for everyone about one piece of work, which are as safe as what the sidebar says about it."""
+    return (not feature.get("small") and feature.get("teaser")) or describe(feature, graph)
+
+
+def release_reason(abouts):
+    """What players are told a release changes. Plain words that are ready beforehand, because it's said just before the reload."""
+    named = list(dict.fromkeys(about_one for about_one in abouts if about_one)) or ["something new"]
+    shown, more = named[:MOST_NAMED_IN_A_RELEASE], len(named) - MOST_NAMED_IN_A_RELEASE
+    if more > 0:
+        return f"{', '.join(shown)} and {more} more"
+    return f"{', '.join(shown[:-1])} and {shown[-1]}" if len(shown) > 1 else shown[0]
 
 
 def safe_teaser(text, feature):

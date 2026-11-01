@@ -672,7 +672,8 @@ class Agent:
             if node not in graph["nodes"]:
                 print(f"refusing feature {feature['id']}: node {node!r} isn't in the progression", flush=True)
                 return
-            shipped = await self.workshop.build(feature["id"], feature["spec"], node, progression.stage_of(graph, node), small=feature.get("small", False), lane=feature.get("lane"))
+            shipped = await self.workshop.build(feature["id"], feature["spec"], node, progression.stage_of(graph, node), small=feature.get("small", False), lane=feature.get("lane"),
+                                                about=feedback.about(feature, graph))
         except Exception as error:  # noqa: BLE001 - one failed feature must not stop the others
             print(f"building {feature['id']} failed: {error}", flush=True)
         finally:

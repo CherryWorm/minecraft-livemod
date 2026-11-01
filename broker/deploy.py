@@ -1,4 +1,5 @@
 """Puts a release on the live server, watches it, and rolls back on its own if it goes wrong."""
+import json
 import shutil
 import time
 
@@ -8,10 +9,21 @@ from broker.gates import shadow
 HEALTH_SECONDS = {"T1": 10, "T2": 15, "T3": 40}
 SAFE_WAIT_SECONDS = 60
 BACKUPS_KEPT = 10
+RELOADING = "Reloading the world for a moment."
+RESTARTING = "Restarting the server for a moment, and you'll be put back where you are."
+UNDOING = "Restarting the server for a moment to undo a change that went wrong, and you'll be put back where you are."
+NOTHING_NAMED = "the engine underneath the world"
+MOST_WHY = 200
 
 
 class RolledBack(Exception):
     pass
+
+
+def tell_players(text):
+    """Said just before the game freezes or restarts, so nobody's left wondering why. Plain text with no model involved, because
+    a model's answer would come after the reload it's explaining. If it can't be sent, the release goes ahead anyway."""
+    runtime.rcon("prod", "tellraw", "@a", json.dumps({"text": text, "color": "gray"}), check=False)
 
 
 def wait_for_safe_moment():
@@ -94,10 +106,11 @@ def health_check(tier, mark):
     return None
 
 
-def deploy(tier, release_folder):
-    """Applies a stored release to prod. Raises RolledBack if it had to be undone."""
+def deploy(tier, release_folder, why=""):
+    """Applies a stored release to prod, first telling players why. Raises RolledBack if it had to be undone."""
     state = runtime.load_state()
     safe = wait_for_safe_moment()
+    tell_players(f"{RESTARTING if tier == 'T3' else RELOADING} What's changing: {(why or NOTHING_NAMED)[:MOST_WHY]}.")
     mark = runtime.utc_now()
     content = release_folder / "content"
     backup_file = None
@@ -130,7 +143,8 @@ def deploy(tier, release_folder):
 def rollback(state, reason):
     """Restores the last good release. Blocks and items keep their slots, so nothing leaves the world."""
     print(f"rolling back: {reason}", flush=True)
-    chaos = runtime.RUNTIME / "prod" / "config" / "conduit" / "chaos_crash_after_ticks"
+    tell_players(UNDOING)
+    chaos =runtime.RUNTIME / "prod" / "config" / "conduit" / "chaos_crash_after_ticks"
     if chaos.exists():
         chaos.unlink()
     previous = state.get("current")

@@ -147,7 +147,7 @@ def handle(request):
     if kind == "gates":
         return promote(request["commit"], release_id, "--no-deploy")
     if kind == "release":
-        return promote(request["commit"], release_id)
+        return promote(request["commit"], release_id, f"--why={request.get('why', '')}")
     if kind == "javap":
         return javap(request["class_name"])
     return {"result": "blocked", "gate": "broker", "reason": f"Unknown request {kind}"}

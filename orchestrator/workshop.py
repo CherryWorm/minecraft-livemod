@@ -14,7 +14,7 @@ import uuid
 
 from claude_agent_sdk import AgentDefinition, create_sdk_mcp_server, tool
 
-from orchestrator import lanes, llm, preview, research, templates, tuning, world_index
+from orchestrator import feedback, lanes, llm, preview, research, templates, tuning, world_index
 
 REPO = pathlib.Path("/workspace/repo")
 PROGRESSION = "bible/progression.json"
@@ -269,6 +269,7 @@ class Ready:
     tree: pathlib.Path
     node: str
     answer: asyncio.Future
+    about: str = ""
 
 
 class Workshop:
@@ -287,10 +288,10 @@ class Workshop:
 
     # Releases -----------------------------------------------------------------------------------------------
 
-    async def _release(self, feature_id, tree, node):
+    async def _release(self, feature_id, tree, node, about=""):
         """Waits for the next release, which takes everything that's ready by then. A release costs about the same whatever's in it,
         and players get more at once. Returns what the broker said about the release that this feature's fate was settled in."""
-        ready = Ready(feature_id, tree, node, asyncio.get_running_loop().create_future())
+        ready = Ready(feature_id, tree, node, asyncio.get_running_loop().create_future(), about)
         self.ready.append(ready)
         if self.releasing is None or self.releasing.done():
             self.releasing = asyncio.create_task(self._run_releases())
@@ -330,7 +331,8 @@ class Workshop:
             names = ", ".join(ready.feature_id for ready in included)
             print(f"releasing together: {names}", flush=True)
             name = included[0].feature_id if len(included) == 1 else f"batch{len(included)}"
-            answer = await request("release", commit=_git("rev-parse", "HEAD", cwd=RELEASE_TREE), release_id=f"{name}-{int(time.time())}")
+            answer = await request("release", commit=_git("rev-parse", "HEAD", cwd=RELEASE_TREE), release_id=f"{name}-{int(time.time())}",
+                                   why=feedback.release_reason(ready.about for ready in included))
             if answer.get("result") in WENT_OUT:
                 _git("checkout", "-q", "main")
                 _git("merge", "-q", "--no-ff", "-m", f"Released {names}", RELEASE_BRANCH)
@@ -418,7 +420,7 @@ class Workshop:
             target.write_text(json.dumps(manifest, indent=1) + "\n", encoding="utf-8")
             async with self.release_lock:
                 commit = ready_commit(f"{feature_id}: {name} {field} to {value}", tree)
-                answer = await request("release", commit=commit, release_id=f"{branch}-{int(now)}")
+                answer = await request("release", commit=commit, release_id=f"{branch}-{int(now)}", why="a balance change")
                 if answer.get("result") not in ("released", "nothing_to_release"):
                     return f"Refused at {answer.get('gate')}: {answer.get('reason')}"
                 _git("checkout", "-q", "main")
@@ -470,7 +472,7 @@ class Workshop:
                              mcp_servers={"broker": _tools_for(feature_id, tree, node), "web": web, "world": self.world_server()},
                              budget=usage, lane=chosen)
 
-    async def build(self, feature_id, spec, node, stage, small=False, lane=None):
+    async def build(self, feature_id, spec, node, stage, small=False, lane=None, about=""):
         """Takes one feature from spec to released. Returns True if it reached players, False if it couldn't be done,
         and None if it had to stop for now and should be picked up again later."""
         started = time.monotonic()
@@ -527,7 +529,7 @@ class Workshop:
                 print(f"{feature_id}: shipping anyway: the problems aren't serious and the gates passed", flush=True)
 
             began = time.monotonic()
-            released = await self._release(feature_id, tree, node)
+            released = await self._release(feature_id, tree, node, about)
             timings["release"] = round(time.monotonic() - began, 1)
             if released.get("result") not in WENT_OUT:
                 feedback = f"Release failed at {released.get('gate')}: {released.get('reason')}\n\nFix it."

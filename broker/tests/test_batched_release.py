@@ -38,11 +38,11 @@ class Base(unittest.IsolatedAsyncioTestCase):
         self.bad = set()
         self.releases = []
 
-    async def broker(self, kind, commit, release_id):
+    async def broker(self, kind, commit, release_id, why=""):
         await asyncio.sleep(0)
         shipped = sorted(path for path in git("ls-tree", "--name-only", commit, "mods/genesis/features/", cwd=self.repo).splitlines())
         names = [path.rsplit("/", 1)[-1] for path in shipped]
-        self.releases.append({"kind": kind, "features": names, "id": release_id})
+        self.releases.append({"kind": kind, "features": names, "id": release_id, "why": why})
         wrong = self.bad.intersection(names)
         return {"result": "blocked", "gate": "shadow", "reason": f"{sorted(wrong)} broke it"} if wrong else {"result": "released", "tier": "T2", "stages": {}}
 
@@ -76,8 +76,8 @@ class Together(Base):
         started, carry_on = asyncio.Event(), asyncio.Event()
         real = self.broker
 
-        async def slow(kind, commit, release_id):
-            answer = await real(kind, commit, release_id)
+        async def slow(kind, commit, release_id, why=""):
+            answer = await real(kind, commit, release_id, why)
             started.set()
             await carry_on.wait()
             return answer

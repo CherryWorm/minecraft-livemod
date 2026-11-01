@@ -244,7 +244,7 @@ def patches_changed(content, old_content):
     return [patch for patch in read(content) if patch["id"] not in old_ids]
 
 
-def promote(source, release_id, deploy_to_prod, chaos_in_prod, stages, check_only=False, lint_only=False):
+def promote(source, release_id, deploy_to_prod, chaos_in_prod, stages, check_only=False, lint_only=False, why=""):
     report = {"release": release_id}
     content = runtime.WORK / "content"
     mods = stages.run("prepare", lambda: prepare_source(source))
@@ -291,7 +291,7 @@ def promote(source, release_id, deploy_to_prod, chaos_in_prod, stages, check_onl
         marker = runtime.RUNTIME / "prod" / "config" / "conduit" / "chaos_crash_after_ticks"
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("60\n", encoding="utf-8")
-    report["deploy"] = stages.run("deploy", lambda: deploy.deploy("T3" if chaos_in_prod else tier, release_folder))
+    report["deploy"] = stages.run("deploy", lambda: deploy.deploy("T3" if chaos_in_prod else tier, release_folder, why))
     report["result"] = "released"
     return report
 
@@ -304,13 +304,14 @@ def main():
     parser.add_argument("--check-only", action="store_true", help="stop after the static checks and build")
     parser.add_argument("--lint-only", action="store_true", help="stop after the static checks, with no compile")
     parser.add_argument("--chaos-in-prod", action="store_true", help="test only: crash prod to exercise rollback")
+    parser.add_argument("--why", default="", help="what players are told this release changes, in words that spoil nothing")
     args = parser.parse_args()
 
     stages = Stages(args.release_id)
     report = {"release": args.release_id}
     code = 0
     try:
-        report = promote(args.source.resolve(), args.release_id, not args.no_deploy, args.chaos_in_prod, stages, args.check_only, args.lint_only)
+        report = promote(args.source.resolve(), args.release_id, not args.no_deploy, args.chaos_in_prod, stages, args.check_only, args.lint_only, args.why)
     except GateFailed as error:
         report.update(result="blocked", gate=error.gate, reason=error.message)
         code = 2
