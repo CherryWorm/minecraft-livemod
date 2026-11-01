@@ -122,13 +122,13 @@ class QuickJobs(Case):
 
     def test_each_lint_at_the_same_time_has_its_own_lane(self):
         lanes = [daemon.free_lane("lint", {})]
-        running = {"a": daemon.Job("lint", lanes[0], None)}
+        running = {"a": daemon.Job("lint", lanes[0], None, 0)}
         lanes.append(daemon.free_lane("lint", running))
         self.assertEqual(len(set(lanes)), 2)
         self.assertNotIn("", lanes)
 
     def test_theres_a_limit_on_how_many(self):
-        running = {str(number): daemon.Job("lint", f"lint-{number}", None) for number in range(daemon.MOST_AT_ONCE)}
+        running = {str(number): daemon.Job("lint", f"lint-{number}", None, 0) for number in range(daemon.MOST_AT_ONCE)}
         self.assertIsNone(daemon.free_lane("lint", running))
         self.assertIsNotNone(daemon.free_lane("javap", running))
 
@@ -140,6 +140,88 @@ class QuickJobs(Case):
         self.slow.set()
         self.serve_until(lambda: self.answered("small") and self.answered("big"))
         self.assertEqual(self.overlap[1], set(), "two test runs overlapped")
+
+
+class CompileChecks(Case):
+    def setUp(self):
+        super().setUp()
+        for patcher in (mock.patch.object(daemon, "CHECK_LANES", 3), mock.patch.object(daemon, "memory_available_gb", return_value=30)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_several_run_side_by_side_each_in_its_own_lane(self):
+        for name in ("a", "b", "c"):
+            self.request(name, "check", commit=name)
+        self.serve_until(lambda: len(self.active) == 3)
+        self.assertEqual(len({lane for _, lane in self.ran}), 3)
+        self.assertNotIn("", {lane for _, lane in self.ran})
+        self.finish_all()
+
+    def test_any_more_wait_for_a_lane(self):
+        for name in ("a", "b", "c", "d"):
+            self.request(name, "check", commit=name)
+        self.serve_until(lambda: len(self.active) == 3)
+        for _ in range(5):
+            daemon.tick(self.running)
+        self.assertEqual(len(self.active), 3)
+        self.assertEqual(self.active, {"a", "b", "c"}, "the oldest should have gone first")
+        self.slow.set()
+        self.serve_until(lambda: self.answered("d"))
+
+    def test_they_dont_wait_for_a_test_run(self):
+        self.request("slow", "gates")
+        self.serve_until(lambda: "slow" in self.active)
+        self.request("compile", "check", commit="abc")
+        self.serve_until(lambda: "compile" in self.active)
+        self.finish_all()
+
+    def test_the_lanes_go_to_the_promote_that_builds_there(self):
+        seen = {}
+        with mock.patch.object(daemon, "promote", lambda commit, release_id, *flags, lane="": seen.update(flags=flags, lane=lane) or {"result": "passed_gates"}):
+            daemon.handle({"id": "x", "kind": "check", "commit": "abc"}, "check-2")
+        self.assertEqual(seen, {"flags": ("--check-only",), "lane": "check-2"})
+
+
+class Memory(Case):
+    def job(self, kind, age=1000):
+        return daemon.Job(kind, f"{kind}-0", None, time.monotonic() - age)
+
+    def test_one_alone_always_goes_ahead(self):
+        with mock.patch.object(daemon, "memory_available_gb", return_value=0.5):
+            self.assertTrue(daemon.room_for("gates", {}))
+            self.assertTrue(daemon.room_for("gates", {"a": self.job("lint")}))
+
+    def test_small_jobs_never_wait_for_memory(self):
+        with mock.patch.object(daemon, "memory_available_gb", return_value=0.5):
+            self.assertIsNotNone(daemon.free_lane("lint", {"a": self.job("gates")}))
+            self.assertIsNotNone(daemon.free_lane("javap", {"a": self.job("gates")}))
+
+    def test_a_big_one_beside_another_needs_room_and_some_to_spare(self):
+        running = {"a": self.job("gates")}
+        need = daemon.BIG_JOBS["check"] + daemon.KEEP_FREE_GB
+        with mock.patch.object(daemon, "memory_available_gb", return_value=need):
+            self.assertTrue(daemon.room_for("check", running))
+        with mock.patch.object(daemon, "memory_available_gb", return_value=need - 0.1):
+            self.assertFalse(daemon.room_for("check", running))
+
+    def test_what_a_job_that_just_started_will_use_is_counted(self):
+        need = daemon.BIG_JOBS["check"] + daemon.KEEP_FREE_GB
+        with mock.patch.object(daemon, "memory_available_gb", return_value=need + 1):
+            self.assertTrue(daemon.room_for("check", {"a": self.job("gates")}))
+            self.assertFalse(daemon.room_for("check", {"a": self.job("gates", age=1)}))
+
+    def test_waiting_for_memory_starts_when_theres_room(self):
+        with mock.patch.object(daemon, "CHECK_LANES", 2), mock.patch.object(daemon, "memory_available_gb", return_value=1) as memory:
+            self.request("a", "check", commit="a")
+            self.request("b", "check", commit="b")
+            self.serve_until(lambda: "a" in self.active)
+            for _ in range(5):
+                daemon.tick(self.running)
+            self.assertEqual(self.active, {"a"})
+            memory.return_value = 30
+            self.running = {name: job._replace(began=0) for name, job in self.running.items()}
+            self.serve_until(lambda: "b" in self.active)
+            self.finish_all()
 
 
 class Crashes(Case):
@@ -284,6 +366,29 @@ class Folders(unittest.TestCase):
             answer = daemon.promote("abc", "r", "--lint-only", lane="lint-0")
         self.assertEqual(answer["result"], "blocked")
         self.assertIn("it died", answer["reason"])
+
+    def test_each_lane_starts_its_gradle_files_from_the_main_ones(self):
+        (self.root / "cache" / "gradle" / "caches").mkdir(parents=True)
+        (self.root / "cache" / "gradle" / "caches" / "a.jar").write_text("jar", encoding="utf-8")
+        (self.root / "cache" / "gradle" / "caches" / "modules-2.lock").write_text("somebody's", encoding="utf-8")
+        calls = []
+
+        def sync(source, target, *excludes):
+            calls.append((source, excludes))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["cp", "-r", str(source), str(target)], check=True)
+
+        with mock.patch.object(runtime, "RUNTIME", self.root), mock.patch.object(runtime, "LANE", "check-1"), mock.patch.object(runtime, "sync_tree", sync):
+            env = runtime.tools_cache()
+            self.assertEqual(env, {"TOOLS_CACHE": str(self.root / "lanes" / "check-1" / "cache")})
+            self.assertTrue((self.root / "lanes" / "check-1" / "cache" / "gradle" / "caches" / "a.jar").exists())
+            self.assertIn("*.lock", calls[0][1])
+            self.assertEqual(runtime.tools_cache(), env)
+            self.assertEqual(len(calls), 1, "only the first build needs a copy")
+
+    def test_no_lane_means_the_main_gradle_files(self):
+        with mock.patch.object(runtime, "LANE", ""):
+            self.assertEqual(runtime.tools_cache(), {})
 
     def test_the_state_file_is_never_half_written(self):
         state_file = self.root / "state.json"

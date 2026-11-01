@@ -97,7 +97,7 @@ def progression_nodes(source):
 def build(mods):
     result = runtime.run(
         ["./scripts/stack.sh", "run", "--rm", "-T", "builder", "./gradlew", "--no-daemon", "--console=plain", "build"],
-        check=False, env={"MODS_DIR": str(mods)}, timeout=600,
+        check=False, env={"MODS_DIR": str(mods), **runtime.tools_cache()}, timeout=600,
     )
     if result.returncode != 0:
         errors = [line for line in result.stdout.splitlines() if "error:" in line or "FAILED" in line]

@@ -47,6 +47,21 @@ def agent_disabled():
     return AGENT_DISABLED.exists() or OWNER_KILL_SWITCH.exists()
 
 
+def tools_cache():
+    """Compose settings that give this lane's builds a copy of Gradle's files of their own. Loom holds a lock on them while it sets a
+    build up, and another build fails after a minute of waiting, so they can't be shared by builds at the same time. Each copy
+    starts from the main one, so it doesn't have to download everything, and it's mounted at the same place, because Gradle and
+    Loom remember paths. The locks are left out because they'd say a build that's running now in the main one was running here."""
+    if not LANE:
+        return {}
+    cache = lane_folder(LANE) / "cache"
+    if not cache.exists():
+        partial = cache.with_name("cache.partial")
+        sync_tree(RUNTIME / "cache", partial, "*.lock", "daemon/")
+        partial.rename(cache)
+    return {"TOOLS_CACHE": str(cache)}
+
+
 def run(command, *, check=True, capture=True, env=None, timeout=None, cwd=REPO):
     """Runs a command with stdin closed, so nothing it starts can swallow a caller's input."""
     result = subprocess.run(

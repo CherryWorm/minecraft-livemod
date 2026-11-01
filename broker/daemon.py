@@ -10,6 +10,7 @@ Usage: python3 -m broker.daemon
 import collections
 import json
 import os
+import pathlib
 import re
 import shutil
 import subprocess
@@ -36,6 +37,12 @@ QUICK = ("lint", "check", "javap", "server_icon", "set_rule", "server_errors")  
 # These don't wait for anything. They share nothing with whatever else is running, and they take seconds at most.
 AT_ONCE = ("lint", "javap", "server_icon", "set_rule", "server_errors")
 MOST_AT_ONCE = 16  # Of each kind. Far more than the builders can ask for at a time, so it only matters if something floods the broker.
+CHECK_LANES = int(runtime.ENV.get("CHECK_LANES", "1"))  # Compile checks side by side. Each lane's Gradle files and work folder take about 1.5 GB of disk.
+# These need real memory, and the live server must never go short. So one beside others only starts if there's room for what it'll use,
+# as well as this much to spare, which is what lets the live server grow to its limit. Measured in GB.
+BIG_JOBS = {"check": 3, "gates": 4, "release": 4}
+KEEP_FREE_GB = 4
+SETTLING_SECONDS = 60  # A job has reached its full size by about now. Until then what it's going to use isn't in the system's figures yet.
 POLL_SECONDS = 0.25
 # Written by scripts/update-engine.sh. Nothing new starts while it's here, so what's running can finish before the broker stops.
 DRAINING = runtime.BROKER / "draining"
@@ -171,7 +178,7 @@ def handle(request, lane=""):
     if kind == "set_rule":
         return set_rule(request["rule"], request["value"])
     if kind == "check":
-        return promote(request["commit"], release_id, "--check-only")
+        return promote(request["commit"], release_id, "--check-only", lane=lane)
     if kind == "gates":
         return promote(request["commit"], release_id, "--no-deploy")
     if kind == "release":
@@ -207,16 +214,35 @@ def next_request(pending):
 
 def lanes_for(kind):
     """Which lanes a kind of job can run in, in the order they're used. A lane holds one job at a time. Jobs that use the shadow
-    server or build anything still share the one lane, because there's one of each and releases must not overlap."""
+    server still share the one lane, because there's one of it and releases must not overlap."""
     if kind in AT_ONCE:
         return [f"{kind}-{number}" for number in range(MOST_AT_ONCE)]
+    if kind == "check":
+        return [f"check-{number}" for number in range(CHECK_LANES)]
     return [""]
+
+
+def memory_available_gb():
+    for line in pathlib.Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+        if line.startswith("MemAvailable:"):
+            return int(line.split()[1]) / 1024 ** 2
+    raise RuntimeError("The system doesn't say how much memory is available.")
+
+
+def room_for(kind, running):
+    """Only big jobs need room, and only beside other big jobs. One by itself always goes ahead, or a small machine would never do anything."""
+    big = [job for job in running.values() if job.kind in BIG_JOBS]
+    if kind not in BIG_JOBS or not big:
+        return True
+    settling = sum(BIG_JOBS[job.kind] for job in big if time.monotonic() - job.began < SETTLING_SECONDS)
+    return memory_available_gb() - settling >= BIG_JOBS[kind] + KEEP_FREE_GB
 
 
 def free_lane(kind, running):
     """The lane a job of this kind can start in now, or None if it has to wait."""
     taken = {job.lane for job in running.values()}
-    return next((lane for lane in lanes_for(kind) if lane not in taken), None)
+    lane = next((lane for lane in lanes_for(kind) if lane not in taken), None)
+    return lane if lane is not None and room_for(kind, running) else None
 
 
 def draining():
@@ -226,7 +252,7 @@ def draining():
         return False
 
 
-Job = collections.namedtuple("Job", "kind lane thread")
+Job = collections.namedtuple("Job", "kind lane thread began")
 
 
 def finish(path, request, answer, seconds, waited):
@@ -259,7 +285,7 @@ def start_job(path, running):
         return
     lane = free_lane(request["kind"], running)
     thread = threading.Thread(target=run_job, args=(path, request, lane, waited), daemon=True)
-    running[path.name] = Job(request["kind"], lane, thread)
+    running[path.name] = Job(request["kind"], lane, thread, time.monotonic())
     thread.start()
 
 
@@ -315,6 +341,8 @@ def main():
     if client_jar.exists():
         reference_textures.extract(client_jar, WORKSPACE / "reference-textures")
     DRAINING.unlink(missing_ok=True)
+    # If memory does run out, the system should stop this, and what it's running, rather than the live server. See started_again.
+    pathlib.Path("/proc/self/oom_score_adj").write_text("500", encoding="utf-8")
     print("broker waiting for requests", flush=True)
     retry_suspects()
     running = {}

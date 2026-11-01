@@ -133,6 +133,12 @@ Once anyone runs a client module, everyone needs the companion. Turn that on wit
 
 The kill switch stops releases and silences the character. The game keeps running, and everything already shipped keeps working.
 
+## How the broker shares the machine
+
+Lookups, lint and the other small jobs start as soon as they're asked for. Each job that's bigger than that has a lane, which is a set of folders under `runtime/lanes` that nothing else uses, and its own copy of Gradle's files. `CHECK_LANES` in `.env` says how many compile checks can run side by side, 1 by default. A lane costs about 1.4 GB of disk, and it's copied from `runtime/cache` the first time it's used. Changing the number needs `systemctl restart livingmod-broker`, and nothing else.
+
+A bigger job beside others only starts if there's room for it and 4 GB to spare, which leaves the live server room to grow to its limit. `grep -E 'waiting [0-9]{2,}' <(journalctl -u livingmod-broker)` shows anything that's had to wait long. If memory runs out anyway, the system stops the broker and the builds, rather than the live server.
+
 ## What the numbers hold it to
 
 Everything the agent builds is checked against limits in `broker/gates/progression.py` and `broker/gates/static.py`: gear and mob strength by stage, automation rates, and how many moving parts a model can have. They're starting values, so tune them after you've played. Real frame rates on your friends' PCs are the thing to watch, because the test client renders in software and can't measure them.

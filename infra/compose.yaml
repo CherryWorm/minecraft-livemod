@@ -149,13 +149,17 @@ services:
     user: "1000:1000"
     # 0 means no limit. On a shared host this stops a build from taking cores away from the live server.
     cpus: ${TOOLS_CPUS:-0}
+    # Several can run at once, so these make sure that if cores or memory run short, it's these that lose out and not the live server.
+    cpu_shares: 256
+    oom_score_adj: 500
     working_dir: /work
     environment:
       GRADLE_USER_HOME: /cache/gradle
       HOME: /cache/home
     volumes:
       - ${MODS_DIR:-../mods}:/work
-      - ${RUNTIME_DIR}/cache:/cache
+      # A job running beside others has its own copy. See tools_cache in broker/runtime.py.
+      - ${TOOLS_CACHE:-${RUNTIME_DIR}/cache}:/cache
     networks:
       - public
 
