@@ -5,7 +5,7 @@ import json
 import re
 
 FEATURE_ID = r"[a-z][a-z0-9_]{1,40}"
-OWN_NAME = re.compile(r"\$(block|item|mob|sound):([a-z0-9_]+)(?![a-z0-9_/])")
+OWN_NAME = re.compile(r"\$(block|item|mob|sound|biome|dimension):([a-z0-9_]+)(?![a-z0-9_/])")
 CONFLICT_HUNK = re.compile(r"^<<<<<<< .*?\n(.*?)^=======\n.*?^>>>>>>> .*?\n", re.MULTILINE | re.DOTALL)
 # The kinds of thing another feature can be added to. The rest of a manifest, like its node, is its own business.
 ADDABLE = ("knowledge", "blocks", "items", "mobs", "ruins", "recipes", "changes_reached")

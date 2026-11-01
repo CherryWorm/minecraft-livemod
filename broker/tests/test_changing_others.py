@@ -464,6 +464,12 @@ class Additions(unittest.TestCase):
         self.assertEqual(others.apply_additions(manifests), [])
         self.assertEqual(manifests["owner"]["blocks"]["cable"]["connects"], ["$block:adder/battery"])
 
+    def test_a_dimension_or_biome_it_names_is_its_own_too(self):
+        manifests = self.adding({"mobs": {"crab": {"spawn": {"biomes": ["minecraft:plains"]}}}},
+                                mobs__crab__spawn__dimension="$dimension:moor", mobs__crab__spawn__biomes=["$biome:fen", "$biome:owner/reef"])
+        self.assertEqual(others.apply_additions(manifests), [])
+        self.assertEqual(manifests["owner"]["mobs"]["crab"]["spawn"], {"biomes": ["minecraft:plains", "$biome:adder/fen", "$biome:owner/reef"], "dimension": "$dimension:adder/moor"})
+
     def test_it_can_give_the_reason_for_changing_what_players_have(self):
         manifests = self.adding({"blocks": {"cable": {}}}, changes_reached={"cable": REASON})
         self.assertEqual(others.apply_additions(manifests), [])

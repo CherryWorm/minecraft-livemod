@@ -12,7 +12,7 @@ from PIL import Image
 
 from broker import bundles, promote
 from broker.gates import GateFailed, static
-from orchestrator import world_index
+from orchestrator import others, world_index
 
 POOL = {"families": {"stone": {"first": 0, "count": 4}, "ore": {"first": 10, "count": 4}, "plant": {"first": 20, "count": 4}}, "item_count": 4, "mobs": {"monster": 1, "creature": 1}}
 FLAT = {"type": "minecraft:flat", "settings": {"biome": "minecraft:plains", "layers": [], "structure_overrides": []}}
@@ -70,14 +70,16 @@ class Slots(unittest.TestCase):
 
 
 class Rendering(unittest.TestCase):
-    def render(self, manifest):
+    def render(self, *manifests):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
-        folder = pathlib.Path(temp.name) / manifest["id"]
-        (folder / "assets" / "textures").mkdir(parents=True)
-        for name in manifest.get("blocks", {}):
-            Image.new("RGBA", (16, 16), (1, 2, 3, 255)).save(folder / "assets" / "textures" / f"{name}.png")
-        found = {manifest["id"]: {"manifest": manifest, "dir": folder}}
+        found = {}
+        for manifest in manifests:
+            folder = pathlib.Path(temp.name) / manifest["id"]
+            (folder / "assets" / "textures").mkdir(parents=True)
+            for name in manifest.get("blocks", {}):
+                Image.new("RGBA", (16, 16), (1, 2, 3, 255)).save(folder / "assets" / "textures" / f"{name}.png")
+            found[manifest["id"]] = {"manifest": manifest, "dir": folder}
         ledger = bundles.assign_slots(found, bundles.empty_ledger(), POOL)
         out = pathlib.Path(temp.name) / "out"
         bundles.render(found, ledger, out, DATA_FORMAT, vanilla_biome=lambda name: PLAINS, vanilla_type=lambda name: OVERWORLD_TYPE)
@@ -130,6 +132,14 @@ class Rendering(unittest.TestCase):
         self.assertEqual(ores["there"]["dimension"], "gm:d0001")
         self.assertNotIn("dimension", ores["here"])
         self.assertEqual(config("surface_patches.json")[0]["dimension"], "gm:d0001")
+        self.assertEqual(config("ruin_patches.json")[0]["dimension"], "gm:d0001")
+
+    def test_a_feature_can_move_anothers_ruin_into_its_own_dimension(self):
+        ruin = {"id": "pile_there", "parts": [{"x": 0, "y": 0, "z": 0, "block": "minecraft:stone"}], "on": ["minecraft:dirt"], "replaces": ["minecraft:air"], "chance": 0.1, "minY": 0, "maxY": 9}
+        manifests = [{"id": "owner", "ruins": {"pile": ruin}},
+                     {"id": "adder", "dimensions": {"moor": dimension()}, "adds_to": {"owner": {"why": "Its ruin belongs out there", "ruins.pile.dimension": "$dimension:moor"}}}]
+        self.assertEqual(others.apply_additions({manifest["id"]: manifest for manifest in manifests}), [])
+        config, _, _ = self.render(*manifests)
         self.assertEqual(config("ruin_patches.json")[0]["dimension"], "gm:d0001")
 
     def test_an_unknown_dimension_is_refused(self):
