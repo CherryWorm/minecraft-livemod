@@ -43,6 +43,38 @@ class Order(unittest.TestCase):
         self.assertEqual(daemon.next_request([small, self.request("c", "lint")]).name, "c.json")
 
 
+class CrashingRequests(unittest.TestCase):
+    """A request that kills the broker has to stop being tried, or nothing behind it ever runs."""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.folder = pathlib.Path(folder.name)
+        for name, value in (("REQUESTS", self.folder), ("STARTED", self.folder / "started.json")):
+            patcher = mock.patch.object(daemon, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def waiting(self, name):
+        (self.folder / f"{name}.json").write_text("{}", encoding="utf-8")
+
+    def test_each_start_is_counted_even_with_others_in_between(self):
+        self.waiting("poison")
+        self.waiting("quick")
+        self.assertEqual(daemon.started_again("poison"), 1)
+        self.assertEqual(daemon.started_again("quick"), 1)
+        self.assertEqual(daemon.started_again("poison"), 2)
+        self.assertGreater(daemon.started_again("poison"), daemon.TRIES_BEFORE_REFUSING)
+
+    def test_requests_that_are_gone_are_forgotten(self):
+        self.waiting("old")
+        daemon.started_again("old")
+        (self.folder / "old.json").unlink()
+        self.waiting("new")
+        daemon.started_again("new")
+        self.assertEqual(list(json.loads(daemon.STARTED.read_text(encoding="utf-8"))), ["new"])
+
+
 class Rules(unittest.TestCase):
     def setUp(self):
         patcher = mock.patch.object(daemon.runtime, "rcon")

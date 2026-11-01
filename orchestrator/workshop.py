@@ -25,6 +25,7 @@ REFERENCE_TEXTURES = pathlib.Path("/workspace/reference-textures")
 FEATURE_RESEARCH = 4
 TUNES_PER_HOUR = 6
 REQUEST_TIMEOUT = {"lint": 300, "check": 300, "gates": 1800, "release": 1800, "javap": 300, "server_icon": 300, "set_rule": 300}  # Generous, because they queue behind whatever's running.
+KEEP_ASKING = ("gates", "release")  # A broker that's down or far behind isn't something a builder can fix, so these wait for it, which costs nothing.
 # Turns and usage for one attempt, and how many attempts. The later a stage is, the bigger its features can be, and
 # nobody's waiting on them, because they're built in the background while people play.
 STAGE_LIMITS = {"early": (60, 8.0, 3), "mid": (120, 16.0, 4), "end": (200, 30.0, 5)}
@@ -164,18 +165,24 @@ async def checked_against_main(kind, message, tree, feature_id, node, **fields):
 
 async def request(kind, **fields):
     """Asks the broker, which runs outside this container, and waits for its answer."""
-    request_id = uuid.uuid4().hex[:12]
     REQUESTS.mkdir(parents=True, exist_ok=True)
-    temporary = REQUESTS / f".{request_id}.tmp"
-    temporary.write_text(json.dumps({"id": request_id, "kind": kind, **fields}), encoding="utf-8")
-    temporary.rename(REQUESTS / f"{request_id}.json")
-    answer = RESPONSES / f"{request_id}.json"
-    deadline = time.monotonic() + REQUEST_TIMEOUT[kind]
-    while time.monotonic() < deadline:
-        if answer.exists():
-            return json.loads(answer.read_text(encoding="utf-8"))
-        await asyncio.sleep(0.5)
-    return {"result": "blocked", "gate": "broker", "reason": f"The broker didn't answer a {kind} request in time."}
+    while True:
+        request_id = uuid.uuid4().hex[:12]
+        temporary = REQUESTS / f".{request_id}.tmp"
+        temporary.write_text(json.dumps({"id": request_id, "kind": kind, **fields}), encoding="utf-8")
+        temporary.rename(REQUESTS / f"{request_id}.json")
+        answer = RESPONSES / f"{request_id}.json"
+        deadline = time.monotonic() + REQUEST_TIMEOUT[kind]
+        while time.monotonic() < deadline:
+            if answer.exists():
+                return json.loads(answer.read_text(encoding="utf-8"))
+            await asyncio.sleep(0.5)
+        # Nobody's waiting for it now, so it mustn't run later, and a release mustn't go out by surprise. If that release
+        # had already started, asking again finds it's out, because there's then nothing left to release.
+        (REQUESTS / f"{request_id}.json").unlink(missing_ok=True)
+        print(f"the broker didn't answer a {kind} request in time", flush=True)
+        if kind not in KEEP_ASKING:
+            return {"result": "blocked", "gate": "broker", "reason": f"The broker didn't answer a {kind} request in time."}
 
 
 def _text(text):

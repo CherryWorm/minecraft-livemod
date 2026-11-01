@@ -28,6 +28,8 @@ CACHE_JAR = "/cache/gradle/caches/fabric-loom/26.3/minecraft-client.jar"
 AGENT_ICON = WORKSPACE / "icon" / "server-icon.png"
 PROXY_DATA = runtime.RUNTIME / "velocity"
 ICON_SIZE = 64
+STARTED = runtime.BROKER / "started.json"
+TRIES_BEFORE_REFUSING = 2  # How many times one request can take the whole broker down before it's answered instead.
 QUICK = ("lint", "check", "javap", "server_icon", "set_rule")  # None of these touch the shadow server, and someone is waiting on each one.
 # Only these, because the rest of what a server command can do would get around the gates. All of them apply to everyone.
 RULES = {"players_sleeping_percentage": lambda value: isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 100,
@@ -151,6 +153,18 @@ def handle(request):
     return {"result": "blocked", "gate": "broker", "reason": f"Unknown request {kind}"}
 
 
+def started_again(request_id):
+    """How many times this request has been started. The record outlives the broker, because that's what it's for: a job
+    that kills the broker is otherwise picked up again as soon as it's back, and everything else waits behind it forever."""
+    started = json.loads(STARTED.read_text(encoding="utf-8")) if STARTED.exists() else {}
+    started = {key: count for key, count in started.items() if (REQUESTS / f"{key}.json").exists()}
+    started[request_id] = started.get(request_id, 0) + 1
+    temporary = STARTED.with_suffix(".tmp")
+    temporary.write_text(json.dumps(started), encoding="utf-8")
+    temporary.replace(STARTED)
+    return started[request_id]
+
+
 def next_request(pending):
     """Still one at a time, because there's one shadow server and releases must not overlap. But with several builders
     working, a quick check shouldn't wait behind everyone else's full test run, and a small change a player is waiting
@@ -174,19 +188,27 @@ def main():
         if not pending:
             time.sleep(0.5)
             continue
-        path = next_request(pending)
-        request = json.loads(path.read_text(encoding="utf-8"))
-        started = time.monotonic()
         try:
-            answer = handle(request)
-        except Exception as error:  # noqa: BLE001 - the agent should hear about any failure, not hang
-            answer = {"result": "blocked", "gate": "broker", "reason": f"{type(error).__name__}: {error}"}
+            path = next_request(pending)
+            request = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            continue  # Whoever asked has stopped waiting and taken it back.
+        started = time.monotonic()
+        if started_again(request["id"]) > TRIES_BEFORE_REFUSING:
+            answer = {"result": "blocked", "gate": "broker",
+                      "reason": f"The broker itself died each of the {TRIES_BEFORE_REFUSING} times it ran this, so it hasn't been checked. "
+                                "That may well not be anything in your work."}
+        else:
+            try:
+                answer = handle(request)
+            except Exception as error:  # noqa: BLE001 - the agent should hear about any failure, not hang
+                answer = {"result": "blocked", "gate": "broker", "reason": f"{type(error).__name__}: {error}"}
         print(f"{request['kind']} {request['id']}: {answer.get('result', 'answered')} "
               f"in {time.monotonic() - started:.1f}s", flush=True)
         temporary = RESPONSES / f".{request['id']}.tmp"
         temporary.write_text(json.dumps(answer), encoding="utf-8")
         temporary.rename(RESPONSES / f"{request['id']}.json")
-        path.unlink()
+        path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

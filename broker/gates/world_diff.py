@@ -5,6 +5,9 @@ This is the safety check for retroactive worldgen. It deliberately shares no cod
 bug in the engine can't hide itself. Fails if our block appears anywhere it wasn't allowed to, if
 anything changed inside a protected volume, or if any block entity (chests and so on) changed.
 
+Goes through the worlds one chunk at a time, and doesn't parse a chunk whose stored bytes are the same in both. A parsed
+chunk takes far more memory than it does on disk, so a world people have really played wouldn't fit if it were all loaded.
+
 Usage: world_diff.py BEFORE AFTER --ore gm:s0001 --allow minecraft:stone minecraft:deepslate
                      [--protect X1 Y1 Z1 X2 Y2 Z2]... [--report-limit N]
 BEFORE and AFTER are folders holding .mca files.
@@ -15,9 +18,13 @@ import gzip
 import json
 import math
 import pathlib
+import resource
 import struct
 import sys
 import zlib
+
+# Far more than one region at a time needs. Going over fails this check, instead of the system killing whatever it chooses.
+MEMORY_LIMIT = 2 * 1024 ** 3
 
 
 def read_nbt(data):
@@ -82,11 +89,12 @@ def read_nbt(data):
     return payload(root)
 
 
-def read_chunks(path):
-    """Yields (chunk x, chunk z, chunk data) for every chunk in one region file."""
+def stored_chunks(path):
+    """Every chunk in one region file as it's stored, compression and bytes, by its place in the file."""
     raw = path.read_bytes()
     if len(raw) < 8192:
-        return
+        return {}
+    stored = {}
     for index in range(1024):
         location = struct.unpack_from(">I", raw, index * 4)[0]
         offset, sectors = location >> 8, location & 0xFF
@@ -94,19 +102,38 @@ def read_chunks(path):
             continue
         start = offset * 4096
         length = struct.unpack_from(">I", raw, start)[0]
-        kind = raw[start + 4]
-        body = raw[start + 5:start + 4 + length]
-        data = gzip.decompress(body) if kind == 1 else zlib.decompress(body) if kind == 2 else body
-        chunk = read_nbt(data)
+        stored[index] = (raw[start + 4], raw[start + 5:start + 4 + length])
+    return stored
+
+
+def parse_chunk(kind, body):
+    data = gzip.decompress(body) if kind == 1 else zlib.decompress(body) if kind == 2 else body
+    return read_nbt(data)
+
+
+def read_chunks(path):
+    """Yields (chunk x, chunk z, chunk data) for every chunk in one region file."""
+    for kind, body in stored_chunks(path).values():
+        chunk = parse_chunk(kind, body)
         yield chunk.get("xPos"), chunk.get("zPos"), chunk
 
 
-def load_world(folder):
-    chunks = {}
-    for path in sorted(pathlib.Path(folder).glob("*.mca")):
-        for x, z, chunk in read_chunks(path):
-            chunks[(x, z)] = chunk
-    return chunks
+def chunk_pairs(before, after):
+    """Yields (position, old, new) for every chunk in the first world that isn't identical in the second, one at a time.
+    A chunk's place in a region file follows from where it is, so the same file and place is the same chunk. New is None
+    if it's gone. Ends with (None, how many were identical, None)."""
+    skipped = 0
+    for path in sorted(pathlib.Path(before).glob("*.mca")):
+        other = pathlib.Path(after) / path.name
+        new_stored = stored_chunks(other) if other.exists() else {}
+        for index, old_stored in stored_chunks(path).items():
+            new = new_stored.get(index)
+            if new == old_stored:
+                skipped += 1
+                continue
+            old = parse_chunk(*old_stored)
+            yield (old.get("xPos"), old.get("zPos")), old, parse_chunk(*new) if new else None
+    yield None, skipped, None
 
 
 def block_name(entry):
@@ -184,8 +211,7 @@ def main():
     parser.add_argument("--allow-new-block-entities", action="store_true", help="existing ones must still be unchanged")
     args = parser.parse_args()
 
-    before = load_world(args.before)
-    after = load_world(args.after)
+    resource.setrlimit(resource.RLIMIT_AS, (MEMORY_LIMIT, MEMORY_LIMIT))
     allowed = set(args.allow)
     protected = [tuple(box) for box in args.protect]
 
@@ -196,7 +222,8 @@ def main():
     forgotten = []
     chunks_with_ore = 0
     unfinished = 0
-    missing = [pos for pos in before if pos not in after]
+    compared = 0
+    missing = []
 
     def in_protected(x, y, z):
         return any(
@@ -204,14 +231,18 @@ def main():
             for a, b, c, d, e, f in protected
         )
 
-    for pos, old in before.items():
-        new = after.get(pos)
+    for pos, old, new in chunk_pairs(args.before, args.after):
+        if pos is None:
+            compared += old
+            continue
         if new is None:
+            missing.append(pos)
             continue
         # Land still being generated when the copy was taken hasn't been seen by anyone, and carries on changing.
         if old.get("Status") != "minecraft:full":
             unfinished += 1
             continue
+        compared += 1
         if not entities_kept(old.get("block_entities", []), new.get("block_entities", []), args.allow_new_block_entities):
             bad_entities.append(pos)
         # Touched records can only ever grow. Shrinking means the mod forgot what players did.
@@ -244,7 +275,7 @@ def main():
                     bad_protected.append((x, y, z, old_name, new_name))
         chunks_with_ore += placed_here > 0
 
-    print(f"chunks compared: {len(before) - len(missing) - unfinished}, still generating when copied: {unfinished}, "
+    print(f"chunks compared: {compared}, still generating when copied: {unfinished}, "
           f"chunks missing afterwards: {len(missing)}")
     ore_total = sum(count for (_, new_name), count in transitions.items() if new_name == args.ore)
     print(f"chunks that received ore: {chunks_with_ore}, {ore_total} blocks placed")
