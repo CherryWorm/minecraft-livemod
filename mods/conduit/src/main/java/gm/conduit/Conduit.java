@@ -5,6 +5,7 @@ import gm.conduit.bridge.Board;
 import gm.conduit.effects.SlotEffects;
 import gm.conduit.fluids.SlotFluids;
 import gm.conduit.bridge.Bridge;
+import gm.conduit.bridge.SafeMoment;
 import gm.conduit.dimensions.Dimensions;
 import gm.conduit.knowledge.Codex;
 import gm.conduit.knowledge.Knowledge;
@@ -72,6 +73,7 @@ public final class Conduit implements ModInitializer {
 		ModulePush.register();
 		WorldEffects.register();
 		Bridge.register();
+		SafeMoment.register();
 		Board.register();
 		ConduitCommands.register();
 		KillSwitch.register();

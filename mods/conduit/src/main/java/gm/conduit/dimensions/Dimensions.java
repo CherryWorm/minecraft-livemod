@@ -212,6 +212,10 @@ public final class Dimensions {
 			if (isClear(level, spot) && isClear(level, spot.above()) && isFirm(level, spot.below())) {
 				return spot;
 			}
+			// Under open water, the first place to stand could be anything, deep in a cave or a sealed room with mobs in it. So that's no place to arrive.
+			if (!level.dimensionType().hasCeiling() && !level.getBlockState(spot).getFluidState().isEmpty()) {
+				return null;
+			}
 		}
 		return null;
 	}
