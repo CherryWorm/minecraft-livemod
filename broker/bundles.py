@@ -618,6 +618,14 @@ def _copy_screen_effects(feature, feature_id, pack):
         ]})
 
 
+def _machine_grid(recipe, feature_id, ledger):
+    """A shaped machine recipe, row by row, with nothing in the places a key's space leaves empty."""
+    shape = recipe["shape"]
+    width = max(len(row) for row in shape)
+    key = _resolve_tokens(recipe["key"], feature_id, ledger)
+    return {"width": width, "cells": [key.get(mark, "") for row in shape for mark in row.ljust(width)]}
+
+
 def _machine_home(features, feature_id, machine):
     """Whose list a machine recipe goes on. A machine's module only asks for what's on its own feature's list, so a recipe for
     another feature's machine has to go there, or it never fires even though recipe viewers show it. A feature can name a
@@ -854,6 +862,9 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
             if definition:
                 _write_json(pack / f"assets/gm/items/{slot}.json", {"model": definition})
             defaults = {key: item[key] for key in ("components", "places") if key in item}
+            if "bar" in item:
+                # A client only draws one for something that doesn't stack, and every stack starts here until a module changes it.
+                defaults["components"] = {**defaults.get("components", {}), "minecraft:max_stack_size": 1, "minecraft:custom_data": {"gm_bar": item["bar"]}}
             if "use" in item:
                 defaults["components"] = {**defaults.get("components", {}), "minecraft:consumable": {
                     "consume_seconds": item["use"].get("seconds", 1), "animation": item["use"].get("animation", "none"),
@@ -877,17 +888,25 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
                                             "machine": recipe.get("machine"), "type": recipe.get("json", {}).get("type")}
             if isinstance(recipe.get("machine"), str):
                 route = recipe.get("route")
-                machines.setdefault(_machine_home(features, feature_id, recipe["machine"]), []).append({
+                entry = {
                     "id": source,
                     "mode": recipe.get("mode"),
-                    "inputs": _resolve_tokens(recipe["inputs"], feature_id, ledger),
                     "outputs": _resolve_tokens(recipe.get("outputs") or [recipe["output"]], feature_id, ledger),
                     "needs": [route if "/" in route else f"{feature_id}/{route}"] if route else [],
-                })
+                }
+                if "shape" in recipe:
+                    entry["grid"] = _machine_grid(recipe, feature_id, ledger)
+                    entry["inputs"] = [{"item": cell, "count": 1} for cell in entry["grid"]["cells"] if cell]
+                else:
+                    entry["inputs"] = _resolve_tokens(recipe["inputs"], feature_id, ledger)
+                machines.setdefault(_machine_home(features, feature_id, recipe["machine"]), []).append(entry)
                 continue
             body = _resolve_tokens(recipe["json"], feature_id, ledger)
             if isinstance(body.get("result"), dict) and "components" in body["result"]:
                 body["result"]["components"] = _wearable(body["result"]["components"])
+            if "carry" in recipe:
+                # Its own kind of recipe, wrapped round the one written, so what it uses and makes reads the same to everything else.
+                body = {"type": "gm:carry", "recipe": body, "what": recipe["carry"]["what"], "from": _resolve_tokens(recipe["carry"]["from"], feature_id, ledger)}
             _write_json(datapack / f"data/gm/recipe/{hashed}.json", body)
             if recipe.get("mode") == "known" and recipe.get("route"):
                 recipe_routes.append((f"gm:{hashed}", source, recipe["route"]))

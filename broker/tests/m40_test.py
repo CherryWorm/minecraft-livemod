@@ -3,7 +3,7 @@
 both ways, comparators, light a module sets, blocks nothing can break, and a model's named parts moved, tinted and scaled. Reuses whatever world is
 there, as long as it has land near the spot, so a run needs no reset. Name the stages to run, or leave them out for all of them.
 
-Usage: python3 -m broker.tests.m40_test [blocks mobs ...]
+Usage: python3 -m broker.tests.m40_test [blocks mobs items ...]
 """
 import json
 import pathlib
@@ -513,8 +513,156 @@ def play_damage(client):
     time.sleep(1)
 
 
+def bar_on_client(client):
+    client.ask("barheld")
+    return json.loads(re.findall(r"\[M8\] bar: (.*)$", client.text(), re.MULTILINE)[-1])
+
+
+def play_bar(client):
+    cell = slot("api_cell", "items")
+    rcon("clear", PLAYER)
+    rcon("give", PLAYER, cell, "1")
+    time.sleep(1)
+    shown = bar_on_client(client)
+    check("an item that isn't a tool shows a bar", shown["visible"], str(shown))
+    check("at the level its feature starts it", 5 <= shown["width"] <= 8, str(shown))
+    check("and the game here doesn't think it can wear out", "max_damage" not in rcon("data", "get", "entity", PLAYER, "SelectedItem"), rcon("data", "get", "entity", PLAYER, "SelectedItem"))
+    client.ask("use")
+    check("a module can change it", holds(client, "cell went from 0.5 to 0.25"))
+    time.sleep(1)
+    lower = bar_on_client(client)
+    check("and the client sees that", lower["width"] < shown["width"], f"{shown} {lower}")
+    client.ask("use")
+    client.ask("use")
+    check("up to full, by way of empty", holds(client, "cell went from 0.0 to 1.0"))
+    time.sleep(1)
+    full = bar_on_client(client)
+    check("and full still shows", full["visible"] and full["width"] == 13, str(full))
+    client.ask("shot bar")
+    rcon("clear", PLAYER)
+
+
+def craft_on_client(client, *rows):
+    """Puts these in a crafting grid by hand, as a player would, and says what it offers. Each is a slot of the grid and an item that's in the player's hotbar."""
+    client.ask("opentable")
+    time.sleep(1)
+    for grid_slot, hotbar in rows:
+        client.ask(f"hotbarclick {hotbar}")
+        client.ask(f"click {grid_slot}")
+    time.sleep(1)
+    client.ask("menu")
+    return re.findall(r"\[M8\] menu holds (.*)$", client.text(), re.MULTILINE)[-1]
+
+
+def play_recipes(client):
+    x, y, z = SPOT
+    pick, better, ingot = slot("api_pick", "items"), slot("api_better_pick", "items"), slot("api_ingot", "items")
+    rcon("setblock", str(x), str(y), str(z), "minecraft:crafting_table")
+    rcon("tp", PLAYER, str(x + 0.5), str(y), str(z + 2.5), "180", "20")
+    rcon("clear", PLAYER)
+    # A half-worn pick with an enchantment and a module's data on it, going through a recipe that carries them.
+    rcon("give", PLAYER, pick + '[minecraft:damage=100,minecraft:enchantments={"minecraft:efficiency":2},minecraft:custom_data={kept:7b}]', "1")
+    rcon("give", PLAYER, "minecraft:stick", "1")
+    time.sleep(1)
+    client.ask(f"useblock {x} {y} {z}")
+    time.sleep(1)
+    client.ask("hotbarclick 0")
+    client.ask("click 1")
+    client.ask("hotbarclick 1")
+    client.ask("click 2")
+    time.sleep(1)
+    client.ask("click 0 shift")
+    time.sleep(1)
+    client.ask("closemenu")
+    time.sleep(1)
+    made = rcon("data", "get", "entity", PLAYER, "Inventory")
+    check("a recipe's result comes out", better in made, made)
+    check("worn as far through its life as what went in", '"minecraft:damage": 50' in made, made)
+    check("with its enchantments", "minecraft:efficiency" in made, made)
+    check("and its data", "kept: 7b" in made, made)
+
+    # A worn pick and two ingots, mended by a quarter for each.
+    rcon("clear", PLAYER)
+    rcon("give", PLAYER, pick + '[minecraft:damage=150,minecraft:custom_data={kept:9b}]', "1")
+    rcon("give", PLAYER, ingot, "2")
+    time.sleep(1)
+    client.ask(f"useblock {x} {y} {z}")
+    time.sleep(1)
+    client.ask("hotbarclick 0")
+    client.ask("click 1")
+    client.ask("hotbarclick 1")
+    client.ask("click 2 right")
+    client.ask("click 3 right")
+    client.ask("hotbarclick 1")
+    time.sleep(1)
+    client.ask("click 0 shift")
+    time.sleep(1)
+    client.ask("closemenu")
+    time.sleep(1)
+    mended = rcon("data", "get", "entity", PLAYER, "Inventory")
+    check("a repair recipe mends by what it says for each piece", '"minecraft:damage": 50' in mended, mended)
+    check("and what's on it stays", "kept: 9b" in mended, mended)
+    rcon("clear", PLAYER)
+    # One that isn't worn has nothing to mend.
+    rcon("give", PLAYER, pick, "1")
+    rcon("give", PLAYER, ingot, "1")
+    time.sleep(1)
+    client.ask(f"useblock {x} {y} {z}")
+    time.sleep(1)
+    client.ask("hotbarclick 0")
+    client.ask("click 1")
+    client.ask("hotbarclick 1")
+    client.ask("click 2")
+    time.sleep(1)
+    client.ask("menu")
+    shown = re.findall(r"\[M8\] menu holds (.*)$", client.text(), re.MULTILINE)[-1]
+    check("nothing that isn't worn can be mended", shown.startswith("0=empty"), shown)
+    client.ask("closemenu")
+    rcon("setblock", str(x), str(y), str(z), "minecraft:air")
+    rcon("kill", "@e[type=item]")
+    rcon("clear", PLAYER)
+
+
+def play_bench(client):
+    x, y, z = SPOT
+    bench, ingot = slot("api_bench"), slot("api_ingot", "items")
+    rcon("setblock", str(x), str(y), str(z), bench)
+    # The ring a recipe calls for, in a 4 by 4 grid, which is 12 ingredients.
+    ring = [0, 1, 2, 3, 4, 7, 8, 11, 12, 13, 14, 15]
+    for place in ring:
+        rcon("item", "replace", "block", str(x), str(y), str(z), f"container.{place}", "with", ingot, "2")
+    check("a grid with more than 9 in it makes what it says", holds(client, "bench offers 1 Api Big"))
+    rcon("tp", PLAYER, str(x + 0.5), str(y), str(z + 2.5), "180", "20")
+    time.sleep(1)
+    client.ask(f"useblock {x} {y} {z}")
+    time.sleep(1)
+    client.ask("menu")
+    shown = re.findall(r"\[M8\] menu holds (.*)$", client.text(), re.MULTILINE)[-1]
+    check("a client sees it as a grid of 4 across with the output at the far right", all(f"{row * 9 + column}=2x" in shown for row, column in ((0, 0), (0, 3), (3, 0), (3, 3))) and "8=1x" in shown, shown)
+    check("and the middle of the ring is empty", all(f"{row * 9 + column}=empty" in shown for row, column in ((1, 1), (2, 2))), shown)
+    client.ask("click 8 shift")
+    check("taking it uses one from each place", holds(client, "bench made Api Big"))
+    time.sleep(1)
+    data = rcon("data", "get", "block", str(x), str(y), str(z), "Items")
+    check("and leaves the rest", data.count("count: 1") >= 12, data)
+    client.ask("closemenu")
+    # Any place in the grid, for something smaller than it.
+    rcon("setblock", str(x), str(y), str(z), "minecraft:air")
+    rcon("kill", "@e[type=item]")
+    rcon("setblock", str(x), str(y), str(z), bench)
+    rcon("item", "replace", "block", str(x), str(y), str(z), "container.5", "with", "minecraft:stick", "1")
+    rcon("item", "replace", "block", str(x), str(y), str(z), "container.6", "with", "minecraft:stick", "1")
+    check("a smaller shape can sit anywhere in it", holds(client, "bench offers 1 Api Ingot"))
+    rcon("item", "replace", "block", str(x), str(y), str(z), "container.15", "with", "minecraft:stick", "1")
+    check("but not with anything else in the grid", holds(client, "bench offers 0"))
+    rcon("setblock", str(x), str(y), str(z), "minecraft:air")
+    rcon("kill", "@e[type=item]")
+    rcon("clear", PLAYER)
+
+
 STAGES = {"blocks": (play_facing, play_placing, play_redstone, play_light, play_unbreakable, play_parts, play_machine_slots),
-          "mobs": (play_mob_drops, play_flying, play_walking, play_damage)}
+          "mobs": (play_mob_drops, play_flying, play_walking, play_damage),
+          "items": (play_bar, play_recipes, play_bench)}
 
 
 def main():

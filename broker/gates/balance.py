@@ -55,6 +55,7 @@ BLOCKS = {"wood": (2.0, 3.0), "stone": (1.5, 6.0), "iron": (5.0, 6.0), "diamond"
 
 WEAPON_STATS = ("attack_damage", "attack_speed")
 ARMOR_STATS = ("armor", "armor_toughness", "knockback_resistance")
+REPAIR_RECIPE = "gm:repair"
 STATS = {"durability", "mining_speed", "hardness", "blast_resistance", *WEAPON_STATS, *ARMOR_STATS}
 # Components with real power and no vanilla curve to hold them to. Passing them would let an item carry
 # any strength at all past the budget, so they stay out until there's a way to measure them.
@@ -157,7 +158,9 @@ def _count(value):
 # Fields in a recipe that aren't things going in. Anything else with a name in it counts as an input, so a
 # machine recipe's own format can't hide what it consumes.
 _NOT_INPUTS = {"type", "category", "group", "pattern", "key", "result", "results", "cookingtime", "experience",
-               "show_notification", "feedback", "sound"}
+               "show_notification", "feedback", "sound", "amount"}
+# Vanilla's own rule for mending: each piece of material is a quarter of a tool's life, and it's one of what the tool's made from.
+MOST_MENDED_AT_ONCE = 0.25
 
 
 def _inputs(body, feature_id):
@@ -243,7 +246,8 @@ def _read_recipes(features):
         for name, recipe in feature["manifest"].get("recipes", {}).items():
             # A named machine's recipe has its inputs and output at the top level, not in Minecraft's own json.
             is_machine = isinstance(recipe.get("machine"), str)
-            body = {"inputs": recipe.get("inputs", []), "results": recipe.get("outputs") or [recipe.get("output")]} if is_machine else recipe.get("json", {})
+            body = {"inputs": recipe.get("inputs", []), "results": recipe.get("outputs") or [recipe.get("output")],
+                    "key": recipe.get("key"), "pattern": recipe.get("shape", [])} if is_machine else recipe.get("json", {})
             inputs = [(_with_tag_members(alternatives, feature_id, tags), count) for alternatives, count in _inputs(body, feature_id)]
             recipes.append({"source": f"{feature_id}/{name}", "tier": recipe.get("tier"), "inputs": inputs, "outputs": _outputs(body, feature_id)})
     return recipes
@@ -418,6 +422,31 @@ def check_power(features, recipes):
                                 f"one of {', '.join(TIERS)}.")
             else:
                 problems += _over_budget(label, tier, claim)
+    return problems
+
+
+def check_repairs(features):
+    """Mending has a cost, or a tool lasts for ever whatever its durability says, and that's the same as being unbreakable, which no tier allows."""
+    recipes = _read_recipes(features)
+    problems = []
+    for feature_id, feature in features.items():
+        for name, recipe in feature["manifest"].get("recipes", {}).items():
+            body = recipe.get("json") or {}
+            if body.get("type") != REPAIR_RECIPE:
+                continue
+            label = f"Recipe {feature_id}/{name}"
+            amount = body.get("amount")
+            if not _is_number(amount) or not 0 < amount <= MOST_MENDED_AT_ONCE:
+                problems.append(f"{label} mends {amount!r} of a tool's life with each piece of material. It has to be above 0 and up to {MOST_MENDED_AT_ONCE}, which is what vanilla's anvil does.")
+            tool_nodes = _alternatives(body.get("tool"), feature_id)
+            material_nodes = set(_alternatives(body.get("material"), feature_id))
+            if not tool_nodes or not material_nodes:
+                problems.append(f"{label} needs a tool and a material, each an item or a list of them.")
+                continue
+            for tool in tool_nodes:
+                made_from = {node for other in recipes for output, _, _ in other["outputs"] if output == tool for alternatives, _ in other["inputs"] for node in alternatives}
+                if made_from and not made_from & material_nodes:
+                    problems.append(f"{label} mends {tool.split(':', 1)[-1]} with {', '.join(sorted(material_nodes))}, which it isn't made from. As with vanilla's tools, it has to be something that goes into making it, or the tool would cost less to keep than to make.")
     return problems
 
 
@@ -739,7 +768,7 @@ def run(features):
     try:
         recipes = _read_recipes(features)
         problems = (check_power(features, recipes) + _check_cycles(features, recipes) + _check_obtainable(features, recipes)
-                    + check_ores(features, recipes) + _check_vanilla_drops(features))
+                    + check_ores(features, recipes) + _check_vanilla_drops(features) + check_repairs(features))
     except (AttributeError, KeyError, TypeError, ValueError) as error:
         # What couldn't be read hasn't been checked, so it can't pass. A crash here would also leave no answer at all.
         raise GateFailed(GATE, f"A feature.json has something in the wrong shape, so it can't be checked: {error!r}. "

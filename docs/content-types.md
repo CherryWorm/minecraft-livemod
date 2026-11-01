@@ -111,7 +111,75 @@ public boolean accepts(SlotBlockEntity machine, int slot, ItemStack stack) {
 
 `"limits": {"0": 1, "3": 16}` in `inventory` says how many fit in a slot, by its number, from 1 to 99, and that goes for hoppers and players alike. A slot can't hold more of an item than that item stacks to, whatever it says here. `slotLimit(machine, slot, limit)` in a module can make it less than that for now, for a machine that takes upgrades, so give those their largest.
 
+A machine's recipe can have a shape, for a bench with a bigger grid than the game's 3 by 3:
+
+```json
+"great_helm": {
+  "mode": "open",
+  "machine": "forge_bench",
+  "shape": ["XXXXX", "X   X", "X   X", "XXXXX"],
+  "key": {"X": "$item:bronze_plate"},
+  "output": {"item": "$item:great_helm", "count": 1}
+}
+```
+
+It has marks for each place, a key for what each mark is, and a space for an empty place. It uses one from each place, and the rest of the grid has to be empty, though the shape can sit anywhere in it. The gates count every place, so all of the rules on recipes apply. Give the bench a grid:
+
+```json
+"forge_bench": {"family": "machine", "display": "Forge Bench", "texture": "bench", "inventory": {"inputs": 25, "outputs": 1, "width": 5}}
+```
+
+`"width": 5` shows its inputs in rows of 5 in `machine.openMenu(player, title)`, up to 7 wide and 6 rows, with any fuel in a column beside them and its outputs down the right. In a panel, put the slots where you want them. Then show what the grid makes, and use it up when someone takes it:
+
+```java
+context.bindMachine("forge_bench", new MachineBehavior() {
+    private List<ItemStack> grid(SlotBlockEntity bench) {
+        List<ItemStack> grid = new ArrayList<>();
+        for (int slot = 0; slot < 25; slot++) {
+            grid.add(bench.getItem(slot));
+        }
+        return grid;
+    }
+
+    @Override
+    public void tick(SlotBlockEntity bench) {
+        MachineAttempt attempt = context.attemptRecipe(null, "forge_bench", grid(bench), 5);
+        bench.setItem(25, attempt.succeeded() ? attempt.output().copy() : ItemStack.EMPTY);
+    }
+
+    @Override
+    public void outputTaken(SlotBlockEntity bench, int slot, ItemStack stack, Player player) {
+        List<ItemStack> grid = grid(bench);
+        // What's being taken has already gone from the output slot, so what makes it is still in the grid.
+        context.attemptRecipe(null, "forge_bench", grid, 5).consume(grid);
+        bench.setChanged();
+    }
+});
+```
+
 Pass `null` for the player when nobody's there, as with a machine a hopper keeps fed. A recipe that has to be learned then only works if this world shares what's learned and someone knows it. `accepts` says what can go in each input and fuel slot, and nothing can go in an output. `machine.openMenu(player, title)` shows the inventory on a chest's screen, with inputs and fuel on the left and outputs on the right, usually from a `BlockBehavior.use`.
+
+## Recipes that remember what went in
+
+A crafting recipe's result normally starts new. Add `carry` to a recipe to have it take after one of its inputs, which is how an upgrade keeps what's on a tool:
+
+```json
+"tin_pick_upgrade": {
+  "mode": "open",
+  "carry": {"from": "$item:tin_pick", "what": ["wear", "enchantments", "data"]},
+  "json": {"type": "minecraft:crafting_shapeless", "ingredients": ["$item:tin_pick", "$item:bronze_ingot"], "result": {"id": "$item:bronze_pick"}}
+}
+```
+
+`from` is one of the recipe's inputs. `wear` is how far through its life it was, so a half-worn pick makes a half-worn pick, however long each lasts. `enchantments` is its enchantments, `data` is its `minecraft:custom_data`, where a module keeps things, and any name it was given. Nothing else comes across, because everything else about what's made is that thing's own, and it's checked as usual.
+
+A recipe can mend something instead of making anything:
+
+```json
+"tin_pick_mend": {"mode": "open", "json": {"type": "gm:repair", "tool": "$item:tin_pick", "material": "$item:tin_ingot", "amount": 0.25}}
+```
+
+A worn one of `tool` and any number of `material` in a crafting grid gives it back, mended by `amount` of its life for each one, and with everything else on it as it was. `amount` can be at most 0.25, which is what vanilla's anvil does, and `material` has to be something that goes into making it, or it would cost less to keep than to make. Two of the same worn tool in a grid also combine, as they do in vanilla. `known` works on these too.
 
 ## Mobs
 
@@ -253,6 +321,7 @@ An item can say what it is, so every stack of it has these from the start, inclu
 - `components` are the game's own item components, and a tool or weapon's numbers here answer to the same tier curve as anywhere else. Prefer this to setting them on a recipe's result, which only covers what's crafted.
 - `places` makes it a seed, or anything like one: using it on the top of a block puts that block above and uses one up. Leave out `on` to allow anything solid.
 - `handheld` holds it the way vanilla holds a tool.
+- `"bar": 1.0` draws a bar under it, from 0 for empty to 1 for full, for a charge, a fuel level or anything else a module keeps up with `context.setBar(stack, 0.5F)` and reads with `context.bar(stack)`. It stops it stacking, and each stack starts there. It only looks like a tool's durability: it can't wear out or be mended, and it needs no tier. The bar's colour goes from green to red, and that can't be changed.
 - `"tooltip": ["Always points north"]` adds fixed lines to its tooltip, in each player's language, like everything else here. See "Text" in `docs/feature-format.md`.
 - `"use": {"seconds": 1, "animation": "brush"}` makes using it take that long, showing that animation, and then `ItemBehavior.finishUsing` runs. It isn't used up unless your module does that. The animations are `none`, `eat`, `drink`, `block`, `bow`, `trident`, `crossbow`, `spyglass`, `toot_horn`, `brush`, `bundle` and `spear`.
 - `"variants": {"gilded": "ledger_gilded"}` gives it other pictures. A stack shows one when it has `"minecraft:custom_model_data": {"strings": ["gilded"]}`, from a recipe's result or a module, and its usual `texture` otherwise.

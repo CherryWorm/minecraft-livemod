@@ -314,6 +314,13 @@ public final class KnowledgeTest implements FabricClientGameTest {
 				client.gameMode.interact(client.player, target, new net.minecraft.world.phys.EntityHitResult(target), InteractionHand.MAIN_HAND);
 			});
 			case "attack" -> context.runOnClient(client -> client.gameMode.attack(client.player, tagged(client, words[1])));
+			case "barheld" -> {
+				String bar = context.computeOnClient(client -> {
+					ItemStack stack = client.player.getMainHandItem();
+					return "{\"visible\":" + stack.isBarVisible() + ",\"width\":" + stack.getBarWidth() + "}";
+				});
+				LOGGER.info("[M8] bar: {}", bar);
+			}
 			case "hotbarclick" -> context.runOnClient(client -> client.gameMode.handleContainerInput(client.player.containerMenu.containerId,
 					client.player.containerMenu.slots.size() - 9 + Integer.parseInt(words[1]), LEFT_BUTTON, ContainerInput.PICKUP, client.player));
 			case "oldcompanion" -> rejoinWithout(context, "inventory_hooks");

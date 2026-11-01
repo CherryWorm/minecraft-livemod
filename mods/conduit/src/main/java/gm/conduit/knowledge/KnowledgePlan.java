@@ -44,7 +44,46 @@ public record KnowledgePlan(
 
 	public record MachineInput(String item, int count) {}
 
-	public record MachineRecipe(String id, String mode, List<MachineInput> inputs, List<MachineInput> outputs, List<String> needs) {
+	/** A recipe's shape, row by row, with an empty name for an empty place. */
+	public record Grid(int width, List<String> cells) {
+		private int height() {
+			return this.cells.size() / this.width;
+		}
+
+		/** Where in a grid this wide each filled place of this shape falls, or nothing if it isn't there, or anything else is. */
+		List<Integer> placeIn(List<ItemStack> offered, int gridWidth) {
+			int gridHeight = offered.size() / gridWidth;
+			for (int down = 0; down + height() <= gridHeight; down++) {
+				for (int across = 0; across + this.width <= gridWidth; across++) {
+					List<Integer> places = at(offered, gridWidth, across, down);
+					if (places != null) {
+						return places;
+					}
+				}
+			}
+			return List.of();
+		}
+
+		private List<Integer> at(List<ItemStack> offered, int gridWidth, int across, int down) {
+			List<Integer> places = new ArrayList<>();
+			for (int place = 0; place < offered.size(); place++) {
+				int x = place % gridWidth - across;
+				int y = place / gridWidth - down;
+				String wanted = x >= 0 && y >= 0 && x < this.width && y < height() ? this.cells.get(y * this.width + x) : "";
+				ItemStack stack = offered.get(place);
+				boolean same = wanted.isEmpty() ? stack.isEmpty() : !stack.isEmpty() && BuiltInRegistries.ITEM.getKey(stack.getItem()).toString().equals(wanted);
+				if (!same) {
+					return null;
+				}
+				if (!wanted.isEmpty()) {
+					places.add(place);
+				}
+			}
+			return places;
+		}
+	}
+
+	public record MachineRecipe(String id, String mode, List<MachineInput> inputs, List<MachineInput> outputs, List<String> needs, Grid grid) {
 		/** What the agent's told a player found, which only needs to be one thing. */
 		public String outputItem() {
 			return this.outputs.getFirst().item();
@@ -146,7 +185,14 @@ public record KnowledgePlan(
 				} else {
 					outputs.add(machineStack(recipe.getAsJsonObject("output")));
 				}
-				recipes.add(new MachineRecipe(recipe.get("id").getAsString(), recipe.get("mode").getAsString(), inputs, outputs, needs));
+				Grid grid = null;
+				if (recipe.has("grid")) {
+					JsonObject shape = recipe.getAsJsonObject("grid");
+					List<String> cells = new ArrayList<>();
+					shape.getAsJsonArray("cells").forEach(cell -> cells.add(cell.getAsString()));
+					grid = new Grid(shape.get("width").getAsInt(), cells);
+				}
+				recipes.add(new MachineRecipe(recipe.get("id").getAsString(), recipe.get("mode").getAsString(), inputs, outputs, needs, grid));
 			});
 			machines.put(item.getKey(), recipes);
 		}

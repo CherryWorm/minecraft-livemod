@@ -1,6 +1,8 @@
 package gm.feature.moduleapi;
 
 import gm.conduit.api.BlockBehavior;
+import gm.conduit.api.ItemBehavior;
+import gm.conduit.api.MachineAttempt;
 import gm.conduit.api.MachineBehavior;
 import gm.conduit.api.MobBehavior;
 import gm.conduit.api.ServerModule;
@@ -27,6 +29,9 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /** Says everything it hears in chat, so a test client can tell what happened on the server. */
 public final class ModuleApiModule implements ServerModule {
 	private static final int LAMP_LOW = 9;
@@ -47,6 +52,7 @@ public final class ModuleApiModule implements ServerModule {
 		bindStatue();
 		bindKiln();
 		bindMobs();
+		bindItems();
 		context.listen(new WorldEvents() {
 			@Override
 			public float damage(LivingEntity target, DamageSource source, float amount) {
@@ -123,6 +129,56 @@ public final class ModuleApiModule implements ServerModule {
 					mob.walkTo(goal, 2.0, arrived -> say("bat " + (arrived ? "arrived" : "gave up") + " in the air " + mob.isNoGravity()));
 				}
 				return InteractionResult.SUCCESS;
+			}
+		});
+	}
+
+	private void bindItems() {
+		this.context.bindItem("api_cell", new ItemBehavior() {
+			@Override
+			public InteractionResult use(Level level, Player player, InteractionHand hand) {
+				ItemStack stack = player.getItemInHand(hand);
+				float bar = ModuleApiModule.this.context.bar(stack);
+				float next = bar <= 0 ? 1 : bar - 0.25F;
+				ModuleApiModule.this.context.setBar(stack, next);
+				say("cell went from " + bar + " to " + next);
+				return InteractionResult.SUCCESS;
+			}
+		});
+		this.context.bindBlock("api_bench", new BlockBehavior() {
+			@Override
+			public InteractionResult use(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
+				if (level.getBlockEntity(pos) instanceof SlotBlockEntity bench && player instanceof ServerPlayer serverPlayer) {
+					bench.openMenu(serverPlayer, Component.literal("Api Bench"));
+				}
+				return InteractionResult.SUCCESS;
+			}
+		});
+		this.context.bindMachine("api_bench", new MachineBehavior() {
+			private List<ItemStack> grid(SlotBlockEntity bench) {
+				List<ItemStack> grid = new ArrayList<>();
+				for (int slot = 0; slot < 16; slot++) {
+					grid.add(bench.getItem(slot));
+				}
+				return grid;
+			}
+
+			@Override
+			public void tick(SlotBlockEntity bench) {
+				MachineAttempt attempt = ModuleApiModule.this.context.attemptRecipe(null, "api_bench", grid(bench), 4);
+				ItemStack shown = attempt.succeeded() ? attempt.output().copy() : ItemStack.EMPTY;
+				if (!ItemStack.matches(shown, bench.getItem(16))) {
+					bench.setItem(16, shown);
+					say("bench offers " + shown.getCount() + " " + shown.getHoverName().getString());
+				}
+			}
+
+			@Override
+			public void outputTaken(SlotBlockEntity bench, int slot, ItemStack stack, Player player) {
+				List<ItemStack> grid = grid(bench);
+				ModuleApiModule.this.context.attemptRecipe(null, "api_bench", grid, 4).consume(grid);
+				bench.setChanged();
+				say("bench made " + stack.getHoverName().getString());
 			}
 		});
 	}

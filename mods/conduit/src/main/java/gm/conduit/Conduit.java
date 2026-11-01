@@ -18,6 +18,7 @@ import gm.conduit.provenance.Provenance;
 import gm.conduit.retrogen.BiomePatch;
 import gm.conduit.retrogen.OrePatchQueue;
 import gm.conduit.panels.PanelNetwork;
+import gm.conduit.recipes.SlotRecipes;
 import gm.conduit.slots.BlockModels;
 import gm.conduit.slots.BlockSettings;
 import gm.conduit.slots.MachineInventories;
@@ -43,6 +44,7 @@ public final class Conduit implements ModInitializer {
 		PasswordGate.register();
 		Opening.register();
 		NeutralSlots.register();
+		SlotRecipes.register();
 		ItemDefaults.register();
 		SlotMobs.register();
 		Minds.register();

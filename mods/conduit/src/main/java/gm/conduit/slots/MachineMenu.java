@@ -19,30 +19,53 @@ import java.util.List;
  * It uses the game's own screen, so it needs nothing on a player's computer.
  */
 final class MachineMenu extends AbstractContainerMenu {
-	private static final List<MenuType<?>> BY_ROWS = List.of(MenuType.GENERIC_9x1, MenuType.GENERIC_9x2, MenuType.GENERIC_9x3);
+	private static final List<MenuType<?>> BY_ROWS = List.of(MenuType.GENERIC_9x1, MenuType.GENERIC_9x2, MenuType.GENERIC_9x3, MenuType.GENERIC_9x4, MenuType.GENERIC_9x5, MenuType.GENERIC_9x6);
 	private static final int ROW = 9;
 
 	private final SlotBlockEntity machine;
 	private final int size;
 
 	MachineMenu(int id, Inventory inventory, SlotBlockEntity machine, MachineInventories.Layout layout) {
-		super(BY_ROWS.get((Math.max(layout.size(), 1) - 1) / ROW), id);
+		super(BY_ROWS.get(rows(layout) - 1), id);
 		this.machine = machine;
-		this.size = (Math.max(layout.size(), 1) - 1) / ROW * ROW + ROW;
+		this.size = rows(layout) * ROW;
 		SimpleContainer panes = new SimpleContainer(this.size);
 		int outputsFrom = this.size - layout.outputs();
 		for (int position = 0; position < this.size; position++) {
-			int kept = layout.inputs() + layout.fuel();
-			if (position < kept) {
-				addSlot(new Held(machine, position, false));
-			} else if (position >= outputsFrom) {
-				addSlot(new Held(machine, kept + position - outputsFrom, true));
+			int shown = layout.width() > 0 ? gridSlot(layout, position) : flowingSlot(layout, position, outputsFrom);
+			if (shown >= 0) {
+				addSlot(new Held(machine, shown, layout.isOutput(shown)));
 			} else {
 				panes.setItem(position, pane());
 				addSlot(new Pane(panes, position));
 			}
 		}
 		addStandardInventorySlots(inventory, 0, 0);
+	}
+
+	private static int rows(MachineInventories.Layout layout) {
+		int flowing = (Math.max(layout.size(), 1) - 1) / ROW + 1;
+		return layout.width() > 0 ? Math.max(Math.max(1, (layout.inputs() + layout.width() - 1) / layout.width()), Math.max(layout.fuel(), layout.outputs())) : flowing;
+	}
+
+	/** Inputs and fuel from the left, and outputs from the right. It returns which of its slots goes at this place, or -1 for none. */
+	private static int flowingSlot(MachineInventories.Layout layout, int position, int outputsFrom) {
+		int kept = layout.inputs() + layout.fuel();
+		return position < kept ? position : position >= outputsFrom ? kept + position - outputsFrom : -1;
+	}
+
+	/** Its inputs as a grid, its fuel in a column beside that, and its outputs down the right. */
+	private static int gridSlot(MachineInventories.Layout layout, int position) {
+		int column = position % ROW;
+		int row = position / ROW;
+		int input = row * layout.width() + column;
+		if (column < layout.width() && input < layout.inputs()) {
+			return input;
+		}
+		if (column == ROW - 2 && row < layout.fuel()) {
+			return layout.inputs() + row;
+		}
+		return column == ROW - 1 && row < layout.outputs() ? layout.inputs() + layout.fuel() + row : -1;
 	}
 
 	private static ItemStack pane() {

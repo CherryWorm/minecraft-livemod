@@ -21,6 +21,7 @@ import gm.conduit.knowledge.Codex;
 import gm.conduit.knowledge.Knowledge;
 import gm.conduit.provenance.Provenance;
 import gm.conduit.slots.ButtonMenu;
+import gm.conduit.slots.ItemBars;
 import gm.conduit.slots.SlotBlock;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
@@ -470,6 +471,21 @@ public final class ServerModuleHost {
 		@Override
 		public MachineAttempt attemptRecipe(Player player, String machine, List<ItemStack> inputs) {
 			return Knowledge.instance().attempt(player, machine.contains("/") ? machine : this.moduleId + "/" + machine, inputs);
+		}
+
+		@Override
+		public MachineAttempt attemptRecipe(Player player, String machine, List<ItemStack> inputs, int gridWidth) {
+			return Knowledge.instance().attempt(player, machine.contains("/") ? machine : this.moduleId + "/" + machine, inputs, gridWidth);
+		}
+
+		@Override
+		public void setBar(ItemStack stack, float fraction) {
+			ItemBars.set(stack, fraction);
+		}
+
+		@Override
+		public float bar(ItemStack stack) {
+			return ItemBars.fraction(stack);
 		}
 
 		@Override

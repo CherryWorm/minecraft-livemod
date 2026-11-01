@@ -1,7 +1,7 @@
 {
   "id": "moduleapi",
   "phase": 1,
-  "summary": "Test fixture for the server modules' API: blocks that face a way and refuse things, redstone, light, unbreakable blocks and model parts. Mobs that fly and drop several things, walking somewhere, and changing damage and knockback.",
+  "summary": "Test fixture for the server modules' API: blocks that face a way and refuse things, redstone, light, unbreakable blocks and model parts. Mobs that fly and drop several things, walking somewhere, and changing damage and knockback. A bar on an item that isn't a tool, recipes that carry things over or mend, and a bench with a bigger grid.",
   "blocks": {
     "api_front": {
       "family": "facing",
@@ -81,6 +81,17 @@
       "glowing": [
         "head"
       ]
+    },
+    "api_bench": {
+      "family": "machine",
+      "display": "Api Bench",
+      "texture": "api_top",
+      "from_module": true,
+      "inventory": {
+        "inputs": 16,
+        "outputs": 1,
+        "width": 4
+      }
     }
   },
   "items": {
@@ -99,6 +110,39 @@
     },
     "api_rare": {
       "display": "Api Rare",
+      "texture": "api_front"
+    },
+    "api_cell": {
+      "display": "Api Cell",
+      "texture": "api_top",
+      "bar": 0.5
+    },
+    "api_ingot": {
+      "display": "Api Ingot",
+      "texture": "api_side"
+    },
+    "api_pick": {
+      "display": "Api Pick",
+      "texture": "api_side",
+      "handheld": true,
+      "tier": "iron",
+      "components": {
+        "minecraft:max_damage": 200,
+        "minecraft:max_stack_size": 1
+      }
+    },
+    "api_better_pick": {
+      "display": "Api Better Pick",
+      "texture": "api_front",
+      "handheld": true,
+      "tier": "iron",
+      "components": {
+        "minecraft:max_damage": 100,
+        "minecraft:max_stack_size": 1
+      }
+    },
+    "api_big": {
+      "display": "Api Big",
       "texture": "api_front"
     }
   },
@@ -160,6 +204,85 @@
       "speed": 0.25,
       "width": 0.8,
       "height": 0.8
+    }
+  },
+  "recipes": {
+    "api_pick_made": {
+      "mode": "open",
+      "json": {
+        "type": "minecraft:crafting_shaped",
+        "pattern": [
+          "XX",
+          " X"
+        ],
+        "key": {
+          "X": "$item:api_ingot"
+        },
+        "result": {
+          "id": "$item:api_pick"
+        }
+      }
+    },
+    "api_pick_upgrade": {
+      "mode": "open",
+      "carry": {
+        "from": "$item:api_pick",
+        "what": [
+          "wear",
+          "enchantments",
+          "data"
+        ]
+      },
+      "json": {
+        "type": "minecraft:crafting_shapeless",
+        "ingredients": [
+          "$item:api_pick",
+          "minecraft:stick"
+        ],
+        "result": {
+          "id": "$item:api_better_pick"
+        }
+      }
+    },
+    "api_pick_mend": {
+      "mode": "open",
+      "json": {
+        "type": "gm:repair",
+        "tool": "$item:api_pick",
+        "material": "$item:api_ingot",
+        "amount": 0.25
+      }
+    },
+    "api_big_made": {
+      "mode": "open",
+      "machine": "api_bench",
+      "shape": [
+        "XXXX",
+        "X  X",
+        "X  X",
+        "XXXX"
+      ],
+      "key": {
+        "X": "$item:api_ingot"
+      },
+      "output": {
+        "item": "$item:api_big",
+        "count": 1
+      }
+    },
+    "api_small_made": {
+      "mode": "open",
+      "machine": "api_bench",
+      "shape": [
+        "XX"
+      ],
+      "key": {
+        "X": "minecraft:stick"
+      },
+      "output": {
+        "item": "$item:api_ingot",
+        "count": 1
+      }
     }
   }
 }

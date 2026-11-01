@@ -80,6 +80,18 @@ public interface ServerModuleContext {
 	 */
 	String textFor(Player player, String name, Object... args);
 
+	/**
+	 * Checks what's in a grid against a machine's recipes, the same way, for recipes with a "shape". The inputs are the whole grid, row by row, with empty stacks
+	 * for its empty slots, and it's this many wide. A shaped recipe can sit anywhere in the grid, as long as nothing else is in it. Recipes with no shape are checked as usual.
+	 */
+	MachineAttempt attemptRecipe(Player player, String machine, List<ItemStack> inputs, int gridWidth);
+
+	/** Sets the bar drawn under an item with "bar" in its feature, from 0 for empty to 1 for full. It takes nothing else to change it. */
+	void setBar(ItemStack stack, float fraction);
+
+	/** Where the bar under an item is, from 0 to 1. */
+	float bar(ItemStack stack);
+
 	/** Opens a menu made of chest slots, from 1 to 6 rows, which needs nothing on the player's computer. */
 	void openMenu(ServerPlayer player, Component title, int rows, MenuBehavior behavior);
 

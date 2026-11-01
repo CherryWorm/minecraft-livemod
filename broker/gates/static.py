@@ -47,6 +47,9 @@ FACING_WAYS = {"horizontal", "all"}
 MOST_LIGHT = 15
 MOST_MACHINE_SLOTS = 27
 MOST_IN_A_SLOT = 99
+CARRIED = {"wear", "enchantments", "data"}
+# Leaving a column on a chest's screen for a machine's fuel and one for its outputs.
+MOST_GRID_WIDTH = 7
 MOST_HARDNESS = 5
 CROP_STAGES = 4
 NOT_CUBES = {"plant", "glow_plant", "tinted_plant", "crop", "connected", "model", "cutout", "ladder"}
@@ -298,7 +301,7 @@ def check_knowledge(features):
                 _fail(f"Recipe {feature_id}/{name} is learned through {key!r}, which no feature declares, "
                       "so nobody could ever learn it.")
             kind = recipe.get("json", {}).get("type", "")
-            if not recipe.get("machine") and not kind.startswith("minecraft:crafting"):
+            if not recipe.get("machine") and not kind.startswith("minecraft:crafting") and kind != balance.REPAIR_RECIPE:
                 _fail(f"Recipe {feature_id}/{name} is 'known', but a {kind} recipe can't be locked. "
                       "Only crafting and machine recipes can. Use 'open' here.")
 
@@ -497,6 +500,12 @@ def check_items(features):
                     _fail(f"{label} has use animation {use.get('animation')!r}. Use one of {sorted(USE_ANIMATIONS)}.")
                 if "minecraft:consumable" in (item.get("components") or {}):
                     _fail(f"{label} has both a use and minecraft:consumable. It's either something timed that goes to a module, or something eaten.")
+            bar = item.get("bar")
+            if bar is not None:
+                if not isinstance(bar, (int, float)) or isinstance(bar, bool) or not 0 <= bar <= 1:
+                    _fail(f"{label} has bar {bar!r}. It's where the bar under it starts, from 0 for empty to 1 for full.")
+                if "minecraft:max_damage" in (item.get("components") or {}) or "durability" in (item.get("stats") or {}):
+                    _fail(f"{label} has a bar and wears out, and both are drawn in the same place. A tool's durability already has a bar.")
             tooltip = item.get("tooltip")
             if tooltip is not None and not (isinstance(tooltip, list) and all(isinstance(line, str) for line in tooltip)):
                 _fail(f"{label} has tooltip {tooltip!r}. It's a list of lines of text.")
@@ -692,6 +701,33 @@ def check_screen_effects(features):
                 _fail(f"{label} uses a while or do loop, which could never finish and hang a player's graphics card. Use a for loop with a fixed count.")
 
 
+def _check_carry(label, recipe, feature_id):
+    carry = recipe["carry"]
+    if not isinstance(carry, dict) or not isinstance(carry.get("from"), str):
+        _fail(f"{label} has carry {carry!r}. It's what the result takes after, and what it takes, like {{\"from\": \"$item:tin_pick\", \"what\": [\"wear\", \"enchantments\"]}}.")
+    what = carry.get("what")
+    if not isinstance(what, list) or not what or not set(what) <= CARRIED:
+        _fail(f"{label} carries {what!r}. It can carry {sorted(CARRIED)}, and nothing else comes across, because anything else about what it makes is that thing's own.")
+    if not str((recipe.get("json") or {}).get("type", "")).startswith("minecraft:crafting"):
+        _fail(f"{label} carries things across, but only a crafting recipe can.")
+    inputs = {node for alternatives, _ in balance._inputs(recipe["json"], feature_id) for node in alternatives}
+    if balance._node(carry["from"], feature_id) not in inputs:
+        _fail(f"{label} carries things across from {carry['from']}, which it doesn't use.")
+
+
+def _check_machine_shape(label, recipe):
+    shape, key = recipe.get("shape"), recipe.get("key")
+    if "inputs" in recipe:
+        _fail(f"{label} has both a shape and inputs. A shape says everything inputs would.")
+    if not (isinstance(shape, list) and shape and all(isinstance(row, str) and row for row in shape)) or not isinstance(key, dict):
+        _fail(f"{label} has shape {shape!r}. It's rows of marks, with a key for what each mark is, like \"shape\": [\"XX\", \"XX\"], \"key\": {{\"X\": \"$item:name\"}}, and a space for an empty place.")
+    marks = {mark for row in shape for mark in row} - {" "}
+    if marks != set(key):
+        _fail(f"{label} has a key for {sorted(key)} and a shape using {sorted(marks)}. They have to be the same.")
+    if max(len(row) for row in shape) * len(shape) > MOST_MACHINE_SLOTS:
+        _fail(f"{label} has a shape of {max(len(row) for row in shape)} by {len(shape)}, and a machine can have at most {MOST_MACHINE_SLOTS} slots.")
+
+
 def check_machines(features):
     """A machine with no slots to take from, or a recipe that says what it makes in two ways, would quietly do less than it looks like."""
     for feature_id, feature in features.items():
@@ -702,19 +738,32 @@ def check_machines(features):
             label = f"Block {feature_id}/{name}"
             if block.get("family") not in MACHINE_FAMILIES:
                 _fail(f"{label} has an inventory, which only a machine or model block can have.")
-            slots = {kind: count for kind, count in inventory.items() if kind != "limits"} if isinstance(inventory, dict) else None
+            width = inventory.get("width", 0) if isinstance(inventory, dict) else 0
+            slots = {kind: count for kind, count in inventory.items() if kind not in ("limits", "width")} if isinstance(inventory, dict) else None
             if slots is None or not set(slots) <= INVENTORY_KINDS or not all(isinstance(count, int) and not isinstance(count, bool) and count >= 0 for count in slots.values()):
                 _fail(f"{label} has inventory {inventory!r}. It's whole numbers of slots, like {{\"inputs\": 2, \"fuel\": 1, \"outputs\": 1}}.")
             if not 0 < sum(slots.values()) <= MOST_MACHINE_SLOTS:
                 _fail(f"{label} has {sum(slots.values())} slots in its inventory. It can have from 1 to {MOST_MACHINE_SLOTS}.")
+            if width:
+                rows = -(-slots.get("inputs", 0) // width) if isinstance(width, int) and not isinstance(width, bool) and 0 < width <= MOST_GRID_WIDTH else None
+                if rows is None or rows > MOST_CHEST_ROWS:
+                    _fail(f"{label} has a grid with width {width!r}. It's how many inputs go in a row, up to {MOST_GRID_WIDTH}, and a chest's screen has {MOST_CHEST_ROWS} rows.")
+                if slots.get("fuel", 0) > MOST_CHEST_ROWS or slots.get("outputs", 0) > MOST_CHEST_ROWS:
+                    _fail(f"{label} has a grid, and its fuel and outputs each go in a column beside that, which has room for {MOST_CHEST_ROWS}.")
             limits = inventory.get("limits", {})
             for slot, limit in limits.items() if isinstance(limits, dict) else [(None, None)]:
                 if not (str(slot).isdigit() and int(slot) < sum(slots.values()) and isinstance(limit, int) and not isinstance(limit, bool) and 1 <= limit <= MOST_IN_A_SLOT):
                     _fail(f"{label} has limits {limits!r}. It's how many fit in a slot, from 1 to {MOST_IN_A_SLOT}, by the slot's number, like {{\"0\": 1}}, and it has slots 0 to {sum(slots.values()) - 1}.")
         for name, recipe in feature["manifest"].get("recipes", {}).items():
+            if "carry" in recipe:
+                _check_carry(f"Recipe {feature_id}/{name}", recipe, feature_id)
             if not isinstance(recipe.get("machine"), str):
+                if "shape" in recipe:
+                    _fail(f"Recipe {feature_id}/{name} has a shape, which only a machine recipe has. A crafting recipe has a pattern and a key in its json.")
                 continue
             label = f"Recipe {feature_id}/{name}"
+            if "shape" in recipe:
+                _check_machine_shape(label, recipe)
             if ("output" in recipe) == ("outputs" in recipe):
                 _fail(f"{label} needs either output, for one thing, or outputs, for several, and not both.")
             made = recipe.get("outputs", [recipe.get("output")])

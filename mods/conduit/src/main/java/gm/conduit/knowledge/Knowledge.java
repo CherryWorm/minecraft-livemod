@@ -319,14 +319,21 @@ public final class Knowledge {
 	 * Checks what a player put in a machine. Order doesn't matter. Near misses are reported so the machine
 	 * can react, which is what makes experimenting fun rather than blind.
 	 */
+	/** With no width given, a grid that's as wide as it's high is the only one it can be, and anything else can only match something shapeless. */
 	public MachineAttempt attempt(Player player, String machine, List<ItemStack> inputs) {
+		int side = (int) Math.round(Math.sqrt(inputs.size()));
+		return attempt(player, machine, inputs, side * side == inputs.size() ? side : 0);
+	}
+
+	public MachineAttempt attempt(Player player, String machine, List<ItemStack> inputs, int gridWidth) {
 		int closest = 0;
 		int needed = 0;
 		boolean locked = false;
 		List<ItemStack> offered = inputs.stream().filter(stack -> !stack.isEmpty()).toList();
 		for (KnowledgePlan.MachineRecipe recipe : this.plan.machines().getOrDefault(machine, List.of())) {
 			int matched = matching(recipe, offered);
-			boolean exact = matched == recipe.inputs().size() && offered.size() == recipe.inputs().size();
+			List<Integer> cells = recipe.grid() == null || gridWidth <= 0 ? List.of() : recipe.grid().placeIn(inputs, gridWidth);
+			boolean exact = recipe.grid() == null ? matched == recipe.inputs().size() && offered.size() == recipe.inputs().size() : !cells.isEmpty();
 			if (exact) {
 				if (recipe.mode().equals("known") && !canUseRecipe(player, recipe)) {
 					locked = true;
@@ -336,14 +343,14 @@ public final class Knowledge {
 					emitDiscovery(serverPlayer, "a machine recipe: " + this.plan.names().getOrDefault(recipe.outputItem(), recipe.outputItem()));
 				}
 				List<ItemStack> outputs = recipe.outputStacks();
-				return new MachineAttempt(outputs.getFirst(), recipe.inputs().size(), recipe.inputs().size(), false, outputs, recipe.id(), recipe.inputStacks());
+				return new MachineAttempt(outputs.getFirst(), recipe.inputs().size(), recipe.inputs().size(), false, outputs, recipe.id(), recipe.inputStacks(), cells);
 			}
 			if (matched > closest || (matched == closest && recipe.inputs().size() < needed)) {
 				closest = matched;
 				needed = recipe.inputs().size();
 			}
 		}
-		return new MachineAttempt(ItemStack.EMPTY, closest, needed, locked, List.of(), null, List.of());
+		return new MachineAttempt(ItemStack.EMPTY, closest, needed, locked, List.of(), null, List.of(), List.of());
 	}
 
 	/** With nobody there, as with a machine a hopper keeps fed, a recipe has to be one this whole world knows. */

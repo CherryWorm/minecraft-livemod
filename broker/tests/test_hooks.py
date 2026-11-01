@@ -205,6 +205,141 @@ class MobDrops(unittest.TestCase):
         self.assertEqual({drop["item"] for drop in balance.drops_of(mob)}, {"fang", "wing"})
 
 
+class ItemBar(unittest.TestCase):
+    def test_a_share(self):
+        static.check_items({"f": {"manifest": {"items": {"cell": {"bar": 0.5}}}}})
+        for bar in (-0.1, 1.5, "full", True):
+            with self.assertRaises(GateFailed) as caught:
+                static.check_items({"f": {"manifest": {"items": {"cell": {"bar": bar}}}}})
+            self.assertIn("from 0 for empty", caught.exception.message)
+
+    def test_not_on_something_that_wears_out(self):
+        for item in ({"bar": 1, "components": {"minecraft:max_damage": 100}}, {"bar": 1, "stats": {"durability": 100}}):
+            with self.assertRaises(GateFailed) as caught:
+                static.check_items({"f": {"manifest": {"items": {"cell": item}}}})
+            self.assertIn("wears out", caught.exception.message)
+
+    def test_it_doesnt_count_as_durability(self):
+        features = {"f": {"manifest": {"items": {"cell": {"bar": 1}}}}}
+        self.assertEqual(balance.check_power(features, balance._read_recipes(features)), [])
+
+    def test_every_stack_starts_there_and_doesnt_stack(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder)
+            textures = root / "f" / "assets" / "textures"
+            textures.mkdir(parents=True)
+            from PIL import Image
+            Image.new("RGBA", (16, 16), (1, 2, 3, 255)).save(textures / "cell.png")
+            features = {"f": {"manifest": {"id": "f", "items": {"cell": {"display": "Cell", "bar": 0.5}}}, "dir": root / "f"}}
+            ledger = bundles.assign_slots(features, bundles.empty_ledger(), POOL)
+            bundles.render(features, ledger, root / "out", 1)
+            defaults = json.loads((root / "out" / "config" / "item_defaults.json").read_text(encoding="utf-8"))[f"gm:{ledger['items']['f/cell']['slot']}"]
+            self.assertEqual(defaults["components"], {"minecraft:max_stack_size": 1, "minecraft:custom_data": {"gm_bar": 0.5}})
+
+
+def crafted(**fields):
+    return {"mode": "open", "json": {"type": "minecraft:crafting_shapeless", "ingredients": ["$item:old"], "result": {"id": "$item:new"}}, **fields}
+
+
+class CarryRules(unittest.TestCase):
+    def check(self, recipe):
+        static.check_machines({"f": {"manifest": {"recipes": {"up": recipe}}}})
+
+    def test_fine(self):
+        self.check(crafted(carry={"from": "$item:old", "what": ["wear", "enchantments", "data"]}))
+
+    def test_wrong(self):
+        for carry, mention in (("$item:old", "what the result takes after"), ({"from": "$item:old", "what": []}, "It can carry"),
+                               ({"from": "$item:old", "what": ["attributes"]}, "It can carry"), ({"from": "$item:other", "what": ["wear"]}, "doesn't use")):
+            with self.assertRaises(GateFailed) as caught:
+                self.check(crafted(carry=carry))
+            self.assertIn(mention, caught.exception.message)
+
+    def test_only_crafting(self):
+        with self.assertRaises(GateFailed) as caught:
+            self.check({"mode": "open", "json": {"type": "minecraft:smelting", "ingredient": "$item:old", "result": {"id": "$item:new"}}, "carry": {"from": "$item:old", "what": ["wear"]}})
+        self.assertIn("only a crafting", caught.exception.message)
+
+    def test_it_reads_the_same_to_everything_else(self):
+        recipes = balance._read_recipes({"f": {"manifest": {"recipes": {"up": crafted(carry={"from": "$item:old", "what": ["wear"]})}}}})
+        self.assertEqual(recipes[0]["outputs"], [("item:f/new", 1, {})])
+        self.assertEqual(recipes[0]["inputs"], [(["item:f/old"], 1)])
+
+
+class Repairs(unittest.TestCase):
+    TOOL = {"mode": "open", "json": {"type": "minecraft:crafting_shapeless", "ingredients": ["$item:ingot", "$item:ingot"], "result": {"id": "$item:pick"}}}
+
+    def problems(self, **fields):
+        repair = {"mode": "open", "json": {"type": "gm:repair", "tool": "$item:pick", "material": "$item:ingot", "amount": 0.25, **fields}}
+        return balance.check_repairs({"f": {"manifest": {"recipes": {"pick": self.TOOL, "mend": repair}}}})
+
+    def test_like_vanillas(self):
+        self.assertEqual(self.problems(), [])
+
+    def test_amount(self):
+        for amount in (0, 0.5, "lots", None):
+            self.assertIn("up to 0.25", self.problems(amount=amount)[0])
+
+    def test_has_to_be_what_its_made_from(self):
+        self.assertIn("isn't made from", self.problems(material="$item:stick")[0])
+
+    def test_what_nothing_makes_can_be_mended_with_anything(self):
+        repair = {"mode": "open", "json": {"type": "gm:repair", "tool": "$item:relic", "material": "$item:stick", "amount": 0.1}}
+        self.assertEqual(balance.check_repairs({"f": {"manifest": {"recipes": {"mend": repair}}}}), [])
+
+    def test_it_makes_nothing_so_it_cant_be_a_source(self):
+        repair = {"mode": "open", "json": {"type": "gm:repair", "tool": "$item:pick", "material": "$item:ingot", "amount": 0.25}}
+        recipes = balance._read_recipes({"f": {"manifest": {"recipes": {"mend": repair}}}})
+        self.assertEqual(recipes[0]["outputs"], [])
+        self.assertEqual(sorted(node for alternatives, _ in recipes[0]["inputs"] for node in alternatives), ["item:f/ingot", "item:f/pick"])
+
+    def test_it_can_be_learned(self):
+        features = {"f": {"manifest": {"knowledge": {"mending": {"title": "T", "text": "T", "routes": [{"type": "obtain", "id": "minecraft:stone"}]}},
+                                       "recipes": {"mend": {"mode": "known", "route": "mending", "json": {"type": "gm:repair"}}}}}}
+        static.check_knowledge(features)
+
+
+class MachineShapes(unittest.TestCase):
+    def recipe(self, **fields):
+        return {"mode": "open", "machine": "bench", "shape": ["XXX", "X X", "XXXX"], "key": {"X": "$item:ingot"}, "output": {"item": "$item:big", "count": 1}, **fields}
+
+    def check(self, recipe):
+        static.check_machines({"f": {"manifest": {"recipes": {"big": recipe}}}})
+
+    def test_fine(self):
+        self.check(self.recipe())
+
+    def test_wrong(self):
+        for fields, mention in (({"inputs": []}, "both a shape and inputs"), ({"shape": []}, "rows of marks"), ({"key": "x"}, "rows of marks"),
+                                ({"key": {"X": "a", "Y": "b"}}, "have to be the same"), ({"shape": ["XXXXXXXXXX"] * 3}, "at most 27")):
+            with self.assertRaises(GateFailed) as caught:
+                self.check(self.recipe(**fields))
+            self.assertIn(mention, caught.exception.message)
+
+    def test_only_on_a_machine(self):
+        with self.assertRaises(GateFailed) as caught:
+            self.check({"mode": "open", "json": {"type": "minecraft:crafting_shaped"}, "shape": ["X"]})
+        self.assertIn("only a machine recipe", caught.exception.message)
+
+    def test_gates_count_every_place(self):
+        recipes = balance._read_recipes({"f": {"manifest": {"recipes": {"big": self.recipe()}}}})
+        self.assertEqual(recipes[0]["inputs"], [(["item:f/ingot"], 9)])
+        self.assertEqual(recipes[0]["outputs"], [("item:f/big", 1, {})])
+
+    def test_rendered_row_by_row(self):
+        ledger = {**bundles.empty_ledger(), "items": {"f/ingot": {"slot": "i0001", "index": 0}}}
+        grid = bundles._machine_grid(self.recipe(), "f", ledger)
+        self.assertEqual(grid["width"], 4)
+        self.assertEqual(grid["cells"], ["gm:i0001"] * 3 + [""] + ["gm:i0001", "", "gm:i0001", ""] + ["gm:i0001"] * 4)
+
+    def test_a_grid_to_look_at(self):
+        static.check_machines({"f": {"manifest": {"blocks": {"bench": {"family": "machine", "inventory": {"inputs": 25, "outputs": 1, "width": 5}}}}}})
+        for inventory, mention in (({"inputs": 25, "width": 8}, "up to 7"), ({"inputs": 25, "width": 3}, "6 rows"), ({"inputs": 4, "width": 2, "outputs": 7}, "room for 6")):
+            with self.assertRaises(GateFailed) as caught:
+                static.check_machines({"f": {"manifest": {"blocks": {"bench": {"family": "machine", "inventory": inventory}}}}})
+            self.assertIn(mention, caught.exception.message)
+
+
 class RuinRules(unittest.TestCase):
     def assert_fine(self, entry):
         static.check_ruins(features(entry))
@@ -436,7 +571,7 @@ class BlockDrops(unittest.TestCase):
                 self.table(drops=drops)
 
     def test_a_mob_still_only_drops_this_worlds_own(self):
-        for drops in ({"item": "minecraft:rotten_flesh"}, [{"item": "gem"}]):
+        for drops in ({"item": "minecraft:rotten_flesh"}, [{"item": "gem"}, {"item": "minecraft:rotten_flesh"}]):
             with tempfile.TemporaryDirectory() as folder:
                 root = pathlib.Path(folder)
                 (root / "feature" / "assets" / "models").mkdir(parents=True)

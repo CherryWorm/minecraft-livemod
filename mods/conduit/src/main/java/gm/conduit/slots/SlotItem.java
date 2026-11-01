@@ -88,6 +88,10 @@ public final class SlotItem extends SimplePolymerItem {
 		if (stack.has(DataComponents.LODESTONE_TRACKER)) {
 			out.set(DataComponents.LODESTONE_TRACKER, stack.get(DataComponents.LODESTONE_TRACKER));
 		}
+		if (ItemBars.hasBar(stack)) {
+			out.set(DataComponents.MAX_DAMAGE, ItemBars.STEPS);
+			out.set(DataComponents.DAMAGE, ItemBars.damageShown(stack));
+		}
 	}
 
 	@Override

@@ -18,10 +18,13 @@ public final class MachineInventories {
 	private static final Logger LOGGER = LoggerFactory.getLogger("Conduit");
 	private static final Path FILE = Path.of("config", "conduit", "machine_inventories.json");
 	private static final Map<String, Layout> LAYOUTS = new HashMap<>();
-	private static final Layout NONE = new Layout(0, 0, 0, Map.of());
+	private static final Layout NONE = new Layout(0, 0, 0, Map.of(), 0);
 
-	/** @param limits how many fit in a slot, for those that say */
-	public record Layout(int inputs, int fuel, int outputs, Map<Integer, Integer> limits) {
+	/**
+	 * @param limits how many fit in a slot, for those that say
+	 * @param width how many of its inputs go in a row, for one that's a grid to look at, or 0 if it's not
+	 */
+	public record Layout(int inputs, int fuel, int outputs, Map<Integer, Integer> limits, int width) {
 		public int size() {
 			return this.inputs + this.fuel + this.outputs;
 		}
@@ -60,7 +63,7 @@ public final class MachineInventories {
 				if (layout.has("limits")) {
 					layout.getAsJsonObject("limits").asMap().forEach((slot, limit) -> limits.put(Integer.parseInt(slot), limit.getAsInt()));
 				}
-				LAYOUTS.put(entry.getKey(), new Layout(count(layout, "inputs"), count(layout, "fuel"), count(layout, "outputs"), limits));
+				LAYOUTS.put(entry.getKey(), new Layout(count(layout, "inputs"), count(layout, "fuel"), count(layout, "outputs"), limits, count(layout, "width")));
 			}
 		} catch (IOException | RuntimeException error) {
 			LOGGER.error("Can't read {}", FILE, error);
