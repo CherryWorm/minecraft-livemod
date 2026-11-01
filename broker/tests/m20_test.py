@@ -23,9 +23,10 @@ SOURCE = runtime.BROKER / "testsrc-m20"
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "panels"
 PLAYER = "Player0"
 SPOT = (40, 120, 40)
-BACKGROUND = (0x11, 0x88, 0x99)
+BADGE = (0x11, 0x88, 0x99)
+PANEL = (0xC6, 0xC6, 0xC6)
 BAR = (0xFF, 0x00, 0xFF)
-TRACK = (0x37, 0x37, 0x37)
+TRACK = (0x8B, 0x8B, 0x8B)
 TOLERANCE = 12
 KEY_ESCAPE = 41
 # Where things are in the fixture's panel.
@@ -33,7 +34,9 @@ FIRST_SLOT = (56, 35)
 HOTBAR = (8, 142)
 BAR_LEFT = (82, 44)
 BAR_RIGHT = (101, 44)
-START = (20, 68)
+START = (20, 58)
+BADGE_PLACE = (160, 12)
+EMPTY_PLACE = (140, 62)
 TALK_TAB = (100, 10)
 ROW_HEIGHT = 18
 ROWS = (20, 22 + ROW_HEIGHT // 2)
@@ -54,7 +57,7 @@ def build_source():
     (target / "assets" / "textures").mkdir(parents=True, exist_ok=True)
     (target / "assets" / "panels").mkdir(parents=True, exist_ok=True)
     Image.new("RGBA", (16, 16), (0x88, 0x88, 0x88, 255)).save(target / "assets" / "textures" / "panel_block.png")
-    Image.new("RGBA", (176, 166), (*BACKGROUND, 255)).save(target / "assets" / "panels" / "kiln_back.png")
+    Image.new("RGBA", (16, 16), (*BADGE, 255)).save(target / "assets" / "panels" / "kiln_badge.png")
 
 
 def release():
@@ -142,8 +145,10 @@ def play_panel(client, results, shots, kiln):
     results.append(report("a machine's panel opens as its own screen", last(client, r"\[M8\] the screen is (\w+)") == "PanelScreen", str(last(client, r"\[M8\] the screen is (\w+)"))))
     at = gui(client)
     client.ask("shot panel_cold")
-    colour = colour_at(shots, "panel_cold", (2, 2), at)
-    results.append(report("it shows the feature's own art", near(colour, BACKGROUND), str(colour)))
+    colour = colour_at(shots, "panel_cold", BADGE_PLACE, at)
+    results.append(report("it shows the feature's own art", near(colour, BADGE), str(colour)))
+    colour = colour_at(shots, "panel_cold", EMPTY_PLACE, at)
+    results.append(report("and with none for its background it's the game's own grey", near(colour, PANEL), str(colour)))
     colour = colour_at(shots, "panel_cold", BAR_LEFT, at)
     results.append(report("a bar starts where the module said", near(colour, TRACK), str(colour)))
 

@@ -604,20 +604,37 @@ def machine(face="side", casing=(112, 112, 122), accent=(232, 142, 54), on=False
 
 # ---------------------------------------------------------------- item sprites
 
-def panel_back(casing=(112, 112, 122), width=176, height=166, slots=(), inventory=(8, 84)):
-    """A plain background for a panel: its colour, with an edge and a frame for each slot, for where the item goes at (x, y) in the panel.
-    The frames for a player's inventory go at inventory, unless that's None. It's a start to draw over."""
-    light, frame, dark = mix(casing, (255, 255, 255), 0.55), mix(casing, (255, 255, 255), 0.25), mix(casing, (0, 0, 0), 0.5)
-    image = Image.new("RGBA", (width, height), (*light, 255))
+def panel_back(width=176, height=166, slots=(), inventory=(8, 84)):
+    """The game's own container background, pixel for pixel, at any size, to paint trims and details over: its grey, its bevelled edge and a
+    sunken frame for each slot, for where the item goes at (x, y) in the panel. The frames for a player's inventory go at inventory, unless that's None."""
+    grey, white, shade, black = (198, 198, 198, 255), (255, 255, 255, 255), (85, 85, 85, 255), (0, 0, 0, 255)
+    slot, slot_shade = (139, 139, 139, 255), (55, 55, 55, 255)
+    image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     pen = ImageDraw.Draw(image)
-    pen.rectangle((0, 0, width - 1, height - 1), outline=(*dark, 255))
+
+    def fill(left, top, right, bottom, colour):
+        pen.rectangle((left, top, right - 1, bottom - 1), fill=colour)
+
+    r, b = width, height
+    for left, top, right, bottom, colour in (
+            (3, 3, r - 3, b - 3, grey), (r - 3, 2, r - 2, 3, grey), (2, b - 3, 3, b - 2, grey),
+            (2, 1, r - 3, 2, white), (1, 2, r - 3, 3, white), (1, 3, 3, b - 3, white), (3, 3, 4, 4, white),
+            (r - 3, 3, r - 1, b - 3, shade), (r - 4, b - 4, r - 3, b - 3, shade), (3, b - 3, r - 1, b - 2, shade), (3, b - 2, r - 2, b - 1, shade),
+            (2, 0, r - 3, 1, black), (1, 1, 2, 2, black), (0, 2, 1, b - 3, black), (1, b - 3, 2, b - 2, black), (2, b - 2, 3, b - 1, black), (3, b - 1, r - 2, b, black),
+            (r - 3, 1, r - 2, 2, black), (r - 2, 2, r - 1, 3, black), (r - 1, 3, r, b - 2, black), (r - 2, b - 2, r - 1, b - 1, black)):
+        fill(left, top, right, bottom, colour)
     places = list(slots)
     if inventory is not None:
         for row in range(4):
             y = inventory[1] + row * 18 + (4 if row == 3 else 0)
             places += [(inventory[0] + column * 18, y) for column in range(9)]
     for x, y in places:
-        pen.rectangle((x - 1, y - 1, x + 16, y + 16), fill=(*frame, 255), outline=(*dark, 255))
+        left, top = x - 1, y - 1
+        fill(left, top, left + 18, top + 18, slot)
+        fill(left, top, left + 17, top + 1, slot_shade)
+        fill(left, top, left + 1, top + 17, slot_shade)
+        fill(left + 1, top + 17, left + 18, top + 18, white)
+        fill(left + 17, top + 1, left + 18, top + 18, white)
     return image
 
 

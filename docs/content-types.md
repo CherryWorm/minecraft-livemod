@@ -377,7 +377,7 @@ It goes by itself when the module unloads. Needing a client module, it won't sho
 
 ## Panels
 
-A machine, an item or a mob can have a screen of its own, with drawn art, item slots placed anywhere, bars that move while it's open, buttons, tabs, scrolling lists, a mob and somewhere to type. Mob conversation and trading are built from these too. It's all described in `"panels"` in `feature.json`, and a server module opens it and runs it. Nothing runs on anyone's computer. Someone with no companion gets the same thing as a plain chest. See 'Panels' in `docs/feature-format.md`. For a few buttons with no art, a menu made of chest slots is less work.
+A machine, an item or a mob can have a screen of its own, with drawn art, item slots placed anywhere, bars that move while it's open, buttons, tabs, scrolling lists, a mob and somewhere to type. Mob conversation and trading are built from these too. It looks like the game's own screens unless you draw it otherwise, and it should stay that way, just nicer. It's all described in `"panels"` in `feature.json`, and a server module opens it and runs it. Nothing runs on anyone's computer. Someone with no companion gets the same thing as a plain chest. See 'Panels' in `docs/feature-format.md`. For a few buttons with no art, a menu made of chest slots is less work.
 
 ## Using your content from a module
 

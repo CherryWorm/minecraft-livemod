@@ -17,7 +17,7 @@ Your spec names this feature's node in the world's progression, and it sets what
 
 Always ship something players can actually get. If your spec asks for more than `docs/feature-format.md` offers, build the closest version that works today and leave the rest for later. A simple ore people can find and use now is worth more than a perfect one that never arrives, and a feature with nothing obtainable fails the gates. Write anything the engine couldn't do in `host_requests` in `feature.json`, as a list of short sentences, so it can be added.
 
-Screens are built from panels, in `docs/feature-format.md`. Draw a panel's background like the rest of your art, and keep it readable: text on it has to be seen at the size of a small laptop's game window. Someone can always end up with it as a plain chest, so typing can't be the only way to do anything.
+Screens are built from panels, in `docs/feature-format.md`, and they have to look like Minecraft's own screens, the way most good mods do. Buttons, tabs, lists, bars and slots already do, so add trims, icons and accents that fit the world rather than drawing a new look, and never make one flat, modern or like a web page. Keep it readable: text on it has to be seen at the size of a small laptop's game window. Someone can always end up with it as a plain chest, so typing can't be the only way to do anything.
 
 Rules that keep this world fair and fun:
 - Blocks and items use slots. Never invent IDs. Refer to your own content with `$block:name` and `$item:name`.

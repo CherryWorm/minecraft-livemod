@@ -992,10 +992,10 @@ def _automation(entries):
 
 
 def _machine_panel(draft, name, display, casing, accent):
-    """A working screen to start from: an input, an output, how far along it is, and a button. Its background is plain, and is there to be drawn over."""
+    """A working screen to start from: an input, an output, how far along it is, and a button. Its background is the game's own, and is there to be painted on."""
     width, height = 176, 166
     buffer = io.BytesIO()
-    tx.panel_back(casing, width, height, slots=[(56, 35), (116, 35)]).save(buffer, "PNG")
+    tx.panel_back(width, height, slots=[(56, 35), (116, 35)]).save(buffer, "PNG")
     draft.file(f"assets/panels/{name}_back.png", buffer.getvalue())
     accent_text = "#%02x%02x%02x" % tx.rgb(accent)
     draft.manifest.setdefault("panels", {})[name] = {
@@ -1005,7 +1005,7 @@ def _machine_panel(draft, name, display, casing, accent):
             {"type": "slot", "x": 116, "y": 35, "slot": 1},
             {"type": "bar", "id": "progress", "x": 78, "y": 36, "width": 28, "height": 14, "color": accent_text, "text": "Progress"},
             {"type": "label", "id": "state", "x": 8, "y": 20, "text": "Idle"},
-            {"type": "button", "id": "start", "x": 8, "y": 58, "width": 40, "height": 18, "text": "Start", "tooltip": "Starts it working"},
+            {"type": "button", "id": "start", "x": 8, "y": 50, "width": 40, "height": 18, "text": "Start", "tooltip": "Starts it working"},
         ],
     }
 
@@ -1055,7 +1055,7 @@ def new_machine(folder, *, name, display, casing, accent, recipe_ingredients=Non
         module = f"The module that's already in server/ needs its own context.bindMachine(\"{name}\", ...)."
     else:
         module = f"{_module_files(draft, name, display, PANEL_MODULE if panel else MODULE)} is its module, in server/."
-    screen = f"Its screen is the panel {name} in feature.json, with assets/panels/{name}_back.png as a plain background for you to draw over. " if panel else ""
+    screen = f"Its screen is the panel {name} in feature.json, with assets/panels/{name}_back.png as the game's own background for you to paint trims and details on. " if panel else ""
     return draft.commit(f"{display}: a machine.",
                         f"Added {display}. {module} {screen}{source}"
                         f"Left to decide: its recipes, with \"machine\": \"{name}\", and what its tick does. If it does anything by itself, declare that in automation.")

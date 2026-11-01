@@ -10,16 +10,16 @@
       "title": "Panel Kiln",
       "width": 176,
       "height": 166,
-      "background": "kiln_back",
       "inventory": {"x": 8, "y": 84},
       "widgets": [
+        {"type": "image", "x": 152, "y": 4, "width": 16, "height": 16, "image": "kiln_badge"},
         {"type": "slot", "x": 56, "y": 35, "slot": 0, "page": "main"},
         {"type": "slot", "x": 116, "y": 35, "slot": 1, "page": "main"},
         {"type": "bar", "id": "heat", "x": 80, "y": 36, "width": 24, "height": 16, "color": "#ff00ff", "text": "Heat", "page": "main"},
         {"type": "label", "id": "state", "x": 8, "y": 20, "text": "Idle", "page": "main"},
-        {"type": "button", "id": "start", "x": 8, "y": 60, "width": 40, "height": 18, "text": "Start", "tooltip": "Light it", "page": "main"},
+        {"type": "button", "id": "start", "x": 8, "y": 50, "width": 40, "height": 18, "text": "Start", "tooltip": "Light it", "page": "main"},
         {"type": "tabs", "id": "tabs", "x": 60, "y": 4, "tabs": [{"id": "main", "text": "Main"}, {"id": "talk", "text": "Talk"}]},
-        {"type": "list", "id": "offers", "x": 8, "y": 22, "width": 110, "height": 54, "max_rows": 4, "page": "talk"},
+        {"type": "list", "id": "offers", "x": 8, "y": 22, "width": 110, "height": 46, "max_rows": 4, "page": "talk"},
         {"type": "mob", "x": 124, "y": 24, "width": 44, "height": 44, "mob": "minecraft:pig", "page": "talk"},
         {"type": "text_field", "id": "name", "x": 124, "y": 70, "width": 44, "height": 12, "max_length": 12, "text": "Name", "page": "talk"}
       ]

@@ -56,20 +56,27 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 	private static final int TAB_PADDING = 10;
 	private static final int ICON_SIZE = 16;
 	private static final int TEXT_HEIGHT = 9;
+	// The colours of the game's own containers.
 	private static final int PANEL_COLOUR = 0xFFC6C6C6;
+	private static final int OUTLINE = 0xFF000000;
 	private static final int EDGE_DARK = 0xFF555555;
 	private static final int EDGE_LIGHT = 0xFFFFFFFF;
 	private static final int SLOT_COLOUR = 0xFF8B8B8B;
-	private static final int BUTTON_COLOUR = 0xFF6B6B6B;
-	private static final int BUTTON_HOVER = 0xFF8C8CB4;
-	private static final int BUTTON_OFF = 0xFF3C3C3C;
+	private static final int SLOT_SHADE = 0xFF373737;
+	private static final int TAB_HOVER = 0xFFA8A8A8;
 	private static final int TEXT_ON_BUTTON = 0xFFFFFFFF;
 	private static final int TEXT_OFF = 0xFFA0A0A0;
 	private static final int TEXT_ON_PANEL = 0xFF404040;
-	private static final int ROW_HOVER = 0x40FFFFFF;
-	private static final int TRACK_COLOUR = 0xFF373737;
 	private static final int BAR_COLOUR = 0xFF55CC55;
-	private static final int SCROLL_COLOUR = 0xFF9A9A9A;
+	private static final int SCROLLER_WIDTH = 6;
+	private static final int SMALLEST_SCROLLER = 8;
+	private static final int INVENTORY_LABEL_ABOVE = 12;
+	private static final Identifier SLOT_SPRITE = Identifier.withDefaultNamespace("container/slot");
+	private static final Identifier BUTTON_SPRITE = Identifier.withDefaultNamespace("widget/button");
+	private static final Identifier BUTTON_HOVER_SPRITE = Identifier.withDefaultNamespace("widget/button_highlighted");
+	private static final Identifier BUTTON_OFF_SPRITE = Identifier.withDefaultNamespace("widget/button_disabled");
+	private static final Identifier SCROLLER_SPRITE = Identifier.withDefaultNamespace("widget/scroller");
+	private static final Identifier SCROLLER_TRACK_SPRITE = Identifier.withDefaultNamespace("widget/scroller_background");
 	private static final int RIGHT_BUTTON = 1;
 	private static final float MOB_LOOK_OFFSET = 0.0625F;
 	// The game wants every entity it draws to have an id, and this one was never in a world to be given one.
@@ -92,6 +99,8 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 	private final Map<String, LivingEntity> mobs = new HashMap<>();
 	private final Set<String> cantDraw = new HashSet<>();
 	private String page = "";
+	private int inventoryLeft;
+	private int inventoryTop;
 
 	private record Row(String text, ItemStack icon, boolean enabled, String tooltip) {}
 
@@ -152,6 +161,8 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 		boolean shown = inventory == null || inventory.isJsonObject();
 		int left = shown && inventory != null ? number(inventory.getAsJsonObject(), "x", 0) : (this.imageWidth - CHEST_ROW * SLOT_SIZE) / 2 + 1;
 		int top = shown && inventory != null ? number(inventory.getAsJsonObject(), "y", 0) : this.imageHeight - INVENTORY_HEIGHT;
+		this.inventoryLeft = left;
+		this.inventoryTop = top;
 		for (int index = 0; index < (MAIN_ROWS + 1) * CHEST_ROW; index++) {
 			int whole = chest + index;
 			Slot old = menu.slots.get(whole);
@@ -261,13 +272,11 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 		if (!background.isEmpty()) {
 			image(graphics, background, this.leftPos, this.topPos, this.imageWidth, this.imageHeight);
 		} else {
-			graphics.fill(this.leftPos, this.topPos, this.leftPos + this.imageWidth, this.topPos + this.imageHeight, PANEL_COLOUR);
-			graphics.outline(this.leftPos, this.topPos, this.imageWidth, this.imageHeight, EDGE_DARK);
+			drawPanel(graphics, this.leftPos, this.topPos, this.imageWidth, this.imageHeight);
 			// With no art to show where they go, slots need to be drawn.
 			for (Slot slot : this.menu.slots) {
 				if (slot.isActive()) {
-					graphics.fill(this.leftPos + slot.x - 1, this.topPos + slot.y - 1, this.leftPos + slot.x + ICON_SIZE + 1, this.topPos + slot.y + ICON_SIZE + 1, SLOT_COLOUR);
-					graphics.outline(this.leftPos + slot.x - 1, this.topPos + slot.y - 1, SLOT_SIZE, SLOT_SIZE, EDGE_DARK);
+					graphics.blitSprite(RenderPipelines.GUI_TEXTURED, SLOT_SPRITE, this.leftPos + slot.x - 1, this.topPos + slot.y - 1, SLOT_SIZE, SLOT_SIZE);
 				}
 			}
 		}
@@ -276,6 +285,42 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 				draw(graphics, widget, mouseX, mouseY);
 			}
 		}
+	}
+
+	/** The same pixels as the game's own containers, at any size. assetkit's panel_back draws the same, for art to start from. */
+	private static void drawPanel(GuiGraphicsExtractor graphics, int x, int y, int width, int height) {
+		int right = x + width;
+		int bottom = y + height;
+		graphics.fill(x + 3, y + 3, right - 3, bottom - 3, PANEL_COLOUR);
+		graphics.fill(right - 3, y + 2, right - 2, y + 3, PANEL_COLOUR);
+		graphics.fill(x + 2, bottom - 3, x + 3, bottom - 2, PANEL_COLOUR);
+		graphics.fill(x + 2, y + 1, right - 3, y + 2, EDGE_LIGHT);
+		graphics.fill(x + 1, y + 2, right - 3, y + 3, EDGE_LIGHT);
+		graphics.fill(x + 1, y + 3, x + 3, bottom - 3, EDGE_LIGHT);
+		graphics.fill(x + 3, y + 3, x + 4, y + 4, EDGE_LIGHT);
+		graphics.fill(right - 3, y + 3, right - 1, bottom - 3, EDGE_DARK);
+		graphics.fill(right - 4, bottom - 4, right - 3, bottom - 3, EDGE_DARK);
+		graphics.fill(x + 3, bottom - 3, right - 1, bottom - 2, EDGE_DARK);
+		graphics.fill(x + 3, bottom - 2, right - 2, bottom - 1, EDGE_DARK);
+		graphics.fill(x + 2, y, right - 3, y + 1, OUTLINE);
+		graphics.fill(x + 1, y + 1, x + 2, y + 2, OUTLINE);
+		graphics.fill(x, y + 2, x + 1, bottom - 3, OUTLINE);
+		graphics.fill(x + 1, bottom - 3, x + 2, bottom - 2, OUTLINE);
+		graphics.fill(x + 2, bottom - 2, x + 3, bottom - 1, OUTLINE);
+		graphics.fill(x + 3, bottom - 1, right - 2, bottom, OUTLINE);
+		graphics.fill(right - 3, y + 1, right - 2, y + 2, OUTLINE);
+		graphics.fill(right - 2, y + 2, right - 1, y + 3, OUTLINE);
+		graphics.fill(right - 1, y + 3, right, bottom - 2, OUTLINE);
+		graphics.fill(right - 2, bottom - 2, right - 1, bottom - 1, OUTLINE);
+	}
+
+	/** Pressed into the panel, like a slot of any size. */
+	private static void drawSunken(GuiGraphicsExtractor graphics, int x, int y, int width, int height, int colour) {
+		graphics.fill(x, y, x + width, y + height, colour);
+		graphics.fill(x, y, x + width - 1, y + 1, SLOT_SHADE);
+		graphics.fill(x, y, x + 1, y + height - 1, SLOT_SHADE);
+		graphics.fill(x + 1, y + height - 1, x + width, y + height, EDGE_LIGHT);
+		graphics.fill(x + width - 1, y + 1, x + width, y + height, EDGE_LIGHT);
 	}
 
 	private void draw(GuiGraphicsExtractor graphics, JsonObject widget, int mouseX, int mouseY) {
@@ -316,21 +361,28 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 		float value = this.values.getOrDefault(id, widget.has("value") ? widget.get("value").getAsFloat() : 0);
 		String direction = widget.has("direction") ? string(widget, "direction") : "right";
 		boolean sideways = direction.equals("right") || direction.equals("left");
+		String image = string(widget, "image");
+		if (image.isEmpty()) {
+			// Inside a frame, the way a progress bar in a container sits in the panel.
+			drawSunken(graphics, x, y, width, height, colour(widget, "back_color", SLOT_COLOUR));
+			x++;
+			y++;
+			width -= 2;
+			height -= 2;
+		}
 		int filled = Math.round((sideways ? width : height) * value);
 		int left = direction.equals("left") ? x + width - filled : x;
 		int top = direction.equals("up") ? y + height - filled : y;
 		int shownWidth = sideways ? filled : width;
 		int shownHeight = sideways ? height : filled;
-		String image = string(widget, "image");
-		if (!image.isEmpty()) {
-			Identifier texture = Identifier.tryParse(image);
-			if (texture != null && filled > 0) {
-				graphics.blit(RenderPipelines.GUI_TEXTURED, texture, left, top, left - x, top - y, shownWidth, shownHeight, width, height);
-			}
+		if (image.isEmpty()) {
+			graphics.fill(left, top, left + shownWidth, top + shownHeight, colour(widget, "color", BAR_COLOUR));
 			return;
 		}
-		graphics.fill(x, y, x + width, y + height, colour(widget, "back_color", TRACK_COLOUR));
-		graphics.fill(left, top, left + shownWidth, top + shownHeight, colour(widget, "color", BAR_COLOUR));
+		Identifier texture = Identifier.tryParse(image);
+		if (texture != null && filled > 0) {
+			graphics.blit(RenderPipelines.GUI_TEXTURED, texture, left, top, left - x, top - y, shownWidth, shownHeight, width, height);
+		}
 	}
 
 	private void drawButton(GuiGraphicsExtractor graphics, JsonObject widget, String id, int x, int y, int width, int height, int mouseX, int mouseY) {
@@ -343,8 +395,7 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 		if (!image.isEmpty()) {
 			image(graphics, image, x, y, width, height);
 		} else {
-			graphics.fill(x, y, x + width, y + height, !on ? BUTTON_OFF : hovered ? BUTTON_HOVER : BUTTON_COLOUR);
-			graphics.outline(x, y, width, height, hovered ? EDGE_LIGHT : EDGE_DARK);
+			graphics.blitSprite(RenderPipelines.GUI_TEXTURED, !on ? BUTTON_OFF_SPRITE : hovered ? BUTTON_HOVER_SPRITE : BUTTON_SPRITE, x, y, width, height);
 		}
 		String icon = string(widget, "icon");
 		String text = this.texts.getOrDefault(id, string(widget, "text"));
@@ -363,11 +414,26 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 			int width = tabWidth(tab);
 			boolean current = string(tab, "id").equals(this.page);
 			boolean hovered = inside(mouseX, mouseY, left, y, width, TAB_HEIGHT);
-			graphics.fill(left, y, left + width, y + TAB_HEIGHT, current ? PANEL_COLOUR : hovered ? BUTTON_HOVER : BUTTON_COLOUR);
-			graphics.outline(left, y, width, TAB_HEIGHT, EDGE_DARK);
+			drawTab(graphics, left, y, width, current, hovered);
 			// Dark text on the light tab that's open would look smudged with a shadow.
 			graphics.text(this.font, string(tab, "text"), left + (width - this.font.width(string(tab, "text"))) / 2, y + (TAB_HEIGHT - TEXT_HEIGHT) / 2 + 1, current ? TEXT_ON_PANEL : TEXT_ON_BUTTON, !current);
 			left += width + 1;
+		}
+	}
+
+	/** Lit from the top left with a black edge, like everything in a container, and the open one is part of the panel. */
+	private static void drawTab(GuiGraphicsExtractor graphics, int x, int y, int width, boolean open, boolean hovered) {
+		int right = x + width;
+		int bottom = y + TAB_HEIGHT;
+		graphics.fill(x + 1, y + 1, right - 1, bottom, open ? PANEL_COLOUR : hovered ? TAB_HOVER : SLOT_COLOUR);
+		graphics.fill(x + 1, y, right - 1, y + 1, OUTLINE);
+		graphics.fill(x, y + 1, x + 1, bottom, OUTLINE);
+		graphics.fill(right - 1, y + 1, right, bottom, OUTLINE);
+		graphics.fill(x + 1, y + 1, right - 1, y + 2, EDGE_LIGHT);
+		graphics.fill(x + 1, y + 1, x + 2, bottom, EDGE_LIGHT);
+		graphics.fill(right - 2, y + 2, right - 1, bottom, EDGE_DARK);
+		if (!open) {
+			graphics.fill(x, bottom - 1, right, bottom, OUTLINE);
 		}
 	}
 
@@ -379,7 +445,10 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 		List<Row> list = this.rows.getOrDefault(id, List.of());
 		int rowHeight = number(widget, "row_height", ROW_HEIGHT);
 		int offset = scrollOf(id, list.size(), rowHeight, height);
-		graphics.fill(x, y, x + width, y + height, colour(widget, "back_color", TRACK_COLOUR));
+		int total = list.size() * rowHeight;
+		boolean scrolls = total > height;
+		int rowWidth = scrolls ? width - SCROLLER_WIDTH : width;
+		drawSunken(graphics, x, y, width, height, colour(widget, "back_color", SLOT_COLOUR));
 		graphics.enableScissor(x, y, x + width, y + height);
 		for (int index = 0; index < list.size(); index++) {
 			Row row = list.get(index);
@@ -387,22 +456,22 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 			if (top + rowHeight <= y || top >= y + height) {
 				continue;
 			}
-			if (row.enabled() && inside(mouseX, mouseY, x, y, width, height) && inside(mouseX, mouseY, x, top, width, rowHeight)) {
-				graphics.fill(x, top, x + width, top + rowHeight, ROW_HOVER);
-			}
-			int textLeft = x + 3;
+			// Each row is a button, the way a villager's trades are.
+			boolean hovered = row.enabled() && inside(mouseX, mouseY, x, y, width, height) && inside(mouseX, mouseY, x, top, rowWidth, rowHeight);
+			graphics.blitSprite(RenderPipelines.GUI_TEXTURED, !row.enabled() ? BUTTON_OFF_SPRITE : hovered ? BUTTON_HOVER_SPRITE : BUTTON_SPRITE, x, top, rowWidth, rowHeight);
+			int textLeft = x + 4;
 			if (!row.icon().isEmpty()) {
-				graphics.item(row.icon(), x + 1, top + (rowHeight - ICON_SIZE) / 2);
-				textLeft = x + ICON_SIZE + 3;
+				graphics.item(row.icon(), x + 2, top + (rowHeight - ICON_SIZE) / 2);
+				textLeft = x + ICON_SIZE + 4;
 			}
-			graphics.text(this.font, row.text(), textLeft, top + (rowHeight - TEXT_HEIGHT) / 2 + 1, row.enabled() ? TEXT_ON_BUTTON : TEXT_OFF, false);
+			graphics.text(this.font, row.text(), textLeft, top + (rowHeight - TEXT_HEIGHT) / 2 + 1, row.enabled() ? TEXT_ON_BUTTON : TEXT_OFF, true);
 		}
 		graphics.disableScissor();
-		int total = list.size() * rowHeight;
-		if (total > height) {
-			int barHeight = Math.max(8, height * height / total);
+		if (scrolls) {
+			int barHeight = Math.max(SMALLEST_SCROLLER, height * height / total);
 			int barTop = y + (height - barHeight) * offset / (total - height);
-			graphics.fill(x + width - 3, barTop, x + width, barTop + barHeight, SCROLL_COLOUR);
+			graphics.blitSprite(RenderPipelines.GUI_TEXTURED, SCROLLER_TRACK_SPRITE, x + width - SCROLLER_WIDTH, y, SCROLLER_WIDTH, height);
+			graphics.blitSprite(RenderPipelines.GUI_TEXTURED, SCROLLER_SPRITE, x + width - SCROLLER_WIDTH, barTop, SCROLLER_WIDTH, barHeight);
 		}
 	}
 
@@ -459,6 +528,10 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 	protected void extractLabels(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
 		if (!string(this.definition, "title").isEmpty()) {
 			graphics.text(this.font, this.title, this.titleLabelX, this.titleLabelY, TEXT_ON_PANEL, false);
+		}
+		JsonElement inventory = this.definition.get("inventory");
+		if (inventory == null || inventory.isJsonObject()) {
+			graphics.text(this.font, this.playerInventoryTitle, this.inventoryLeft, this.inventoryTop - INVENTORY_LABEL_ABOVE, TEXT_ON_PANEL, false);
 		}
 	}
 
