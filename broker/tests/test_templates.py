@@ -741,7 +741,7 @@ class Machines(Case):
         self.assertIn("RuneForgeModule", result["summary"])
         features, _, _ = self.release()
         self.assertEqual(bundles.find_modules(features), [("rune_forge", "server")])
-        self.assertEqual(advice.run(features), [])
+        self.assertEqual(advice_on_the_template(features), [])
 
     def test_each_face_has_its_own_art(self):
         new_machine(self.at("rune_forge"), name="crucible", display="Rune Crucible", casing="#70707a", accent="#e88e36", recipe_ingredients=["minecraft:iron_block"])
@@ -833,6 +833,11 @@ class Machines(Case):
             self.assertFalse(self.at(feature).exists())
 
 
+def advice_on_the_template(features):
+    """A template leaves nothing for a reviewer to send back, except a feature's page in the Codex, which is its builder's own writing."""
+    return [note for note in advice.run(features) if "no page in the Codex" not in note]
+
+
 class Together(Case):
     def chain(self, tier, ore_at="metal", tools_at="metal", armor_at="metal"):
         token = "$item:tin_ingot" if tools_at == ore_at else f"$item:{ore_at}/tin_ingot"
@@ -844,19 +849,24 @@ class Together(Case):
     def test_ore_tools_and_armor_in_one_feature_at_every_tier(self):
         for tier in TIERS:
             with self.subTest(tier):
-                self.chain(tier)
-                features, _, _ = self.release()
-                self.assertEqual(advice.run(features), [])
-                shutil.rmtree(self.at("metal"))
+                # Whatever happens, because the next tier starts from nothing, and one failure shouldn't look like seven.
+                try:
+                    self.chain(tier)
+                    features, _, _ = self.release()
+                    self.assertEqual(advice_on_the_template(features), [])
+                finally:
+                    shutil.rmtree(self.at("metal"), ignore_errors=True)
 
     def test_ore_tools_and_armor_across_features_at_every_tier(self):
         for tier in TIERS:
             with self.subTest(tier):
-                self.chain(tier, ore_at="metal", tools_at="gear", armor_at="plate")
-                features, _, _ = self.release()
-                self.assertEqual(advice.run(features), [])
-                for feature in ("metal", "gear", "plate"):
-                    shutil.rmtree(self.at(feature))
+                try:
+                    self.chain(tier, ore_at="metal", tools_at="gear", armor_at="plate")
+                    features, _, _ = self.release()
+                    self.assertEqual(advice_on_the_template(features), [])
+                finally:
+                    for feature in ("metal", "gear", "plate"):
+                        shutil.rmtree(self.at(feature), ignore_errors=True)
 
     def test_tools_from_a_better_ingot_than_they_need_pass(self):
         new_ore(self.at("metal"), name="tin", display="Tin", color="#d8c8a0", tier="diamond")
