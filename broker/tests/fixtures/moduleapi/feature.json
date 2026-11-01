@@ -122,7 +122,8 @@
     "api_cell": {
       "display": "Api Cell",
       "texture": "api_top",
-      "bar": 0.5
+      "bar": 0.5,
+      "from_module": true
     },
     "api_ingot": {
       "display": "Api Ingot",

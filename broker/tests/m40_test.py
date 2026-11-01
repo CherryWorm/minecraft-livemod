@@ -907,7 +907,11 @@ def main():
         for stage in wanted:
             for play in STAGES[stage]:
                 print(f"--- {play.__name__}", flush=True)
-                play(client)
+                # A slot to run in can take an hour to get, so one thing going wrong shouldn't lose the rest of the run.
+                try:
+                    play(client)
+                except Exception as error:  # noqa: BLE001 - whatever it was, it's reported, and the next one still runs
+                    check(f"{play.__name__} got to the end", False, repr(error)[:800])
     finally:
         client.stop()
     shots = mods / "companion" / "build" / "run" / "clientGameTest" / "screenshots"

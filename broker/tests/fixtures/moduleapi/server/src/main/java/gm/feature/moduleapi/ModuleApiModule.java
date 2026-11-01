@@ -34,7 +34,9 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.BlockHitResult;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /** Says everything it hears in chat, so a test client can tell what happened on the server. */
 public final class ModuleApiModule implements ServerModule {
@@ -42,6 +44,7 @@ public final class ModuleApiModule implements ServerModule {
 	private static final int LAMP_HIGH = 14;
 	private ServerModuleContext context;
 	private boolean postOn = true;
+	private final Set<Integer> cheatedDeath = new HashSet<>();
 
 	private void say(String text) {
 		this.context.server().getPlayerList().broadcastSystemMessage(Component.literal("API " + text), false);
@@ -157,9 +160,8 @@ public final class ModuleApiModule implements ServerModule {
 
 			@Override
 			public boolean survives(LivingEntity target, DamageSource source, float amount) {
-				if (target.getType() == context.mob("api_calf") && !target.getTags().contains("dead_for_real")) {
+				if (target.getType() == context.mob("api_calf") && ModuleApiModule.this.cheatedDeath.add(target.getId())) {
 					say("calf cheats death from " + amount);
-					target.addTag("dead_for_real");
 					target.setHealth(3);
 					return true;
 				}
