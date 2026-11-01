@@ -3,6 +3,7 @@
 The agent works in a git worktree, and only plain code commits, requests checks and asks for a release.
 """
 import asyncio
+import dataclasses
 import inspect
 import json
 import os
@@ -26,6 +27,10 @@ FEATURE_RESEARCH = 4
 TUNES_PER_HOUR = 6
 REQUEST_TIMEOUT = {"lint": 300, "check": 300, "gates": 1800, "release": 1800, "javap": 300, "server_icon": 300, "set_rule": 300}  # Generous, because they queue behind whatever's running.
 KEEP_ASKING = ("gates", "release")  # A broker that's down or far behind isn't something a builder can fix, so these wait for it, which costs nothing.
+RELEASE_TREE = TREES / "_release"
+RELEASE_BRANCH = "release/next"
+WENT_OUT = ("released", "nothing_to_release")
+MOST_IN_A_RELEASE = 8  # Finding a bad one takes longer the more there are. Anything over this goes in the next release, straight after.
 # Turns and usage for one attempt, and how many attempts. A feature is everything that has to arrive together, so these leave
 # room for that, and most use far less. The later a stage is, the bigger its features can be, and
 # nobody's waiting on them, because they're built in the background while people play.
@@ -257,6 +262,15 @@ BUILDER_DENIED = ["Read(//proc/**)", "Read(//run/**)", "Read(//home/agent/.claud
                   "Glob(//workspace/state/**)", "WebFetch", "WebSearch"]
 
 
+@dataclasses.dataclass
+class Ready:
+    """A feature that's passed everything, waiting to go out."""
+    feature_id: str
+    tree: pathlib.Path
+    node: str
+    answer: asyncio.Future
+
+
 class Workshop:
     def __init__(self, governor, on_released, web_research, reached=lambda: ()):
         self.governor = governor
@@ -268,6 +282,78 @@ class Workshop:
         self.release_lock = asyncio.Lock()
         self.lanes = {}  # Models other than Claude that a builder can run on, by name.
         self.hub = None  # Other machines that can do a builder's work.
+        self.ready = []  # What's passed everything and is waiting for the next release.
+        self.releasing = None
+
+    # Releases -----------------------------------------------------------------------------------------------
+
+    async def _release(self, feature_id, tree, node):
+        """Waits for the next release, which takes everything that's ready by then. A release costs about the same whatever's in it,
+        and players get more at once. Returns what the broker said about the release that this feature's fate was settled in."""
+        ready = Ready(feature_id, tree, node, asyncio.get_running_loop().create_future())
+        self.ready.append(ready)
+        if self.releasing is None or self.releasing.done():
+            self.releasing = asyncio.create_task(self._run_releases())
+        return await ready.answer
+
+    async def _run_releases(self):
+        while self.ready:
+            batch, self.ready = self.ready[:MOST_IN_A_RELEASE], self.ready[MOST_IN_A_RELEASE:]
+            await self._ship(batch)
+
+    async def _ship(self, batch):
+        """If a release of several fails, each half goes on its own, so one bad feature can't hold back the others, and
+        it's that one that gets told. They've each passed the gates alone, so this is rare."""
+        try:
+            batch, answer = await self._release_together(batch)
+        except Exception as error:  # noqa: BLE001 - everyone waiting has to hear, whatever went wrong
+            answer = {"result": "blocked", "gate": "release", "reason": f"{type(error).__name__}: {error}"}
+        if not batch:
+            return
+        if answer.get("result") in WENT_OUT or len(batch) == 1:
+            for ready in batch:
+                ready.answer.set_result(answer)
+            return
+        print(f"a release of {len(batch)} failed at {answer.get('gate')}, so trying them in smaller groups", flush=True)
+        middle = len(batch) // 2
+        await self._ship(batch[:middle])
+        await self._ship(batch[middle:])
+
+    async def _release_together(self, batch):
+        """Asks for one release of all of them. Returns who was in it, because one that won't merge is told so and left out."""
+        # One at a time, from a commit merged with everything already out. Without this, a release that's waiting
+        # its turn would look like removing whatever the one ahead of it just shipped.
+        async with self.release_lock:
+            included = self._merge_into_release(batch)
+            if not included:
+                return [], {}
+            names = ", ".join(ready.feature_id for ready in included)
+            print(f"releasing together: {names}", flush=True)
+            name = included[0].feature_id if len(included) == 1 else f"batch{len(included)}"
+            answer = await request("release", commit=_git("rev-parse", "HEAD", cwd=RELEASE_TREE), release_id=f"{name}-{int(time.time())}")
+            if answer.get("result") in WENT_OUT:
+                _git("checkout", "-q", "main")
+                _git("merge", "-q", "--no-ff", "-m", f"Released {names}", RELEASE_BRANCH)
+            return included, answer
+
+    def _merge_into_release(self, batch):
+        if not RELEASE_TREE.exists():
+            TREES.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["git", "worktree", "prune"], cwd=REPO, check=False)
+            _git("worktree", "add", "-q", "-B", RELEASE_BRANCH, str(RELEASE_TREE), "main")
+        _git("checkout", "-q", "-f", "-B", RELEASE_BRANCH, "main", cwd=RELEASE_TREE)
+        included = []
+        for ready in batch:
+            try:
+                ready_commit(f"{ready.feature_id}: ready to release", ready.tree, ready.feature_id, ready.node)
+                _git("merge", "-q", "--no-edit", f"feature/{ready.feature_id}", cwd=RELEASE_TREE)
+                included.append(ready)
+            except subprocess.CalledProcessError as error:
+                subprocess.run(["git", "merge", "--abort"], cwd=RELEASE_TREE, check=False, capture_output=True)
+                ready.answer.set_result({"result": "blocked", "gate": "merge", "reason": f"It changes something another feature changes too, so they can't both go out: {error.stderr or error}"})
+        return included
+
+    # Everything else ----------------------------------------------------------------------------------------
 
     def world_server(self, can_tune=False):
         """What the director, builders and tuner can ask about the world, and for the tuner, change."""
@@ -441,17 +527,9 @@ class Workshop:
                 print(f"{feature_id}: shipping anyway: the problems aren't serious and the gates passed", flush=True)
 
             began = time.monotonic()
-            # One at a time, from the commit that's merged with everything already out. Without this, a release that's
-            # waiting its turn would look like removing whatever the one ahead of it just shipped.
-            async with self.release_lock:
-                commit = ready_commit(f"{feature_id}: ready to release", tree, feature_id, node)
-                released = await request("release", commit=commit, release_id=f"{feature_id}-{int(time.time())}")
-                went_out = released.get("result") in ("released", "nothing_to_release")
-                if went_out:
-                    _git("checkout", "-q", "main")
-                    _git("merge", "-q", "--no-ff", "-m", f"Released {feature_id}", f"feature/{feature_id}")
+            released = await self._release(feature_id, tree, node)
             timings["release"] = round(time.monotonic() - began, 1)
-            if not went_out:
+            if released.get("result") not in WENT_OUT:
                 feedback = f"Release failed at {released.get('gate')}: {released.get('reason')}\n\nFix it."
                 last_problem = f"Release: {str(released.get('reason'))[:300]}"
                 print(f"{feature_id}: release failed: {released.get('reason')}", flush=True)

@@ -168,10 +168,11 @@ def started_again(request_id):
 def next_request(pending):
     """Still one at a time, because there's one shadow server and releases must not overlap. But with several builders
     working, a quick check shouldn't wait behind everyone else's full test run, and a small change a player is waiting
-    for goes ahead of a big one that's being built in the background."""
+    for goes ahead of a big one that's being built in the background. So does a release, because that's finished work
+    that everything still being tested would otherwise have to be tested again on top of."""
     def order(path):
         request = json.loads(path.read_text(encoding="utf-8"))
-        return (0 if request["kind"] in QUICK else 1 if request.get("hurry") else 2, path.stat().st_mtime)
+        return (0 if request["kind"] in QUICK else 1 if request.get("hurry") or request["kind"] == "release" else 2, path.stat().st_mtime)
     return min(pending, key=order)
 
 

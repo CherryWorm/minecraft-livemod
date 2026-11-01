@@ -24,8 +24,13 @@ class Order(unittest.TestCase):
         return path
 
     def test_the_oldest_goes_first(self):
-        first, second = self.request("a", "gates"), self.request("b", "release")
+        first, second = self.request("a", "gates"), self.request("b", "gates")
         self.assertEqual(daemon.next_request([second, first]), first)
+
+    def test_a_release_goes_ahead_of_a_test_run(self):
+        gates, release = self.request("a", "gates"), self.request("b", "release")
+        self.assertEqual(daemon.next_request([gates, release]), release)
+        self.assertEqual(daemon.next_request([release, self.request("c", "check")]).name, "c.json")
 
     def test_a_quick_check_goes_ahead_of_a_test_run(self):
         gates = self.request("a", "gates")
