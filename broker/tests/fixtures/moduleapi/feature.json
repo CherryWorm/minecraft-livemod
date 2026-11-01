@@ -1,22 +1,165 @@
 {
   "id": "moduleapi",
   "phase": 1,
-  "summary": "Test fixture for the server modules' API: blocks that face a way and refuse things, redstone, light, unbreakable blocks and model parts.",
+  "summary": "Test fixture for the server modules' API: blocks that face a way and refuse things, redstone, light, unbreakable blocks and model parts. Mobs that fly and drop several things, walking somewhere, and changing damage and knockback.",
   "blocks": {
-    "api_front": {"family": "facing", "display": "Api Front", "texture": "api_side", "from_module": true,
-                  "faces": {"front": "api_front", "side": "api_side", "top": "api_top"}},
-    "api_point": {"family": "facing", "display": "Api Point", "texture": "api_side", "from_module": true, "facing": "all",
-                  "faces": {"front": "api_front", "side": "api_side"}},
-    "api_kiln": {"family": "facing_machine", "display": "Api Kiln", "texture": "api_side", "from_module": true, "tool": "pickaxe",
-                 "faces": {"front": "api_front", "side": "api_side"}, "comparator": true,
-                 "inventory": {"inputs": 2, "outputs": 1, "limits": {"0": 4}}},
-    "api_post": {"family": "soil", "display": "Api Post", "texture": "api_side", "from_module": true, "redstone": true},
-    "api_gate": {"family": "soil", "display": "Api Gate", "texture": "api_side", "from_module": true},
-    "api_lamp": {"family": "stone", "display": "Api Lamp", "texture": "api_top", "from_module": true, "light": 9},
-    "api_vault": {"family": "stone", "display": "Api Vault", "texture": "api_front", "from_module": true, "unbreakable": true},
-    "api_statue": {"family": "model", "display": "Api Statue", "texture": "api_top", "model": "api_statue", "from_module": true, "facing": "horizontal", "glowing": ["head"]}
+    "api_front": {
+      "family": "facing",
+      "display": "Api Front",
+      "texture": "api_side",
+      "from_module": true,
+      "faces": {
+        "front": "api_front",
+        "side": "api_side",
+        "top": "api_top"
+      }
+    },
+    "api_point": {
+      "family": "facing",
+      "display": "Api Point",
+      "texture": "api_side",
+      "from_module": true,
+      "facing": "all",
+      "faces": {
+        "front": "api_front",
+        "side": "api_side"
+      }
+    },
+    "api_kiln": {
+      "family": "facing_machine",
+      "display": "Api Kiln",
+      "texture": "api_side",
+      "from_module": true,
+      "tool": "pickaxe",
+      "faces": {
+        "front": "api_front",
+        "side": "api_side"
+      },
+      "comparator": true,
+      "inventory": {
+        "inputs": 2,
+        "outputs": 1,
+        "limits": {
+          "0": 4
+        }
+      }
+    },
+    "api_post": {
+      "family": "soil",
+      "display": "Api Post",
+      "texture": "api_side",
+      "from_module": true,
+      "redstone": true
+    },
+    "api_gate": {
+      "family": "soil",
+      "display": "Api Gate",
+      "texture": "api_side",
+      "from_module": true
+    },
+    "api_lamp": {
+      "family": "stone",
+      "display": "Api Lamp",
+      "texture": "api_top",
+      "from_module": true,
+      "light": 9
+    },
+    "api_vault": {
+      "family": "stone",
+      "display": "Api Vault",
+      "texture": "api_front",
+      "from_module": true,
+      "unbreakable": true
+    },
+    "api_statue": {
+      "family": "model",
+      "display": "Api Statue",
+      "texture": "api_top",
+      "model": "api_statue",
+      "from_module": true,
+      "facing": "horizontal",
+      "glowing": [
+        "head"
+      ]
+    }
   },
   "items": {
-    "api_token": {"display": "Api Token", "texture": "api_top", "from_module": true}
+    "api_token": {
+      "display": "Api Token",
+      "texture": "api_top",
+      "from_module": true
+    },
+    "api_fang": {
+      "display": "Api Fang",
+      "texture": "api_top"
+    },
+    "api_scale": {
+      "display": "Api Scale",
+      "texture": "api_side"
+    },
+    "api_rare": {
+      "display": "Api Rare",
+      "texture": "api_front"
+    }
+  },
+  "mobs": {
+    "api_bat": {
+      "category": "creature",
+      "display": "Api Bat",
+      "model": "api_bat",
+      "behaviour": "passive",
+      "health": 4,
+      "damage": 0,
+      "speed": 0.3,
+      "width": 0.6,
+      "height": 0.6,
+      "flying": true,
+      "glowing": [
+        "head"
+      ]
+    },
+    "api_ox": {
+      "category": "creature",
+      "display": "Api Ox",
+      "model": "api_ox",
+      "behaviour": "passive",
+      "health": 6,
+      "damage": 0,
+      "speed": 0.25,
+      "width": 0.8,
+      "height": 0.8,
+      "knockback_resistance": 1,
+      "drops": [
+        {
+          "item": "api_fang",
+          "count": [
+            2,
+            2
+          ]
+        },
+        {
+          "item": "api_scale",
+          "count": [
+            1,
+            1
+          ]
+        },
+        {
+          "item": "api_rare",
+          "chance": 0.001
+        }
+      ]
+    },
+    "api_calf": {
+      "category": "creature",
+      "display": "Api Calf",
+      "model": "api_ox",
+      "behaviour": "passive",
+      "health": 6,
+      "damage": 0,
+      "speed": 0.25,
+      "width": 0.8,
+      "height": 0.8
+    }
   }
 }

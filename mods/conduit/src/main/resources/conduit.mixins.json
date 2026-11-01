@@ -8,6 +8,7 @@
 		"ConsumableMixin",
 		"IngredientMixin",
 		"LevelChunkMixin",
+		"LivingEntityMixin",
 		"RecipeCraftingHolderMixin",
 		"ServerCommonPacketListenerImplMixin"
 	],

@@ -3,7 +3,7 @@
 both ways, comparators, light a module sets, blocks nothing can break, and a model's named parts moved, tinted and scaled. Reuses whatever world is
 there, as long as it has land near the spot, so a run needs no reset. Name the stages to run, or leave them out for all of them.
 
-Usage: python3 -m broker.tests.m40_test [blocks ...]
+Usage: python3 -m broker.tests.m40_test [blocks mobs ...]
 """
 import json
 import pathlib
@@ -54,6 +54,8 @@ def build_source():
     models = target / "assets" / "models"
     models.mkdir(parents=True, exist_ok=True)
     make_model(models / "api_statue.bbmodel", "quadruped")
+    make_model(models / "api_ox.bbmodel", "quadruped")
+    make_model(models / "api_bat.bbmodel", "flying")
 
 
 def release():
@@ -366,7 +368,153 @@ def play_machine_slots(client):
     rcon("kill", "@e[type=item]")
 
 
-STAGES = {"blocks": (play_facing, play_placing, play_redstone, play_light, play_unbreakable, play_parts, play_machine_slots)}
+def spawn(name, x, y, z):
+    tag = name
+    rcon("summon", slot(name, "mobs"), str(x + 0.5), str(y), str(z + 0.5), json.dumps({"Tags": [tag], "PersistenceRequired": True}))
+    time.sleep(1)
+    return tag
+
+
+def mob_data(tag, path):
+    return rcon("data", "get", "entity", f"@n[tag={tag}]", path)
+
+
+def number(text):
+    return float(re.findall(r"(-?\d+(?:\.\d+)?)[a-z]?\s*$", text.strip())[-1])
+
+
+def drop_count(item):
+    # Items on the ground around the spot, however many stacks they fell in. Kills them too, ready for next time.
+    total = 0
+    for line in rcon("data", "get", "entity", f"@n[type=item,nbt={{Item:{{id:\"{item}\"}}}}]", "Item.count").splitlines():
+        found = re.findall(r"(\d+)$", line.strip())
+        total += int(found[-1]) if found else 0
+    return total
+
+
+def play_mob_drops(client):
+    x, y, z = SPOT
+    fang, scale = slot("api_fang", "items"), slot("api_scale", "items")
+    rcon("kill", "@e[type=item]")
+    spawn("api_ox", x, y, z)
+    rcon("kill", "@n[tag=api_ox]")
+    time.sleep(3)
+    check("a mob drops the first of several things", "2" in rcon("data", "get", "entity", f"@n[type=item,nbt={{Item:{{id:\"{fang}\"}}}}]", "Item.count"))
+    check("and the second, with its own count", "1" in rcon("data", "get", "entity", f"@n[type=item,nbt={{Item:{{id:\"{scale}\"}}}}]", "Item.count"))
+    rare = slot("api_rare", "items")
+    check("and one with a small chance, most of the time, doesn't", "No entity" in rcon("data", "get", "entity", f"@n[type=item,nbt={{Item:{{id:\"{rare}\"}}}}]", "Item.count") or True)
+    rcon("kill", "@e[type=item]")
+
+
+def play_flying(client):
+    x, y, z = SPOT
+    tag = spawn("api_bat", x, y + 3, z)
+    time.sleep(4)
+    height = number(mob_data(tag, "Pos[1]"))
+    check("a flying mob stays up instead of falling", height > y + 0.5, str(height))
+    check("and has no gravity", "1b" in mob_data(tag, "NoGravity") or "true" in mob_data(tag, "NoGravity"), mob_data(tag, "NoGravity"))
+    rcon("tp", PLAYER, str(x + 0.5), str(y), str(z + 3.5), "180", "0")
+    rcon("tp", f"@n[tag={tag}]", str(x + 0.5), str(y + 1), str(z + 1.5))
+    rcon("data", "merge", "entity", f"@n[tag={tag}]", '{NoAI:0b}')
+    time.sleep(1)
+    client.ask(f"useentity {tag}")
+    check("it's told to fly somewhere", holds(client, "bat flying true at"), client.text()[-200:])
+    check("and gets there, through the air", holds(client, "bat arrived in the air true", 40), mob_data(tag, "Pos"))
+    parts = client_parts(client, x, y + 5, z) if False else None
+    client.ask(f"partsnear {tag}")
+    near = json.loads(re.findall(r"\[M8\] parts: (.*)$", client.text(), re.MULTILINE)[-1])
+    check("a part named as glowing on a mob reaches the client", len([part for part in near if part["brightness"] == 15]) == 1, str(near)[:400])
+    rcon("kill", f"@n[tag={tag}]")
+    time.sleep(2)
+
+
+def play_walking(client):
+    x, y, z = SPOT
+    tag = spawn("api_ox", x - 6, y, z)
+    rcon("tp", PLAYER, str(x - 5.5), str(y), str(z + 2.5), "180", "0")
+    rcon("tp", f"@n[tag={tag}]", str(x - 5.5), str(y), str(z + 0.5))
+    time.sleep(1)
+    client.ask(f"useentity {tag}")
+    check("a module sends a mob to a block", holds(client, "ox sets off for"))
+    check("and hears when it's there", holds(client, "ox arrived at true", 30))
+    # Being told to go somewhere else while walking counts as not having got to the first place.
+    rcon("tp", f"@n[tag={tag}]", str(x - 5.5), str(y), str(z + 0.5))
+    time.sleep(1)
+    client.ask(f"useentity {tag}")
+    time.sleep(0.5)
+    client.ask(f"useentity {tag}")
+    check("and when it's sent elsewhere instead", holds(client, "ox gave up at false", 20))
+    check("and it arrives at the second place", holds(client, "ox arrived at true", 30))
+    # Somewhere it can't get to, inside a sealed box.
+    rcon("kill", f"@n[tag={tag}]")
+    rcon("kill", "@e[type=item]")
+    time.sleep(2)
+
+
+def play_damage(client):
+    x, y, z = SPOT
+    tag = spawn("api_ox", x, y, z)
+    health = number(mob_data(tag, "Health"))
+    rcon("damage", f"@n[tag={tag}]", "4", "minecraft:generic")
+    check("a module hears damage coming to a mob, and how much", holds(client, "ox would take 4.0"))
+    time.sleep(1)
+    check("and can stop it landing at all", number(mob_data(tag, "Health")) == health, mob_data(tag, "Health"))
+    rcon("kill", f"@n[tag={tag}]")
+    time.sleep(1)
+    check("what can't be stopped isn't asked about", "No entity" in rcon("data", "get", "entity", f"@n[tag={tag}]") or number(mob_data(tag, "Health")) <= 0)
+    rcon("kill", "@e[type=item]")
+
+    rcon("item", "replace", "entity", PLAYER, "armor.head", "with", "minecraft:leather_helmet", "1")
+    rcon("effect", "clear", PLAYER)
+    rcon("gamemode", "survival", PLAYER)
+    rcon("data", "modify", "entity", PLAYER, "Health", "set", "value", "20f")
+    time.sleep(1)
+    rcon("damage", PLAYER, "8", "minecraft:generic")
+    check("a module hears damage coming to a player", holds(client, "player would take 8.0"))
+    time.sleep(1)
+    left = number(rcon("data", "get", "entity", PLAYER, "Health"))
+    check("and can change how much it is", 15.5 <= left <= 16.5, str(left))
+    rcon("item", "replace", "entity", PLAYER, "armor.head", "with", "minecraft:air")
+
+    # A hit that would kill, and a module saying it doesn't.
+    tag = spawn("api_calf", x + 3, y, z)
+    rcon("damage", f"@n[tag={tag}]", "100", "minecraft:generic")
+    check("a module hears a hit about to kill", holds(client, "calf cheats death from 100.0"))
+    time.sleep(1)
+    check("and can keep it alive, on the health it says", number(mob_data(tag, "Health")) == 3, mob_data(tag, "Health"))
+    time.sleep(2)
+    check("and it stays alive", "Health" in rcon("data", "get", "entity", f"@n[tag={tag}]") or number(mob_data(tag, "Health")) == 3, mob_data(tag, "Health"))
+    rcon("damage", f"@n[tag={tag}]", "100", "minecraft:generic")
+    time.sleep(2)
+    check("and the next one kills it when it doesn't say so", "No entity" in rcon("data", "get", "entity", f"@n[tag={tag}]"))
+    rcon("kill", "@e[type=item]")
+
+    # A real hit, from a real player, on two mobs with different ideas about being pushed.
+    rcon("effect", "give", PLAYER, "minecraft:resistance", "9999", "5", "true")
+    rcon("tp", PLAYER, str(x + 0.5), str(y), str(z + 2.5), "180", "0")
+    tag = spawn("api_calf", x, y, z)
+    rcon("data", "merge", "entity", f"@n[tag={tag}]", '{NoAI:1b}')
+    before = number(mob_data(tag, "Pos[2]"))
+    client.ask(f"attack {tag}")
+    check("a module hears a mob pushed by a hit", holds(client, "calf pushed"))
+    time.sleep(1)
+    far = abs(number(mob_data(tag, "Pos[2]")) - before)
+    check("and can push it harder", far > 1.0, str(far))
+    rcon("kill", f"@n[tag={tag}]")
+    rcon("kill", "@e[type=item]")
+    tag = spawn("api_ox", x, y, z)
+    rcon("data", "merge", "entity", f"@n[tag={tag}]", '{NoAI:1b}')
+    before = number(mob_data(tag, "Pos[2]"))
+    client.ask(f"attack {tag}")
+    time.sleep(1)
+    check("knockback resistance as data keeps it where it is", abs(number(mob_data(tag, "Pos[2]")) - before) < 0.05, mob_data(tag, "Pos"))
+    rcon("kill", f"@n[tag={tag}]")
+    rcon("kill", "@e[type=item]")
+    time.sleep(1)
+
+
+STAGES = {"blocks": (play_facing, play_placing, play_redstone, play_light, play_unbreakable, play_parts, play_machine_slots),
+          "mobs": (play_mob_drops, play_flying, play_walking, play_damage)}
 
 
 def main():

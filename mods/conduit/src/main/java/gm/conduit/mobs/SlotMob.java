@@ -10,8 +10,12 @@ import eu.pb4.polymer.virtualentity.api.attachment.EntityAttachment;
 import eu.pb4.polymer.virtualentity.api.elements.TextDisplayElement;
 import gm.conduit.api.MobBehavior;
 import gm.conduit.modules.ServerModuleHost;
+import de.tomalbrc.bil.core.holder.wrapper.Bone;
+import de.tomalbrc.bil.core.holder.wrapper.ItemBone;
+import eu.pb4.polymer.virtualentity.api.elements.DisplayElement;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.resources.Identifier;
@@ -19,6 +23,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.util.Brightness;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -28,7 +33,11 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityDimensions;
 import net.minecraft.world.entity.EntityEvent;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.control.FlyingMoveControl;
+import net.minecraft.world.entity.ai.control.MoveControl;
+import net.minecraft.world.entity.ai.navigation.FlyingPathNavigation;
 import net.minecraft.world.entity.ai.util.DefaultRandomPos;
+import net.minecraft.world.entity.animal.FlyingAnimal;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.PathfinderMob;
@@ -40,24 +49,33 @@ import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
 import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
 import net.minecraft.world.entity.ai.goal.PanicGoal;
 import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
+import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomFlyingGoal;
 import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
 import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
 import net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * A creature with no fixed identity. Its type is one of a fixed pool registered at boot, and everything else
  * comes from the current release: looks, size, stats, behaviour, so a new mob needs no restart. A slot with
  * nothing bound removes itself rather than standing around invisible.
  */
-public final class SlotMob extends PathfinderMob implements AnimatedEntity {
+public final class SlotMob extends PathfinderMob implements AnimatedEntity, FlyingAnimal {
 	private static final String IDLE = "idle";
 	private static final String WALK = "walk";
+	private static final String FLY = "fly";
+	/** How long a mob keeps trying to get somewhere before giving up, however far that is, and how often it looks for a way again. */
+	private static final int WALK_GIVES_UP_TICKS = 2400;
+	private static final int WALK_REPLAN_TICKS = 20;
+	private static final int STUCK_TRIES = 6;
+	private static final double ARRIVED_WITHIN = 1.5;
 	private static final String HURT = "hurt";
 	private static final String DEATH = "death";
 	private static final int NORMAL_DEATH_TICKS = 20;
@@ -96,6 +114,16 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 	private int tint = NO_TINT;
 	/** How long until it's grown, in ticks. It's only a baby while this isn't 0, and if it's below 0 it stays one. */
 	private int growsUpIn;
+	/** Where a module has sent it, with what to do once it's there, and who asked. Not saved, because that's code that may not be there next time. */
+	private BlockPos walkingTo;
+	private double walkSpeed;
+	private Consumer<Boolean> walkDone;
+	private MobBehavior walkOwner;
+	private int walkUntil;
+	private int walkFailures;
+	private boolean flies;
+	/** What modules have done to its parts, by part, kept here so it comes back with the world. */
+	private CompoundTag parts = new CompoundTag();
 
 	public SlotMob(EntityType<? extends PathfinderMob> type, Level level) {
 		super(type, level);
@@ -123,6 +151,9 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 		getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(definition.speed());
 		getAttribute(Attributes.FOLLOW_RANGE).setBaseValue(definition.followRange());
 		getAttribute(Attributes.ARMOR).setBaseValue(definition.armor());
+		getAttribute(Attributes.KNOCKBACK_RESISTANCE).setBaseValue(definition.knockbackResistance());
+		getAttribute(Attributes.FLYING_SPEED).setBaseValue(definition.speed());
+		setFlies(definition.flying());
 		refreshDimensions();
 		if (this.holder != null) {
 			this.holder.destroy();
@@ -146,6 +177,7 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 
 	private void installGoals(MobDefinition definition) {
 		this.goalSelector.addGoal(0, new FloatGoal(this));
+		this.goalSelector.addGoal(1, new WalkGoal(this));
 		if (definition.mind() != null) {
 			this.goalSelector.addGoal(1, new MindGoal(this));
 		}
@@ -165,7 +197,7 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 			}
 			default -> this.goalSelector.addGoal(2, new PanicGoal(this, 1.4));
 		}
-		this.goalSelector.addGoal(5, new WaterAvoidingRandomStrollGoal(this, 0.8));
+		this.goalSelector.addGoal(5, definition.flying() ? new WaterAvoidingRandomFlyingGoal(this, 0.8) : new WaterAvoidingRandomStrollGoal(this, 0.8));
 		this.goalSelector.addGoal(6, new LookAtPlayerGoal(this, Player.class, 8.0F));
 		this.goalSelector.addGoal(7, new RandomLookAroundGoal(this));
 	}
@@ -195,6 +227,162 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 		MobBehavior behavior = ServerModuleHost.instance().mobBehavior(slotId());
 		if (behavior != null) {
 			ServerModuleHost.instance().guarded(slotId(), () -> behavior.tick(this));
+		}
+	}
+
+	/** Flying is how it's steered, not just that it stays up, so this swaps what does the steering. */
+	private void setFlies(boolean flying) {
+		if (flying == this.flies) {
+			return;
+		}
+		this.flies = flying;
+		setNoGravity(flying);
+		getNavigation().stop();
+		if (flying) {
+			this.moveControl = new FlyingMoveControl<>(this, 20, true);
+			FlyingPathNavigation navigation = new FlyingPathNavigation(this, level());
+			navigation.setCanOpenDoors(false);
+			navigation.setCanFloat(true);
+			this.navigation = navigation;
+		} else {
+			this.moveControl = new MoveControl(this);
+			this.navigation = createNavigation(level());
+		}
+	}
+
+	@Override
+	public boolean isFlying() {
+		return this.flies;
+	}
+
+	@Override
+	public void travel(Vec3 input) {
+		if (this.flies) {
+			travelFlying(input, getSpeed());
+		} else {
+			super.travel(input);
+		}
+	}
+
+	@Override
+	protected void checkFallDamage(double ya, boolean onGround, BlockState onState, BlockPos pos) {
+		if (!this.flies) {
+			super.checkFallDamage(ya, onGround, onState, pos);
+		}
+	}
+
+	/**
+	 * Goes to a block, over whatever its usual wandering would have it do, and says how that went: true once it's there, or false if it can't get there or
+	 * gives up after 2 minutes. Its speed is a multiple of its usual one. Anything it's already been told to walk to is forgotten, and hears false. A restart,
+	 * or its module being replaced, forgets it too, without a word, because the code to run wouldn't be there.
+	 */
+	public void walkTo(BlockPos place, double speed, Consumer<Boolean> done) {
+		finishWalk(false);
+		this.walkingTo = place;
+		this.walkSpeed = speed;
+		this.walkDone = done;
+		this.walkOwner = ServerModuleHost.instance().mobBehavior(slotId());
+		this.walkUntil = this.tickCount + WALK_GIVES_UP_TICKS;
+		this.walkFailures = 0;
+		getNavigation().stop();
+	}
+
+	public boolean isWalking() {
+		return this.walkingTo != null;
+	}
+
+	/** Stops it walking anywhere, which it hears as not having got there. */
+	public void stopWalking() {
+		finishWalk(false);
+		getNavigation().stop();
+	}
+
+	/** Only WalkGoal calls this, so a mob with its AI turned off just stands still. */
+	void tickWalk() {
+		if (this.walkingTo == null) {
+			return;
+		}
+		if (ServerModuleHost.instance().mobBehavior(slotId()) != this.walkOwner) {
+			this.walkingTo = null;
+			this.walkDone = null;
+			return;
+		}
+		if (position().closerThan(Vec3.atBottomCenterOf(this.walkingTo), ARRIVED_WITHIN)) {
+			getNavigation().stop();
+			finishWalk(true);
+			return;
+		}
+		if (this.tickCount >= this.walkUntil) {
+			finishWalk(false);
+		} else if (getNavigation().isDone() || this.tickCount % WALK_REPLAN_TICKS == 0) {
+			boolean found = getNavigation().moveTo(this.walkingTo.getX() + 0.5, this.walkingTo.getY(), this.walkingTo.getZ() + 0.5, this.walkSpeed);
+			this.walkFailures = found ? 0 : this.walkFailures + 1;
+			if (this.walkFailures >= STUCK_TRIES) {
+				finishWalk(false);
+			}
+		}
+	}
+
+	private void finishWalk(boolean arrived) {
+		Consumer<Boolean> done = this.walkDone;
+		this.walkingTo = null;
+		this.walkDone = null;
+		if (done != null) {
+			ServerModuleHost.instance().guarded(slotId(), () -> done.accept(arrived));
+		}
+	}
+
+	/** Colours one part of its model, by its name there, as {@link #setTint} does for all of it. Returns false if it has no such part. */
+	public boolean tintPart(String part, int rgb) {
+		Bone<?> bone = this.holder == null ? null : this.holder.getBone(part);
+		if (bone == null) {
+			return false;
+		}
+		if (bone instanceof ItemBone item) {
+			item.updateColor(rgb);
+		}
+		CompoundTag tag = this.parts.getCompoundOrEmpty(part);
+		tag.putInt("tint", rgb);
+		this.parts.put(part, tag);
+		return true;
+	}
+
+	/** Makes one part of its model give its own light, from 0 to 15, whatever's around it. Returns false if it has no such part. */
+	public boolean glowPart(String part, int level) {
+		Bone<?> bone = this.holder == null ? null : this.holder.getBone(part);
+		if (bone == null) {
+			return false;
+		}
+		int glow = Mth.clamp(level, 0, 15);
+		if (bone.element() instanceof DisplayElement element) {
+			element.setBrightness(new Brightness(glow, glow));
+		}
+		CompoundTag tag = this.parts.getCompoundOrEmpty(part);
+		tag.putInt("glow", glow);
+		this.parts.put(part, tag);
+		return true;
+	}
+
+	/** What its definition says should glow, then what's been done to this one. */
+	private void applyParts() {
+		if (this.holder == null || this.applied == null) {
+			return;
+		}
+		for (String part : this.applied.glowing()) {
+			Bone<?> bone = this.holder.getBone(part);
+			if (bone != null && bone.element() instanceof DisplayElement element) {
+				element.setBrightness(Brightness.FULL_BRIGHT);
+			}
+		}
+		for (String part : this.parts.keySet()) {
+			CompoundTag tag = this.parts.getCompoundOrEmpty(part);
+			Bone<?> bone = this.holder.getBone(part);
+			if (bone instanceof ItemBone item && tag.contains("tint")) {
+				item.updateColor(tag.getIntOr("tint", NO_TINT));
+			}
+			if (bone != null && bone.element() instanceof DisplayElement element && tag.contains("glow")) {
+				element.setBrightness(new Brightness(tag.getIntOr("glow", 0), tag.getIntOr("glow", 0)));
+			}
 		}
 	}
 
@@ -246,6 +434,7 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 	private void applyLook() {
 		if (this.holder != null) {
 			this.holder.setColor(this.tint);
+			applyParts();
 		}
 	}
 
@@ -254,6 +443,9 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 		super.addAdditionalSaveData(output);
 		output.putInt("tint", this.tint);
 		output.putInt("grows_up_in", this.growsUpIn);
+		if (!this.parts.isEmpty()) {
+			output.store("parts", CompoundTag.CODEC, this.parts);
+		}
 	}
 
 	@Override
@@ -261,6 +453,7 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 		super.readAdditionalSaveData(input);
 		this.tint = input.getIntOr("tint", NO_TINT);
 		this.growsUpIn = input.getIntOr("grows_up_in", 0);
+		this.parts = input.read("parts", CompoundTag.CODEC).orElseGet(CompoundTag::new);
 		applyLook();
 	}
 
@@ -269,11 +462,12 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 		if (animator == null || this.posed != null || isDeadOrDying()) {
 			return;
 		}
+		String moving = this.flies && animation(FLY) != null ? FLY : WALK;
 		if (this.walkAnimation.isMoving() && this.walkAnimation.speed() > 0.02F) {
 			animator.pauseAnimation(IDLE);
-			animator.playAnimation(WALK, 5);
+			animator.playAnimation(moving, 5);
 		} else {
-			animator.pauseAnimation(WALK);
+			animator.pauseAnimation(moving);
 			animator.playAnimation(IDLE, 1, true);
 		}
 	}
@@ -459,6 +653,7 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 		}
 		animator.stopAnimation(IDLE);
 		animator.stopAnimation(WALK);
+		animator.stopAnimation(FLY);
 		if (this.posed != null) {
 			animator.stopAnimation(this.posed);
 		}
@@ -500,6 +695,7 @@ public final class SlotMob extends PathfinderMob implements AnimatedEntity {
 		if (animator() != null && animation(DEATH) != null) {
 			animator().stopAnimation(IDLE);
 			animator().stopAnimation(WALK);
+			animator().stopAnimation(FLY);
 			animator().playAnimation(DEATH, 20, true);
 		}
 	}

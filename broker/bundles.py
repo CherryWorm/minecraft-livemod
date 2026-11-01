@@ -406,16 +406,17 @@ def _render_mob(feature, feature_id, name, mob, ledger, pack_lang, datapack, con
     model = _copy_model(feature, feature_id, name, mob.get("model", name), config)
     pack_lang.name(f"entity.gm.{slot}", mob["display"])
     if mob.get("drops"):
-        if not isinstance(mob["drops"], dict) or ":" in str(mob["drops"].get("item")):
-            raise BundleError(f"{feature_id}/{name}: a mob drops one of this world's items, like {{\"item\": \"fang\", \"count\": [1, 2]}}, not {mob['drops']!r}.")
+        listed = mob["drops"] if isinstance(mob["drops"], list) else [mob["drops"]]
+        if not all(isinstance(drop, dict) and isinstance(drop.get("item"), str) and ":" not in drop["item"] for drop in listed):
+            raise BundleError(f"{feature_id}/{name}: a mob drops this world's items, like {{\"item\": \"fang\", \"count\": [1, 2]}}, or a list of those, not {mob['drops']!r}.")
+        looting = {"type": "minecraft:enchanted_count_increase", "enchantment": "minecraft:looting", "count": {"type": "minecraft:uniform", "min": 0.0, "max": 1.0}}
+        # A pool only ever gives one of what's in it, so each thing gets a pool of its own.
         _write_json(datapack / f"data/gm/loot_table/entities/{slot}.json", {
             "type": "minecraft:entity",
-            "pools": [{"rolls": 1, "entries": [_drop_entry(mob["drops"], feature_id, ledger, {
-                "type": "minecraft:enchanted_count_increase", "enchantment": "minecraft:looting",
-                "count": {"type": "minecraft:uniform", "min": 0.0, "max": 1.0},
-            })]}],
+            "pools": [{"rolls": 1, "entries": [_drop_entry(drop, feature_id, ledger, looting)],
+                       **({"condition": {"type": "minecraft:random_chance", "chance": drop["chance"]}} if "chance" in drop else {})} for drop in listed],
         })
-    fields = ("behaviour", "health", "damage", "speed", "width", "height", "followRange", "armor", "spawn", "display")
+    fields = ("behaviour", "health", "damage", "speed", "width", "height", "followRange", "armor", "spawn", "display", "flying", "knockback_resistance", "glowing")
     definition = {"model": model, **{field: mob[field] for field in fields if field in mob}}
     if "spawn" in definition:
         definition["spawn"] = _resolve_tokens(definition["spawn"], feature_id, ledger)

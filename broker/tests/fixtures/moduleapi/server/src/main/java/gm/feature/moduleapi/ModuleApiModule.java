@@ -2,9 +2,11 @@ package gm.feature.moduleapi;
 
 import gm.conduit.api.BlockBehavior;
 import gm.conduit.api.MachineBehavior;
+import gm.conduit.api.MobBehavior;
 import gm.conduit.api.ServerModule;
 import gm.conduit.api.ServerModuleContext;
 import gm.conduit.api.WorldEvents;
+import gm.conduit.mobs.SlotMob;
 import gm.conduit.slots.SlotBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -12,7 +14,10 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.RandomSource;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -41,7 +46,41 @@ public final class ModuleApiModule implements ServerModule {
 		bindLight();
 		bindStatue();
 		bindKiln();
+		bindMobs();
 		context.listen(new WorldEvents() {
+			@Override
+			public float damage(LivingEntity target, DamageSource source, float amount) {
+				if (target.getType() == context.mob("api_ox") && amount > 0) {
+					say("ox would take " + amount);
+					return target.getMainHandItem().isEmpty() && target.getHealth() >= 6 ? 0 : 1;
+				}
+				if (target instanceof ServerPlayer && target.hasItemInSlot(EquipmentSlot.HEAD) && amount > 0) {
+					say("player would take " + amount);
+					return amount / 2;
+				}
+				return amount;
+			}
+
+			@Override
+			public boolean survives(LivingEntity target, DamageSource source, float amount) {
+				if (target.getType() == context.mob("api_calf") && !target.getTags().contains("dead_for_real")) {
+					say("calf cheats death from " + amount);
+					target.addTag("dead_for_real");
+					target.setHealth(3);
+					return true;
+				}
+				return false;
+			}
+
+			@Override
+			public double knockback(LivingEntity target, DamageSource source, double power) {
+				if (target.getType() == context.mob("api_calf")) {
+					say("calf pushed " + power);
+					return power * 5;
+				}
+				return power;
+			}
+
 			@Override
 			public void blockPlaced(ServerPlayer player, ServerLevel level, BlockPos pos, BlockState state, ItemStack stack) {
 				say("anything placed " + state.getBlock().getName().getString() + " from " + stack.getCount());
@@ -57,6 +96,33 @@ public final class ModuleApiModule implements ServerModule {
 					say("no breaking gold");
 				}
 				return allowed;
+			}
+		});
+	}
+
+	private void bindMobs() {
+		this.context.bindMob("api_ox", new MobBehavior() {
+			@Override
+			public InteractionResult interact(SlotMob mob, Player player, InteractionHand hand) {
+				if (hand != InteractionHand.MAIN_HAND) {
+					return InteractionResult.PASS;
+				}
+				boolean first = !mob.isWalking();
+				BlockPos goal = mob.blockPosition().east(first ? 4 : 2);
+				say("ox sets off for " + goal.toShortString());
+				mob.walkTo(goal, 1.5, arrived -> say("ox " + (arrived ? "arrived" : "gave up") + " at " + mob.blockPosition().closerThan(goal, 2)));
+				return InteractionResult.SUCCESS;
+			}
+		});
+		this.context.bindMob("api_bat", new MobBehavior() {
+			@Override
+			public InteractionResult interact(SlotMob mob, Player player, InteractionHand hand) {
+				if (hand == InteractionHand.MAIN_HAND) {
+					say("bat flying " + mob.isFlying() + " at " + mob.getY());
+					BlockPos goal = mob.blockPosition().above(5);
+					mob.walkTo(goal, 2.0, arrived -> say("bat " + (arrived ? "arrived" : "gave up") + " in the air " + mob.isNoGravity()));
+				}
+				return InteractionResult.SUCCESS;
 			}
 		});
 	}

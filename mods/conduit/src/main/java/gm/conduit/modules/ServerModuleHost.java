@@ -38,10 +38,13 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.Filterable;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.Container;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.SimpleMenuProvider;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -82,6 +85,7 @@ public final class ServerModuleHost {
 	private static final Path BINDINGS = Path.of("config", "conduit", "bindings.json");
 	private static final int MAX_FAILURES = 5;
 	private static final int TEXT_ID_LENGTH = 16;
+	private static final float LEFT_ON = 1.0F;
 
 	private final Map<String, LoadedModule> modules = new LinkedHashMap<>();
 	private final Map<String, LoadedModule> ownerBySlot = new HashMap<>();
@@ -92,6 +96,7 @@ public final class ServerModuleHost {
 	private final List<ServerPlayer> joining = new ArrayList<>();
 	private Map<String, String> slotsByName = Map.of();
 	private MinecraftServer server;
+	private boolean askingAboutHit;
 
 	private ServerModuleHost() {}
 
@@ -126,6 +131,16 @@ public final class ServerModuleHost {
 			if (level instanceof ServerLevel serverLevel && player instanceof ServerPlayer serverPlayer) {
 				INSTANCE.fire(events -> events.blockBroken(serverPlayer, serverLevel, pos, state, blockEntity));
 			}
+		});
+		ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, amount) -> {
+			if (source.is(DamageTypeTags.BYPASSES_INVULNERABILITY) || INSTANCE.allAgree(events -> !events.survives(entity, source, amount))) {
+				return true;
+			}
+			// Anything still at no health is taken for dead on its next tick, so a module has to leave it something.
+			if (entity.getHealth() <= 0) {
+				entity.setHealth(LEFT_ON);
+			}
+			return false;
 		});
 		ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> INSTANCE.fire(events -> events.mobKilled(entity, source)));
 		// Fabric says so before the player is in the world or the player list, so a module would be handed someone half arrived.
@@ -173,6 +188,36 @@ public final class ServerModuleHost {
 			}
 		}
 		return true;
+	}
+
+	/** How much a hit really does, once every module has had its say. A module hurting something from in here doesn't ask again, or it would never finish. */
+	public float damage(LivingEntity target, DamageSource source, float amount) {
+		if (this.askingAboutHit) {
+			return amount;
+		}
+		this.askingAboutHit = true;
+		float[] left = {amount};
+		fire(events -> {
+			float said = events.damage(target, source, left[0]);
+			left[0] = Float.isNaN(said) ? left[0] : said;
+		});
+		this.askingAboutHit = false;
+		return left[0];
+	}
+
+	/** How hard a hit really pushes, in the same way. */
+	public double knockback(LivingEntity target, DamageSource source, double power) {
+		if (this.askingAboutHit) {
+			return power;
+		}
+		this.askingAboutHit = true;
+		double[] left = {power};
+		fire(events -> {
+			double said = events.knockback(target, source, left[0]);
+			left[0] = Double.isNaN(said) ? left[0] : said;
+		});
+		this.askingAboutHit = false;
+		return left[0];
 	}
 
 	/** Tells every module that's listening. One that throws only loses its own turn. */

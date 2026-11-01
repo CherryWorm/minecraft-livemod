@@ -569,8 +569,7 @@ def _natural_sources(features):
             placed.add(f"block:{_key(feature_id, entry.get('block', ''))}")
         # A mob with no spawn entry still counts, because a module can summon it.
         for mob in manifest.get("mobs", {}).values():
-            if mob.get("drops"):
-                handed_out.add(f"item:{_key(feature_id, mob['drops']['item'])}")
+            handed_out.update(f"item:{_key(feature_id, drop['item'])}" for drop in drops_of(mob))
         for ruin in manifest.get("ruins", {}).values():
             placed.update(_node(part_block(part), feature_id) for layout in ruin_layouts(ruin) for part in layout if part_block(part).startswith("$block:"))
             handed_out.update(f"{found.group(1)}:{_key(feature_id, found.group(2))}"

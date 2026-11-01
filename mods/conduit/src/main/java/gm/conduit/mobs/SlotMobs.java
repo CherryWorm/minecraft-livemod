@@ -91,6 +91,7 @@ public final class SlotMobs {
 		PolymerEntityUtils.registerType(type);
 		FabricDefaultAttributeRegistry.register(type, Mob.createMobAttributes()
 				.add(Attributes.ATTACK_DAMAGE, 1.0)
+				.add(Attributes.FLYING_SPEED, 0.4)
 				.add(Attributes.FOLLOW_RANGE, 24.0)
 				.add(Attributes.ARMOR, 0.0));
 	}

@@ -144,6 +144,67 @@ class RenderedBlockSettings(unittest.TestCase):
         self.assertFalse(self.render()[1] & {"wither_immune", "dragon_immune"})
 
 
+class MobFields(unittest.TestCase):
+    def assert_refused(self, mention, **fields):
+        with self.assertRaises(GateFailed) as caught:
+            static.check_mobs({"f": {"manifest": {"mobs": {"bat": fields}}, "dir": pathlib.Path("nowhere")}})
+        self.assertIn(mention, caught.exception.message)
+
+    def test_fine(self):
+        static.check_mobs({"f": {"manifest": {"mobs": {"bat": {"flying": True, "knockback_resistance": 0.5, "glowing": ["eyes"],
+                                                               "drops": [{"item": "fang", "chance": 0.5}, {"item": "wing"}]}}}, "dir": pathlib.Path("nowhere")}})
+
+    def test_wrong(self):
+        self.assert_refused("true or false", flying="yes")
+        for resistance in (-0.1, 1.5, "lots", True):
+            self.assert_refused("from 0 to 1", knockback_resistance=resistance)
+        self.assert_refused("above 0", drops=[{"item": "fang", "chance": 0}])
+        self.assert_refused("a list of the names", glowing="eyes")
+
+    def test_a_glowing_part_has_to_be_in_its_model(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = pathlib.Path(folder) / "assets" / "models"
+            path.mkdir(parents=True)
+            (path / "bat.bbmodel").write_text(json.dumps({"outliner": [{"name": "eyes", "children": []}]}), encoding="utf-8")
+            static.check_mobs({"f": {"manifest": {"mobs": {"bat": {"glowing": ["eyes"]}}}, "dir": pathlib.Path(folder)}})
+            with self.assertRaises(GateFailed) as caught:
+                static.check_mobs({"f": {"manifest": {"mobs": {"bat": {"glowing": ["wings"]}}}, "dir": pathlib.Path(folder)}})
+            self.assertIn("['wings']", caught.exception.message)
+
+
+class MobDrops(unittest.TestCase):
+    def render(self, drops):
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder)
+            models = root / "f" / "assets" / "models"
+            models.mkdir(parents=True)
+            (models / "bat.bbmodel").write_text("{}", encoding="utf-8")
+            features = {"f": {"manifest": {"id": "f", "items": {"fang": {"display": "Fang"}, "wing": {"display": "Wing"}}, "mobs": {"bat": {"category": "creature", "display": "Bat", "model": "bat", "drops": drops}}}, "dir": root / "f"}}
+            ledger = {**bundles.empty_ledger(), "items": {"f/fang": {"slot": "i0001", "index": 0}, "f/wing": {"slot": "i0002", "index": 1}},
+                      "mobs": {"f/bat": {"slot": "e0001", "category": "creature", "index": 0}}}
+            bundles._render_mob(features["f"], "f", "bat", features["f"]["manifest"]["mobs"]["bat"], ledger, bundles.LanguageFiles({}), root / "datapack", root / "config")
+            return json.loads((root / "datapack" / "data" / "gm" / "loot_table" / "entities" / "e0001.json").read_text(encoding="utf-8"))
+
+    def test_one_still_works(self):
+        pools = self.render({"item": "fang", "count": [1, 2]})["pools"]
+        self.assertEqual(len(pools), 1)
+        self.assertEqual(pools[0]["entries"][0]["name"], "gm:i0001")
+
+    def test_each_of_several_has_its_own_pool(self):
+        pools = self.render([{"item": "fang"}, {"item": "wing", "chance": 0.25}])["pools"]
+        self.assertEqual([pool["entries"][0]["name"] for pool in pools], ["gm:i0001", "gm:i0002"])
+        self.assertNotIn("condition", pools[0])
+        self.assertEqual(pools[1]["condition"], {"type": "minecraft:random_chance", "chance": 0.25})
+
+    def test_vanillas_items_are_still_refused(self):
+        with self.assertRaises(bundles.BundleError):
+            self.render([{"item": "fang"}, {"item": "minecraft:diamond"}])
+
+    def test_each_counts_as_a_source(self):
+        mob = {"drops": [{"item": "fang"}, {"item": "wing"}]}
+        self.assertEqual({drop["item"] for drop in balance.drops_of(mob)}, {"fang", "wing"})
+
+
 class RuinRules(unittest.TestCase):
     def assert_fine(self, entry):
         static.check_ruins(features(entry))
@@ -374,7 +435,7 @@ class BlockDrops(unittest.TestCase):
             with self.assertRaises(bundles.BundleError):
                 self.table(drops=drops)
 
-    def test_a_mob_still_only_drops_one_of_this_worlds(self):
+    def test_a_mob_still_only_drops_this_worlds_own(self):
         for drops in ({"item": "minecraft:rotten_flesh"}, [{"item": "gem"}]):
             with tempfile.TemporaryDirectory() as folder:
                 root = pathlib.Path(folder)
@@ -383,7 +444,7 @@ class BlockDrops(unittest.TestCase):
                 ledger = {**self.LEDGER, "mobs": {"f/m": {"slot": "e0001"}}}
                 with self.assertRaises(bundles.BundleError) as caught:
                     bundles._render_mob({"dir": root / "feature"}, "f", "m", {"display": "M", "drops": drops}, ledger, bundles.LanguageFiles({}), root, root)
-                self.assertIn("one of this world's items", str(caught.exception))
+                self.assertIn("this world's items", str(caught.exception))
 
     def test_an_empty_list_is_refused(self):
         with self.assertRaises(GateFailed) as caught:

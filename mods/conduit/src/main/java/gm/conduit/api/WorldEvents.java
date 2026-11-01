@@ -27,6 +27,28 @@ public interface WorldEvents {
 	/** A player has just placed a block, any block, and {@code stack} is what they placed it with. To stop one of this world's blocks being placed, see {@link BlockBehavior#canPlace}. */
 	default void blockPlaced(ServerPlayer player, ServerLevel level, BlockPos pos, BlockState state, ItemStack stack) {}
 
+	/**
+	 * Something living, a player or a mob, is about to be hurt by this much, before armor or a shield, and this says how much it really is. Each module listening gets
+	 * what the one before it said. 0 means it doesn't land at all. Use {@code target.getHealth()} to see if it would kill, though armor may yet save them. What
+	 * can't be stopped by anything, like falling out of the world or {@code /kill}, doesn't ask, and nor does something it can't hurt anyway.
+	 */
+	default float damage(LivingEntity target, DamageSource source, float amount) {
+		return amount;
+	}
+
+	/**
+	 * A hit is about to kill this, armor and all, and saying true means it doesn't. Any module saying so is enough. It's left on half a heart unless you set its
+	 * health to something else from here. This goes ahead of a totem, so a totem isn't used up. The same things as above don't ask.
+	 */
+	default boolean survives(LivingEntity target, DamageSource source, float amount) {
+		return false;
+	}
+
+	/** Something living is about to be pushed by a hit this hard, and this says how hard really. It's 0.4 from most hits, and 0 means not at all. Knockback resistance still applies. */
+	default double knockback(LivingEntity target, DamageSource source, double power) {
+		return power;
+	}
+
 	/** Something living has died, whatever the cause, and that includes players. {@code source.getEntity()} is who did it, if anyone. */
 	default void mobKilled(LivingEntity mob, DamageSource source) {}
 

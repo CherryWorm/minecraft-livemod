@@ -134,9 +134,15 @@ Pass `null` for the player when nobody's there, as with a machine a hopper keeps
 - `model` is `assets/models/<model>.bbmodel`. Model each creature for itself with `assetkit/sculpt.py`, so it looks like nothing else in the world. See `assetkit/README.md`. It needs animations named `idle` and `walk`, and `attack` if it fights, and should have `hurt` and `death`. The game plays all of these by itself, and a mob stays until its `death` finishes, up to 5 seconds. Set `width` and `height` from what `sculpt.stats` says.
 - `behaviour` is `hostile`, `neutral` (fights back), `passive` or `skittish` (avoids players).
 - `spawn` is optional. Leave it out for something only a module summons. `light` is `dark`, `bright` or `any`. `cap` limits how many gather near one player. Biomes can be ids or `#tags`.
+- `drops` is what it drops, and can be a list, each given by itself: `"drops": [{"item": "fang", "count": [1, 2]}, {"item": "rare_scale", "chance": 0.1}]`. `chance` is how often that one drops, and is always if you leave it out. They're all this world's items, and all respect looting.
+- `"flying": true` makes it fly: it goes where it wants in the air, wanders in the air, and takes no fall damage. Its `speed` is how fast it flies too, and it needs less to go as fast, so start around 0.1 to 0.3. If its model has an animation called `fly` that plays instead of `walk`.
+- `"knockback_resistance": 0.5` is how much of a hit's push it ignores, from 0 to 1.
+- `"glowing": ["eyes"]` draws those parts of its model at full brightness even in the dark, by their names in the model. A module can do this with `mob.glowPart("eyes", 15)`, and colour one part with `mob.tintPart("shell", 0xFF8800)`. Both last through a restart.
 - `sounds` is optional, and the game plays these by itself: `"sounds": {"idle": "$sound:crab_click", "hurt": "$sound:crab_yelp", "death": "minecraft:entity.fox.death"}`. Each is one of this world's from `"sounds"` below, or vanilla's by its name. `idle` plays every so often. With none of its own it's quiet when idle, and gets the game's plain hurt and death sounds.
 
 For anything more, bind code to it: `context.bindMob("rune_crab", new MobBehavior() { ... })`, with `tick(mob)`, `hurt(mob, source)` and `interact(mob, player, hand)`. A model's animations are played with `mob.animator().playAnimation("name")`.
+
+To send one somewhere, `mob.walkTo(pos, 1.0, arrived -> { ... })` goes there over whatever else it was doing, flying if it can, and tells you how it went: `arrived` is true once it's there, or false if it can't get there or gives up after 2 minutes. The speed is a multiple of its usual one. `mob.isWalking()` and `mob.stopWalking()` do what they say. Telling it to go somewhere else counts as not having arrived at the first place. A restart, or its module being replaced, forgets all of this without a word, so keep where it's going in its own saved data if that has to carry on.
 
 To give a mob from another feature a new look, its own model replaces the old one for every one of them, including those already out there: `"reskins": {"fraying_tears/frayling": "frayling_v2"}`, with `assets/models/frayling_v2.bbmodel` in your feature. Its size stays what the mob's definition says, so keep the same shape, and the same animation names, or it will stand still.
 
@@ -326,7 +332,7 @@ A block's `drops` can also name vanilla's items, and can be a list, all of which
 "drops": [{"item": "minecraft:copper_ingot"}, {"item": "minecraft:glass_pane", "count": [0, 2]}, {"item": "brass_scrap"}]
 ```
 
-Diamonds, emeralds, netherite and vanilla's other rarest things can't come from a block this way, because what the world keeps placing soon makes them common. Put those in a ruin's loot instead, as a rare find. And something crafted can't break into more of vanilla's materials than it took, on average, or it would make them from nothing. A mob's `drops` is still one thing, and from this world.
+Diamonds, emeralds, netherite and vanilla's other rarest things can't come from a block this way, because what the world keeps placing soon makes them common. Put those in a ruin's loot instead, as a rare find. And something crafted can't break into more of vanilla's materials than it took, on average, or it would make them from nothing. A mob's `drops` are all from this world.
 
 ## Ores by biome
 

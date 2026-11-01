@@ -573,10 +573,18 @@ context.listen(new WorldEvents() {
     public void blockExamined(ServerPlayer player, ServerLevel level, BlockPos pos, BlockState state) { /* ... */ }
     @Override
     public void mobExamined(ServerPlayer player, Entity mob) { /* ... */ }
+    @Override
+    public float damage(LivingEntity target, DamageSource source, float amount) { return amount; }
+    @Override
+    public boolean survives(LivingEntity target, DamageSource source, float amount) { return false; }
+    @Override
+    public double knockback(LivingEntity target, DamageSource source, double power) { return power; }
 });
 ```
 
 These fire for everything, vanilla's and every feature's, so check what it was first. `blockBroken` is only for what a player breaks, and the block is already gone, so `state` is what it was. `mobKilled` is anything living that dies, however it happened, including players, and `source.getEntity()` is who did it, if anyone. `itemEaten` is food and drink, including potions and milk, and `stack` is a copy of what they had just before. `playerJoined` doesn't include anyone already online when your module loads, so look through `context.server().getPlayerList().getPlayers()` in `enable` if that matters. `knowledgeLearned` is any feature's knowledge being learned for the first time, however it happened, with `entry` as its full name, `feature/name`, and `title` as what players read. Where a world shares what's learned, that's once for everyone, with whoever got there first. `blockExamined` and `mobExamined` are a player using something while crouching with an empty hand, whether or not there was anything to learn from it, and anything it taught has been learned by then. `mobExamined` is any entity, so check what it is.
+
+`damage` is a player or a mob about to be hurt by that much, before armor or a shield, and what you return is how much it really is, so returning 0 means it doesn't land at all. Each module listening gets what the one before it said. `target.getHealth()` tells you if it might kill, though armor can still save them. `survives` is a hit that really is about to kill it, armor and all, and returning true means it lives, on half a heart unless you set its health to something else there. That goes ahead of a totem, so a totem isn't used up. `knockback` is how hard a hit pushes, which is 0.4 from most, and returning 0 means not at all. These all fire for everything, so check who it is first. Falling out of the world and `/kill` can't be changed, and a module hurting something from inside one of these doesn't ask again. Fair-play limits still apply: what a tier's gear can do is measured from the gear, so don't use this to make something stronger than its tier says.
 
 A module that keeps throwing errors is switched off automatically.
 

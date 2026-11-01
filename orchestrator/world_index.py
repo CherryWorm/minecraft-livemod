@@ -157,7 +157,9 @@ def _guide_feature(manifest, say, not_out):
         if facts:
             lines.append(f"- {block.get('display', name)}: {', '.join(facts)}")
     for name, mob in manifest.get("mobs", {}).items():
-        drops = f", drops {say(mob['drops'].get('item'))}" if mob.get("drops") else ""
+        listed = mob.get("drops") or []
+        listed = listed if isinstance(listed, list) else [listed]
+        drops = f", drops {', '.join(say(drop.get('item')) for drop in listed)}" if listed else ""
         lines.append(f"- {mob.get('display', name)}: {mob.get('behaviour')} creature, {places(mob.get('spawn') or {})}{drops}")
     for plant in manifest.get("plants", []):
         lines.append(f"- {block_name(plant.get('block'))}: grows {places(plant)}")

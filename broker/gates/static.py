@@ -722,6 +722,31 @@ def check_machines(features):
                 _fail(f"{label} has outputs {made!r}. Each is like {{\"item\": \"$item:name\", \"count\": 1}}.")
 
 
+def check_mobs(features):
+    """A number out of range would just quietly do something odd, and a part that isn't there would just not glow."""
+    for feature_id, feature in features.items():
+        for name, mob in feature["manifest"].get("mobs", {}).items():
+            label = f"Mob {feature_id}/{name}"
+            if "flying" in mob and not isinstance(mob["flying"], bool):
+                _fail(f"{label} has flying {mob['flying']!r}, which is true or false.")
+            resistance = mob.get("knockback_resistance", 0)
+            if not (isinstance(resistance, (int, float)) and not isinstance(resistance, bool) and 0 <= resistance <= 1):
+                _fail(f"{label} has knockback_resistance {resistance!r}. It's how much of a hit's push it ignores, from 0 to 1.")
+            drops = mob.get("drops", [])
+            for drop in drops if isinstance(drops, list) else [drops]:
+                if isinstance(drop, dict) and "chance" in drop and not _is_share(drop["chance"]):
+                    _fail(f"{label} has a drop with chance {drop['chance']!r}. It's how often it drops, above 0 and up to 1.")
+            glowing = mob.get("glowing")
+            if glowing is None:
+                continue
+            if not (isinstance(glowing, list) and all(isinstance(part, str) for part in glowing)):
+                _fail(f"{label} has glowing {glowing!r}. It's a list of the names of parts in its model.")
+            path = feature["dir"] / "assets" / "models" / f"{mob.get('model', name)}.bbmodel"
+            missing = set(glowing) - _model_parts(path) if path.exists() else set()
+            if missing:
+                _fail(f"{label} has glowing parts {sorted(missing)}, which its model doesn't have.")
+
+
 def check_mob_sounds(features):
     """A sound the pack doesn't have plays nothing, and a kind of sound nothing asks for never plays, and neither says so."""
     sounds = {f"{feature_id}/{name}" for feature_id, feature in features.items() for name in feature["manifest"].get("sounds", [])}
@@ -902,6 +927,7 @@ def run(features, old_ledger, new_ledger, pool, content):
     check_screen_effects(features)
     check_panels(features)
     check_machines(features)
+    check_mobs(features)
     check_mob_sounds(features)
     check_model_costs(features)
     check_minds(features)
