@@ -329,7 +329,8 @@ NOTHING = Nothing()
 
 class Nowhere:
     """What a build gets if its record couldn't even be started. It'd be a shame to stop the build over that."""
-    data = {}
+    def __init__(self):
+        self.data = {}
 
     def __getattr__(self, name):
         return lambda *args, **kwargs: None

@@ -87,7 +87,7 @@ class Translator:
 
     async def _translate(self, batch, language, name):
         store = wording.read_store(self.repo, language)
-        result = await llm.ask(self.governor, "translator", _prompt(batch, name, store[wording.NAMES]), schema=SCHEMA, max_turns=3)
+        result = await llm.ask(self.governor, "translator", _prompt(batch, name, store[wording.NAMES]), schema=SCHEMA)
         for thing in batch:
             self.tries[(language, thing["english"])] += 1
         answers = result.structured.get("translations", []) if isinstance(result.structured, dict) and not result.is_error else []

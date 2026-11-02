@@ -110,7 +110,7 @@ async def check():
     tools_needed = [research.TOOL_NAME]
     result = await llm.ask(
         governor, "triage", f"Use the research tool to ask exactly this question: {question}\nThen repeat what it answers, word for word.",
-        system="You run small checks exactly as asked.", allowed_tools=tools_needed, max_turns=4, mcp_servers={"web": web.server(1)})
+        system="You run small checks exactly as asked.", allowed_tools=tools_needed, mcp_servers={"web": web.server(1)})
     note = research.note_path(question)
     print(f"research: stop={result.stop_reason} estimate={result.estimate:.4f} seconds={result.seconds}\n  note saved={note.exists()}\n  {result.text[:700]}")
     if not note.exists():
@@ -128,7 +128,7 @@ async def check():
     system = "You run small file checks. Use the Read tool as asked, then reply with what it returned, or CANNOT if it failed."
     for path, expected in ((allowed, True), (blocked, False)):
         result = await llm.ask(governor, "triage", f"Read {path} and reply with its contents.", system=system,
-                               tools=["Read"], allowed_tools=["Read"], disallowed_tools=["Read(//tmp/deny-test/**)"], max_turns=3)
+                               tools=["Read"], allowed_tools=["Read"], disallowed_tools=["Read(//tmp/deny-test/**)"])
         saw = "harmless-note-7" in result.text
         print(f"read {path}: saw contents={saw}, estimate={result.estimate:.4f}, reply={result.text[:80]!r}")
         if saw != expected:
@@ -152,7 +152,7 @@ async def check():
         "the stamp. 3: use Bash to run: python3 -c \"import PIL, numpy; print('pil-ok')\" . 4: use Bash to run: "
         "python3 -c \"import glob; print('outside', sum(b's6_agent_' + b'smoke' in open(p, 'rb').read() for p in glob.glob('/proc/[0-9]*/cmdline')))\" . "
         "Reply with the stamp and both Bash outputs.",
-        system="You run small checks exactly as asked.", tools=tools_needed, allowed_tools=tools_needed, cwd=str(folder), max_turns=8,
+        system="You run small checks exactly as asked.", tools=tools_needed, allowed_tools=tools_needed, cwd=str(folder),
         mcp_servers={"checks": create_sdk_mcp_server("checks", tools=[stamp])})
     written = (folder / "stamp.txt").read_text(encoding="utf-8").strip() if (folder / "stamp.txt").exists() else None
     print(f"tools: stop={result.stop_reason} wrote={written!r} estimate={result.estimate:.4f} reply={result.text[:120]!r}")

@@ -79,7 +79,7 @@ async def check_structured_output():
     }
     result, _, _ = await run(
         "A player said: 'this cave is scary, there are 3 of us'. Report the mood and the player count.",
-        ClaudeAgentOptions(model=FAST, output_format={"type": "json_schema", "schema": schema}, max_turns=3),
+        ClaudeAgentOptions(model=FAST, output_format={"type": "json_schema", "schema": schema}),
     )
     output = result.structured_output if result else None
     print(f"  output: {output}")
@@ -90,7 +90,7 @@ async def check_strong_model():
     print("2. the strong model")
     result, _, _ = await run(
         "Reply with exactly the word: ready",
-        ClaudeAgentOptions(model=STRONG, effort="low", max_turns=1),
+        ClaudeAgentOptions(model=STRONG, effort="low"),
     )
     print(f"  reply: {result.result if result else None}")
     results["strong model"] = bool(result and not result.is_error and "ready" in (result.result or "").lower())
@@ -100,7 +100,7 @@ async def check_token_secrecy():
     print("3. the agent's own shell commands can't reach the token")
     result, tool_output, _ = await run(
         SECRECY_PROMPT,
-        ClaudeAgentOptions(model=FAST, allowed_tools=["Bash"], permission_mode="dontAsk", max_turns=4),
+        ClaudeAgentOptions(model=FAST, allowed_tools=["Bash"], permission_mode="dontAsk"),
     )
     text = "\n".join(tool_output)
     counts = dict(re.findall(r"(env_length|file_readable|uid|processes_visible)=(\d+)", text))
@@ -131,7 +131,7 @@ async def check_parallel_subagents():
     }
     result, _, _ = await run(
         "Start the alpha and beta subagents at the same time, in one message, then reply with the two words they return.",
-        ClaudeAgentOptions(model=FAST, agents=agents, allowed_tools=["Agent", "Task"], permission_mode="dontAsk", max_turns=6),
+        ClaudeAgentOptions(model=FAST, agents=agents, allowed_tools=["Agent", "Task"], permission_mode="dontAsk"),
     )
     text = (result.result or "").lower() if result else ""
     print(f"  reply: {text[:80]}")

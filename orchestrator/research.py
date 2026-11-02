@@ -77,7 +77,7 @@ class Research:
         try:
             result = await asyncio.wait_for(
                 llm.ask(self.governor, "researcher", llm.untrusted("question", question), tools=WEB_TOOLS, allowed_tools=WEB_TOOLS,
-                        max_turns=10, budget=USAGE_LIMIT, env={"HTTPS_PROXY": url, "HTTP_PROXY": url}),
+                        budget=USAGE_LIMIT, env={"HTTPS_PROXY": url, "HTTP_PROXY": url}),
                 SECONDS_LIMIT)
         except TimeoutError:
             return "That search took too long, so it was stopped. Go with what you know.", False

@@ -348,11 +348,13 @@ class TwoAtOnce(Repo):
             self.assertTrue(await self.shop.build("demo", "A spec.", "e_one", "early", small=True))
         self.assertEqual(len(told), 4)
 
-    async def test_but_it_cant_go_on_forever(self):
-        told, attempt, timing = self.builds("demo", *[None] * 20)
-        with attempt, timing, mock.patch.object(workshop, "checked_against_main", mock.AsyncMock(return_value={"result": "blocked", "gate": "merge", "reason": "Lines."})):
-            self.assertFalse(await self.shop.build("demo", "A spec.", "e_one", "early", small=True, fix="bug_1"))
-        self.assertEqual(len(told), workshop.FIX_LIMITS[2] + workshop.MOST_CONFLICTS)
+    async def test_conflicts_keep_being_repaired_past_the_old_attempt_limit(self):
+        told, attempt, timing = self.builds("demo", *[None] * 21)
+        answers = [{"result": "blocked", "gate": "merge", "reason": "Lines."}] * 20 + [{"result": "passed_gates"}]
+        with attempt, timing, mock.patch.object(workshop, "checked_against_main", mock.AsyncMock(side_effect=answers)), \
+                mock.patch.object(self.shop, "_release", mock.AsyncMock(return_value={"result": "released"})):
+            self.assertTrue(await self.shop.build("demo", "A spec.", "e_one", "early", small=True, fix="bug_1"))
+        self.assertEqual(len(told), 21)
 
     async def test_the_whole_way_with_a_conflict_on_the_way(self):
         def first_go(tree):

@@ -67,7 +67,7 @@ echo "Stored ${stored_length} characters, readable by root only."
 
 echo "Testing it..."
 if ./scripts/stack.sh --profile agent run --rm --no-deps -T agent bash -c \
-  "$claude -p 'Reply with exactly the word: working' --model claude-haiku-5-5 --max-turns 1" </dev/null; then
+  "$claude -p 'Reply with exactly the word: working' --model claude-haiku-5-5" </dev/null; then
   echo "The token works. You can close this window, and clear the scrollback if you like."
 else
   echo "Claude rejected the token. Run this again and choose to sign in, which issues a new one."

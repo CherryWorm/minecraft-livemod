@@ -176,7 +176,7 @@ class Interview:
 
     async def _ask(self, instruction):
         result = await llm.ask(self.governor, "interviewer", "\n".join([*conversation(self.transcript), instruction]), system=llm.prompt_text("interviewer") + language_note(self.language, names_too=False),
-                               schema=INTERVIEW_SCHEMA, max_turns=3)
+                               schema=INTERVIEW_SCHEMA)
         data = result.structured if isinstance(result.structured, dict) else None
         if result.is_error or data is None:
             return None
@@ -195,7 +195,7 @@ async def choose_direction(governor, briefs, web, problems=()):
     if problems:
         prompt += "\n\nLast time, the progression had these problems, so fix them:\n" + "\n".join(problems)
     result = await llm.ask(governor, "direction", prompt, schema=DIRECTION_SCHEMA, allowed_tools=["mcp__web__research"],
-                           mcp_servers={"web": web}, max_turns=10)
+                           mcp_servers={"web": web})
     return result.structured if isinstance(result.structured, dict) and not result.is_error else None
 
 
@@ -224,7 +224,7 @@ def looking_things_up():
     async def look_up(args):
         return {"content": [{"type": "text", "text": world_index.player_entry(FEATURES, args.get("id", ""))}]}
 
-    return {"allowed_tools": [LOOK_UP], "mcp_servers": {"guide": create_sdk_mcp_server("guide", tools=[look_up])}, "max_turns": 6}
+    return {"allowed_tools": [LOOK_UP], "mcp_servers": {"guide": create_sdk_mcp_server("guide", tools=[look_up])}}
 
 
 def names_for_chat(languages):
@@ -267,7 +267,7 @@ async def teaser(governor, feature, stage):
     brief = llm.untrusted("brief", json.dumps({"stage": stage, "category": feature.get("category"), "spec": feature.get("spec")}))
     prompt = brief
     for _ in range(TEASER_TRIES):
-        result = await llm.ask(governor, "teaser", prompt, schema=TEASER_SCHEMA, max_turns=3)
+        result = await llm.ask(governor, "teaser", prompt, schema=TEASER_SCHEMA)
         line = result.structured.get("teaser") if isinstance(result.structured, dict) and not result.is_error else None
         problem = feedback.teaser_problem(line, feature)
         if not problem:

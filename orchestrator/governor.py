@@ -52,7 +52,7 @@ class Governor:
     def record_rate_limit(self, status, resets_at):
         """rejected means stop until the reset. A warning means slow down well before reaching it."""
         if status == "rejected":
-            self.state["paused_until"] = int(resets_at or (time.time() + 1800))
+            self.state["paused_until"] = max(self.state["paused_until"], int(resets_at or (time.time() + 1800)))
         elif status == "allowed_warning":
             self.state["last_warning"] = int(time.time())
         self._save()

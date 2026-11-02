@@ -210,21 +210,35 @@ def new_visuals(old_ledger, new_ledger):
 
 
 def changed_panels(content, old_content):
-    """Panels that would look different from the last release. Their art has names that don't change with it, so new art counts for all of them."""
+    """Compare each panel's layout and the textures it actually uses."""
     def read(folder):
         file = folder / "config" / "panels.json"
         return json.loads(file.read_text(encoding="utf-8")) if file.exists() else {}
 
     panels = read(content)
     old = read(old_content)
-    art = bundles.tree_hash(content / "pack/assets/gm/textures/gui") != bundles.tree_hash(old_content / "pack/assets/gm/textures/gui")
-    return sorted(name for name, panel in panels.items() if art or old.get(name) != panel)
+    def textures(value):
+        if isinstance(value, dict):
+            return {path for child in value.values() for path in textures(child)}
+        if isinstance(value, list):
+            return {path for child in value for path in textures(child)}
+        if isinstance(value, str) and value.startswith("gm:textures/gui/") and ".." not in value.split("/"):
+            return {"pack/assets/gm/" + value.removeprefix("gm:")}
+        return set()
+
+    def data(folder, path):
+        file = folder / path
+        return file.read_bytes() if file.is_file() else None
+
+    return sorted(name for name, panel in panels.items()
+                  if old.get(name) != panel or any(data(content, path) != data(old_content, path) for path in textures(panel)))
 
 
 def fingerprint(content, jars, current):
     """Identifies what a gate run proved: this exact content and these jars, on top of this release. Words in another language don't count, because
     no slow gate looks at them and the instant checks run every time anyway, and a translation arriving shouldn't mean testing everything again."""
-    digest = hashlib.sha256(str(current).encode())
+    # Older passes may have photographed unrelated panels or skipped panels after the first eight.
+    digest = hashlib.sha256(f"panel-evidence-v2:{current}".encode())
     digest.update(bundles.tree_hash(content, wording.is_translation).encode())
     for jar in sorted(jars):
         digest.update(jar.read_bytes())
@@ -259,14 +273,56 @@ def run_gates(tier, jars, content, old_ledger, new_ledger, old_content, mods, re
                       or bundles.tree_hash(content / "pack/assets/gm/shaders") != bundles.tree_hash(old_content / "pack/assets/gm/shaders"))
     sign.mark_for_testing(content)
     current = runtime.HISTORY / str(runtime.load_state().get("current"))
-    report["shadow"] = stages.run("shadow", lambda: shadow.run_gate(tier, jars, content, new_patches, new_mixins(jars, current)))
-
-    blocks, items, mobs = new_visuals(old_ledger, new_ledger)
     report_dir = runtime.REPORTS / release_id
-    panels = changed_panels(content, old_content)
-    shots = stages.run("client", lambda: client.run_gate(blocks, items, mods, report_dir, mobs, client_modules, panels))
+    mark, since = runtime.utc_now(), time.time()
+    gate = "shadow"
+    try:
+        report["shadow"] = stages.run("shadow", lambda: shadow.run_gate(tier, jars, content, new_patches, new_mixins(jars, current)))
+        blocks, items, mobs = new_visuals(old_ledger, new_ledger)
+        panels = changed_panels(content, old_content)
+        gate = "client"
+        shots = stages.run("client", lambda: client.run_gate(blocks, items, mods, report_dir, mobs, client_modules, panels))
+    except (GateFailed, TimeoutError, RuntimeError) as error:
+        failure = error if isinstance(error, GateFailed) else GateFailed(gate, f"{type(error).__name__}: {error}")
+        failure.diagnostics = save_diagnostics(report_dir, mark, since)
+        if failure is error:
+            raise
+        raise failure from error
     report["screenshots"] = [str(path) for path in shots]
     remember_pass(passes, proof, report["screenshots"])
+
+
+def save_diagnostics(folder, mark, since):
+    """Keep failed-test evidence before another candidate replaces its logs, with bounded file sizes."""
+    paths = []
+    limit = 16 * 1024 * 1024
+
+    def save(name, data):
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / name
+        if len(data) > limit:
+            data = b"[Earlier log content omitted; final 16 MiB follows]\n" + data[-limit + 100:]
+        target.write_bytes(data)
+        paths.append(str(target))
+
+    try:
+        for server in ("shadow", "shadow-proxy"):
+            try:
+                save(f"{server}.log", runtime.logs_since(server, mark).encode("utf-8"))
+            except (OSError, RuntimeError) as error:
+                save(f"{server}.log", f"Couldn't collect Docker logs: {error}".encode("utf-8"))
+        for crash in sorted((runtime.server_folder("shadow") / "crash-reports").glob("*.txt")):
+            if crash.stat().st_mtime >= since:
+                save(crash.name, crash.read_bytes())
+        registry = runtime.WORK / "registry-ledger.json"
+        if registry.is_file():
+            save("registry-ledger.json", registry.read_bytes())
+        client_log = folder / "client.log"
+        if client_log.is_file():
+            save("client.log", client_log.read_bytes())
+    except OSError as error:
+        print(f"couldn't save all gate diagnostics: {error}", flush=True)
+    return paths
 
 
 def patches_changed(content, old_content):
@@ -363,6 +419,8 @@ def main():
         report = promote(args.source.resolve(), args.release_id, not args.no_deploy, args.chaos_in_prod, stages, args.check_only, args.lint_only, args.why)
     except GateFailed as error:
         report.update(result="blocked", gate=error.gate, reason=error.message)
+        if getattr(error, "diagnostics", None):
+            report["diagnostics"] = error.diagnostics
         code = 2
     except bundles.BundleError as error:
         report.update(result="blocked", gate="static", reason=str(error))

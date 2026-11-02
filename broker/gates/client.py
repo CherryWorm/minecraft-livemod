@@ -21,7 +21,6 @@ FILMED_ANIMATIONS = ("walk", "attack", "hurt", "death")
 FILMED_PHASES = (0.0, 0.25, 0.5, 0.75)
 EYE_HEIGHT = 1.62
 # Again each is a real screenshot, and it's rare for a release to change more than this at once.
-MOST_PANEL_SHOTS = 8
 MOST_WORN_SHOWN = 4
 WORN_PLACES = {"head", "chest", "legs", "feet"}
 
@@ -186,7 +185,7 @@ def motion_sheet(slot, rows, shots_dir, out):
 def photograph_panels(panels, log, process):
     """Each new panel opened on the real client, the way a player would see it before anything is driving it."""
     names = []
-    for panel in panels[:MOST_PANEL_SHOTS]:
+    for panel in panels:
         runtime.rcon("shadow", "conduit", "panel", PLAYER, panel, check=False)
         time.sleep(1)
         name = "panel_" + re.sub(r"[^a-z0-9_]", "_", panel)

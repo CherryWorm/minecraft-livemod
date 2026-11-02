@@ -98,14 +98,16 @@ def promote(commit, release_id, *flags, lane=""):
         if not last.exists():
             return {"result": "blocked", "gate": "broker", "reason": f"The broker crashed:\n{result.stderr[-1500:]}"}
         report = json.loads(last.read_text(encoding="utf-8"))
-    # Screenshots go where the agent can read them.
-    copied = []
-    for path in report.get("screenshots", []):
-        target = REPORTS_FOR_AGENT / release_id
-        target.mkdir(parents=True, exist_ok=True)
-        shutil.copy(path, target)
-        copied.append(f"/workspace/reports/{release_id}/{path.rsplit('/', 1)[-1]}")
-    report["screenshots"] = copied
+    # Test evidence goes where the agent can read it, even after the next gate overwrites the server's logs.
+    for kind in ("screenshots", "diagnostics"):
+        copied = []
+        for path in report.get(kind, []):
+            target = REPORTS_FOR_AGENT / release_id
+            target.mkdir(parents=True, exist_ok=True)
+            shutil.copy(path, target)
+            copied.append(f"/workspace/reports/{release_id}/{path.rsplit('/', 1)[-1]}")
+        if kind in report or kind == "screenshots":
+            report[kind] = copied
     return report
 
 

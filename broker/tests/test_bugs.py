@@ -235,7 +235,8 @@ class Fixing(Base):
 
     async def test_a_fix_that_had_to_stop_carries_on(self):
         self.agent.workshop.build.side_effect = [None, True]
-        await self.report()
+        with mock.patch.object(bugs, "WAIT_SECONDS", 0):
+            await self.report()
         self.assertEqual(self.agent.workshop.build.await_count, 2)
         self.assertEqual(self.status(), bugs.FIXED)
 

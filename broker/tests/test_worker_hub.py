@@ -118,7 +118,7 @@ class Attempts(unittest.IsolatedAsyncioTestCase):
             self.addCleanup(patcher.stop)
 
     async def attempt(self, lane):
-        return await self.shop._attempt("demo", pathlib.Path("/tmp/demo"), "Build it.", None, False, lane, "e_one", "early", 10, 1.0, ["Read"], None)
+        return await self.shop._attempt("demo", pathlib.Path("/tmp/demo"), "Build it.", None, False, lane, "e_one", "early", 1.0, ["Read"], None)
 
     async def test_claude_by_default(self):
         await self.attempt(None)
@@ -136,7 +136,8 @@ class Attempts(unittest.IsolatedAsyncioTestCase):
         await self.attempt(lanes.REMOTE)
         self.ask.assert_not_awaited()
         details = self.shop.hub.attempt.await_args.args[2]
-        self.assertEqual((details["prompt"], details["node"], details["max_turns"], details["system"]), ("Build it.", "e_one", 10, "Be good."))
+        self.assertEqual((details["prompt"], details["node"], details["system"]), ("Build it.", "e_one", "Be good."))
+        self.assertNotIn("max_turns", details)
 
     async def test_a_machine_going_away_puts_the_feature_back_in_the_queue(self):
         self.shop.hub.attempt.return_value = llm.Result("", None, "", 0.0, True, lanes.MACHINE_GONE[1], 0.0)

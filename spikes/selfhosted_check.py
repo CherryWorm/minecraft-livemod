@@ -40,14 +40,14 @@ async def run():
         (pathlib.Path(folder) / "note.txt").write_text(f"The word is {secret_word}.\n", encoding="utf-8")
         result = await llm.ask(Meter(), "builder", "Read note.txt with the Read tool, then write that word on its own to word.txt with the Write tool. Then say done.",
                                system="You follow instructions exactly, using your tools.", tools=["Read", "Write"], allowed_tools=["Read", "Write"],
-                               cwd=folder, max_turns=8, budget=5.0, lane=self_hosted.lane)
+                               cwd=folder, budget=5.0, lane=self_hosted.lane)
         written = pathlib.Path(folder) / "word.txt"
         worked = written.exists() and secret_word in written.read_text(encoding="utf-8")
         (pathlib.Path(folder) / "picture.png").write_bytes(red_picture())
         looked = await llm.ask(Meter(), "builder", "Read picture.png with the Read tool, then reply with its colour, in one word.", system="You follow instructions exactly, using your tools.",
-                               tools=["Read"], allowed_tools=["Read"], cwd=folder, max_turns=4, lane=self_hosted.lane) if self_hosted.bridge.vision else None
+                               tools=["Read"], allowed_tools=["Read"], cwd=folder, lane=self_hosted.lane) if self_hosted.bridge.vision else None
     form = {"type": "object", "properties": {"reply": {"type": "string"}}, "required": ["reply"]}
-    chat = await llm.ask(Meter(), "builder", "Say hello to Sam.", system="You're a friendly character.", schema=form, max_turns=3, budget=5.0, lane=self_hosted.lane)
+    chat = await llm.ask(Meter(), "builder", "Say hello to Sam.", system="You're a friendly character.", schema=form, budget=5.0, lane=self_hosted.lane)
     spoke = isinstance(chat.structured, dict) and bool(chat.structured.get("reply"))
     server.cancel()
     saw = looked is None or "red" in looked.text.lower()

@@ -182,10 +182,14 @@ class Worker:
             small = job.get("small", False)
             names = workshop.SMALL_TOOLS if small else [name for name in workshop.BUILDER_TOOLS if name != research.TOOL_NAME]
             prompt = (self.lane.note if self.lane and not job.get("session") else "") + job["prompt"]
-            result = await llm.ask(meter, "small_builder" if small else "builder", prompt, system=job["system"], tools=names, allowed_tools=names,
-                                   disallowed_tools=workshop.BUILDER_DENIED, agents=None if small else workshop.SUBAGENTS, cwd=str(tree),
-                                   max_turns=job["max_turns"], resume=job.get("session"), budget=job.get("budget"), lane=self.lane,
-                                   mcp_servers={"broker": workshop._tools_for(feature_id, tree, job["node"], ask=ask), "world": self._world_server(job_id)})
+            try:
+                result = await llm.ask(meter, "small_builder" if small else "builder", prompt, system=job["system"], tools=names, allowed_tools=names,
+                                       disallowed_tools=workshop.BUILDER_DENIED, agents=None if small else workshop.SUBAGENTS, cwd=str(tree),
+                                       resume=job.get("session"), budget=job.get("budget"), lane=self.lane,
+                                       mcp_servers={"broker": workshop._tools_for(feature_id, tree, job["node"], ask=ask), "world": self._world_server(job_id)})
+            except llm.ModelInterrupted as error:
+                # Hand back partial work and rate-limit events too, so another machine can continue if this one goes away.
+                result = llm.Result(str(error), None, error.session_id or "", 0, True, "model_interrupted", round(time.monotonic() - began, 1))
             async with self.git_lock:
                 try:
                     commit = await asyncio.to_thread(workshop.ready_commit, f"{feature_id}: from this machine", tree, feature_id, job["node"])

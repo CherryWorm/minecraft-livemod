@@ -90,7 +90,7 @@ async def make(governor, graph):
     prompt = "Make the banner and write the words."
     session = None
     for _ in range(TRIES):
-        result = await llm.ask(governor, "banner", prompt, schema=SCHEMA, tools=TOOLS, allowed_tools=TOOLS, disallowed_tools=workshop.BUILDER_DENIED, cwd=str(FOLDER), max_turns=30, budget=3.0, resume=session)
+        result = await llm.ask(governor, "banner", prompt, schema=SCHEMA, tools=TOOLS, allowed_tools=TOOLS, disallowed_tools=workshop.BUILDER_DENIED, cwd=str(FOLDER), budget=3.0, resume=session)
         session = result.session_id or session
         answer = result.structured
         problem = "It didn't finish." if result.is_error else problem_with_picture(FOLDER / "banner.png") or problem_with_words(answer, graph)

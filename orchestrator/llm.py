@@ -2,6 +2,7 @@
 import dataclasses
 import json
 import pathlib
+import re
 import time
 
 from claude_agent_sdk import ClaudeAgentOptions, RateLimitEvent, ResultMessage, query
@@ -11,6 +12,36 @@ from orchestrator.governor import Governor
 
 PROMPTS = pathlib.Path(__file__).parent / "prompts"
 TIMELINE = pathlib.Path("/workspace/state/llm.jsonl")
+MAX_MESSAGE_BYTES = 16 * 1024 * 1024
+QUOTA = re.compile(r"(?:hit|reached|exceeded).{0,50}(?:limit|quota)|rate.?limit|usage limit", re.I)
+INTERRUPTED = re.compile(r"maximum buffer|buffer size|overloaded|connection (?:closed|reset|error)|timed? out|timeout|API Error: (?:429|5\d\d)", re.I)
+
+
+class ModelInterrupted(RuntimeError):
+    """An unfinished conversation, not a verdict on the feature it was working on."""
+
+    def __init__(self, role, reason, session_id=None):
+        super().__init__(reason)
+        self.role = role
+        self.session_id = session_id
+
+
+def interruption(governor, role, message, session_id, lane):
+    if QUOTA.search(message):
+        if lane is None or lane.counted:
+            # A RateLimitEvent, when present, already saved the precise reset. Do not shorten it.
+            governor.record_rate_limit("rejected", None)
+        return ModelInterrupted(role, message, session_id)
+    if INTERRUPTED.search(message):
+        return ModelInterrupted(role, message, session_id)
+    return None
+
+
+def exception_text(error):
+    # Async SDK transports can wrap the useful error in an ExceptionGroup.
+    if isinstance(error, BaseExceptionGroup):
+        return str(error) + "\n" + "\n".join(exception_text(child) for child in error.exceptions)
+    return str(error)
 
 # One place to change the model or effort for a role. Workers run at lower effort because it's faster.
 ROLES = {
@@ -91,7 +122,7 @@ async def ask(governor: Governor, role, prompt, *, lane=None, **options):
 
 
 async def _ask(governor, role, prompt, *, system=None, schema=None, resume=None, tools=None,
-               allowed_tools=None, disallowed_tools=None, cwd=None, agents=None, max_turns=4, mcp_servers=None,
+               allowed_tools=None, disallowed_tools=None, cwd=None, agents=None, mcp_servers=None,
                permission_mode="dontAsk", budget=None, env=None, lane=None):
     config = ROLES[role]
     scrub.keep_out_environment(lane.env if lane else {})
@@ -104,29 +135,40 @@ async def _ask(governor, role, prompt, *, system=None, schema=None, resume=None,
         allowed_tools=allowed_tools or [],
         disallowed_tools=disallowed_tools or [],
         permission_mode=permission_mode,
-        max_turns=max_turns,
+        max_buffer_size=MAX_MESSAGE_BYTES,
         cwd=cwd,
         resume=resume,
         agents=agents,
         mcp_servers=mcp_servers or {},
-        # Budgets are the plan's. Claude Code prices another model as Claude with no cache, so one would stop it far too soon, and the turn limit still holds.
+        # Budgets are the plan's. Claude Code prices another model as Claude with no cache, so one would stop it far too soon.
         max_budget_usd=None if lane and not lane.counted else budget,
         env={**(env or {}), **(lane.env if lane else {})},
         output_format={"type": "json_schema", "schema": schema} if schema else None,
     )
     started = time.monotonic()
     final = None
+    session_id = resume
     recording = ledger.call(role, prompt)
-    async for message in query(prompt=prompt, options=options):
-        recording.heard(message)
-        if isinstance(message, RateLimitEvent) and lane is None:
-            info = message.rate_limit_info
-            governor.record_rate_limit(info.status, info.resets_at)
-        elif isinstance(message, ResultMessage):
-            final = message
+    try:
+        async for message in query(prompt=prompt, options=options):
+            recording.heard(message)
+            data = getattr(message, "data", None)
+            if isinstance(data, dict):
+                session_id = data.get("session_id") or session_id
+            if isinstance(message, RateLimitEvent) and lane is None:
+                info = message.rate_limit_info
+                governor.record_rate_limit(info.status, info.resets_at)
+            elif isinstance(message, ResultMessage):
+                final = message
+                session_id = message.session_id or session_id
+    except Exception as error:
+        retry = interruption(governor, role, exception_text(error), session_id, lane)
+        if retry:
+            raise retry from error
+        raise
     seconds = round(time.monotonic() - started, 1)
     if final is None:
-        return Result("", None, "", 0.0, True, "no_result", seconds)
+        return Result("", None, session_id or "", 0.0, True, "no_result", seconds)
     recording.answered(final, final.total_cost_usd)
     # What Claude Code estimates for a model it doesn't know says nothing about the plan, which this doesn't touch.
     if lane is None or lane.counted:
@@ -135,5 +177,9 @@ async def _ask(governor, role, prompt, *, system=None, schema=None, resume=None,
     with TIMELINE.open("a", encoding="utf-8") as stream:
         stream.write(json.dumps({"at": time.time(), "role": role, "seconds": seconds, "estimate": final.total_cost_usd,
                                  "error": final.is_error, "stop": final.stop_reason, **({"lane": lane.name} if lane else {})}) + "\n")
+    if final.is_error:
+        retry = interruption(governor, role, final.result or "", session_id, lane)
+        if retry:
+            raise retry
     return Result(final.result or "", final.structured_output, final.session_id, final.total_cost_usd or 0.0,
                   final.is_error, final.stop_reason or "", seconds)

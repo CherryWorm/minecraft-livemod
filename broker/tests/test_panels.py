@@ -6,11 +6,12 @@ import json
 import pathlib
 import tempfile
 import unittest
+from unittest import mock
 
 from PIL import Image
 
 from broker import bundles, promote
-from broker.gates import GateFailed, static
+from broker.gates import GateFailed, client, static
 from orchestrator import templates
 
 
@@ -203,11 +204,30 @@ class Photographs(unittest.TestCase):
     def test_only_what_would_look_different_is_photographed(self):
         with tempfile.TemporaryDirectory() as folder:
             new, old = pathlib.Path(folder, "new"), pathlib.Path(folder, "old")
-            self.write(old, {"f/same": {"width": 1}, "f/moved": {"width": 1}}, b"a")
-            self.write(new, {"f/same": {"width": 1}, "f/moved": {"width": 2}, "f/added": {"width": 1}}, b"a")
+            same = {"width": 1, "background": "gm:textures/gui/p.png"}
+            self.write(old, {"f/same": same, "f/moved": {"width": 1}}, b"a")
+            self.write(new, {"f/same": same, "f/moved": {"width": 2}, "f/added": {"width": 1}}, b"a")
             self.assertEqual(promote.changed_panels(new, old), ["f/added", "f/moved"])
-            self.write(new, {"f/same": {"width": 1}}, b"b")
+            self.write(new, {"f/same": same}, b"b")
             self.assertEqual(promote.changed_panels(new, old), ["f/same"])
+
+    def test_changed_art_does_not_select_every_unrelated_panel(self):
+        with tempfile.TemporaryDirectory() as folder:
+            new, old = pathlib.Path(folder, "new"), pathlib.Path(folder, "old")
+            panels = {f"a/p{i}": {"width": 1} for i in range(12)}
+            panels["z/subject"] = {"widgets": [{"hover_image": "gm:textures/gui/p.png"}]}
+            panels["z/shared"] = {"background": "gm:textures/gui/p.png"}
+            self.write(old, panels, b"a")
+            self.write(new, panels, b"b")
+            self.assertEqual(promote.changed_panels(new, old), ["z/shared", "z/subject"])
+
+    def test_every_selected_panel_is_photographed(self):
+        panels = [f"f/p{i}" for i in range(13)]
+        with mock.patch.object(client.runtime, "rcon") as rcon, mock.patch.object(client.time, "sleep"), \
+                mock.patch.object(client, "_tell"), mock.patch.object(client, "_wait_log"):
+            shots = client.photograph_panels(panels, mock.Mock(), mock.Mock())
+        self.assertEqual(len(shots), 13)
+        self.assertEqual([call.args[-1] for call in rcon.call_args_list], panels)
 
     def test_a_first_release_has_nothing_to_compare_with(self):
         with tempfile.TemporaryDirectory() as folder:

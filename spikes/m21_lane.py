@@ -46,7 +46,7 @@ async def run():
     tools = ["Read", "Write", "Bash", "Agent", "Task"]
     agents = {"helper": AgentDefinition(description="A helper.", prompt="HELPER-MARKER", tools=["Read"], model=llm.WORKER["model"], effort=llm.WORKER["effort"])}
     result = await llm.ask(meter, "builder", "Make the thing.", system="You build things.", tools=tools, allowed_tools=tools, disallowed_tools=workshop.BUILDER_DENIED,
-                           agents=agents, cwd=str(work), max_turns=20, budget=5.0, lane=lane)
+                           agents=agents, cwd=str(work), budget=5.0, lane=lane)
     outcome.update({"text": result.text, "is_error": result.is_error, "stop": result.stop_reason, "session": bool(result.session_id), "hello": (work / "hello.txt").exists(),
                     "usage_calls": meter.usage, "rate_limit_calls": meter.rate_limits})
     pathlib.Path("/workspace/lane-out.json").write_text(json.dumps(outcome), encoding="utf-8")

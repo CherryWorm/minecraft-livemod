@@ -13,7 +13,7 @@ async def make(governor):
     shutil.copyfile(workshop.REPO / "bible" / "theme.md", FOLDER / "theme.md")
     for attempt in range(2):
         result = await llm.ask(governor, "icon", "Make the icon.", tools=TOOLS, allowed_tools=TOOLS, disallowed_tools=workshop.BUILDER_DENIED,
-                               cwd=str(FOLDER), max_turns=30, budget=3.0)
+                               cwd=str(FOLDER), budget=3.0)
         answer = await workshop.request("server_icon")
         if answer.get("result") == "installed":
             print(f"server icon installed: {result.text[:200]}", flush=True)

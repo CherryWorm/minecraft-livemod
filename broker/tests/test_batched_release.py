@@ -184,7 +184,7 @@ class TheBuild(Base):
         with mock.patch.object(self.shop, "_attempt", attempt), mock.patch.object(self.shop, "_release", mock.AsyncMock(side_effect=answers)), \
                 mock.patch.object(self.shop, "_review", mock.AsyncMock(return_value={"approve": True})), mock.patch.object(self.shop, "_log_timing"), \
                 mock.patch.object(workshop, "checked_against_main", mock.AsyncMock(return_value={"result": "passed_gates", "screenshots": []})), \
-                mock.patch.object(self.shop, "_prepare_tree", return_value=self.root / "tree"):
+                mock.patch.object(self.shop, "_prepare_tree", return_value=self.feature("demo")):
             shipped = await self.shop.build("demo", "A spec.", "e_one", "early")
         self.assertTrue(shipped)
         self.assertIn("It broke.", prompts[1])

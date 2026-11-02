@@ -165,7 +165,7 @@ class Minds:
 
     async def _decide(self, event):
         _, briefs = self.private_words()
-        result = await llm.ask(self.governor, "mind", build_prompt(event, self.rumours.for_kin(event["kin"])), schema=SCHEMA, max_turns=2)
+        result = await llm.ask(self.governor, "mind", build_prompt(event, self.rumours.for_kin(event["kin"])), schema=SCHEMA)
         self.governor.record_mind(result.estimate)
         if result.is_error or not isinstance(result.structured, dict):
             return

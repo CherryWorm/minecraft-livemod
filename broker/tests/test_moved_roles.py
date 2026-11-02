@@ -159,7 +159,7 @@ class Art(unittest.IsolatedAsyncioTestCase):
         return await self.shop._finish_art("demo", "A spec.", self.tree, "e_one", None)
 
     async def attempt(self, role_is_small=False, tools=("Read",)):
-        return await self.shop._attempt("demo", self.tree, "Build it.", None, role_is_small, None, "e_one", "early", 10, 1.0, list(tools), None)
+        return await self.shop._attempt("demo", self.tree, "Build it.", None, role_is_small, None, "e_one", "early", 1.0, list(tools), None)
 
     async def test_git_and_this_agree_on_what_shipped_art_is(self):
         path = "assets/textures/old.png"

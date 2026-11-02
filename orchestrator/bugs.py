@@ -32,7 +32,6 @@ VERDICTS = (CONFIRMED, ENGINE, NOT_A_BUG, CANT_CONFIRM)
 LABEL = "§c[Bug]§r "
 LONGEST_REPORT = 1000
 TRIES = 2
-MOST_TURNS = 30
 MOST_USAGE = 5.0
 WAIT_SECONDS = 60
 
@@ -168,7 +167,7 @@ class BugDesk:
         for _ in range(TRIES):
             await self._wait_until_allowed()
             result = await llm.ask(self.agent.governor, "bug_investigator", self._prompt(entry), schema=SCHEMA, tools=READING, allowed_tools=[*READING, *EVIDENCE],
-                                   disallowed_tools=workshop.BUILDER_DENIED, cwd=str(workshop.REPO), max_turns=MOST_TURNS, budget=MOST_USAGE,
+                                   disallowed_tools=workshop.BUILDER_DENIED, cwd=str(workshop.REPO), budget=MOST_USAGE,
                                    mcp_servers={"evidence": self._evidence(entry["player"]), "world": self.agent.workshop.world_server()})
             found = result.structured
             if not result.is_error and isinstance(found, dict) and found.get("verdict") in VERDICTS and found.get("findings"):
@@ -243,6 +242,7 @@ class BugDesk:
                                                               details={"title": entry.get("title"), "queued_at": entry.get("at")})
                 if shipped is not None:  # Otherwise it had to stop for now, not because of anything wrong with it.
                     return shipped
+                await asyncio.sleep(WAIT_SECONDS)
 
     async def _fix(self, number, entry):
         try:

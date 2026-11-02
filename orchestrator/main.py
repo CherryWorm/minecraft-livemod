@@ -31,7 +31,6 @@ WATCH_SECONDS = 5 * 60
 FEATURE_ID = workshop.FEATURE_ID
 DIRECTION_RESEARCH = 6
 DIRECTOR_RESEARCH = 3
-DIRECTOR_TURNS = 60  # Running out loses every decision it made, and it's 30 minutes before it's asked again. A plan over 47 requests took 36, because world_index no longer fits in one read.
 DIRECTOR_REST_SECONDS = 30 * 60
 FEEDBACK_PLAN_SECONDS = 10 * 60  # How long new requests can wait for the director, however much is being built.
 REQUEST_FEATURES_PER_PLAN = 2  # However many people ask, most of what gets built comes from the world's own plan.
@@ -494,7 +493,7 @@ class Agent:
         changes_before = self.workshop.changes
         try:
             result = await llm.ask(self.governor, "director_quick", prompt, system=llm.prompt_text("director") + "\n\n" + llm.prompt_text("director_quick"), schema=SORTER_SCHEMA,
-                                   allowed_tools=SORTER_TOOLS, mcp_servers={"world": self.workshop.world_server(can_tune=True)}, max_turns=20)
+                                   allowed_tools=SORTER_TOOLS, mcp_servers={"world": self.workshop.world_server(can_tune=True)})
             decisions = result.structured.get("decisions", []) if isinstance(result.structured, dict) and not result.is_error else []
         finally:
             # If this fails, the director still sees them, because a request only leaves its list by being decided.
@@ -596,7 +595,7 @@ class Agent:
                   f"Features that couldn't be finished, and why. Ask for these differently, or not at all:\n{unfinished}\n\n"
                   "Read bible/theme.md, bible/stages.yaml and bible/progression.json, look at world_index, then choose the next features.")
         result = await llm.ask(self.governor, "director", prompt, schema=DIRECTOR_SCHEMA, tools=["Read", "Glob", "Grep"],
-                               allowed_tools=["Read", "Glob", "Grep", research.TOOL_NAME, "mcp__world__world_index"], cwd=str(workshop.REPO), max_turns=DIRECTOR_TURNS,
+                               allowed_tools=["Read", "Glob", "Grep", research.TOOL_NAME, "mcp__world__world_index"], cwd=str(workshop.REPO),
                                mcp_servers={"web": self.research.server(DIRECTOR_RESEARCH), "world": self.workshop.world_server()})
         if result.is_error or not isinstance(result.structured, dict):
             return []
@@ -744,7 +743,8 @@ class Agent:
         finally:
             del self.building[feature["id"]]
             if shipped is None:
-                self.queue.insert(0, feature)  # It had to stop for now, not because of anything wrong with it.
+                feature["retry_after"] = time.time() + 60
+                self.queue.append(feature)  # Keep its work, and give other features a turn while the model recovers.
             elif not shipped:
                 # Nobody's going to deliver it after all, so the director gets to decide again, soon.
                 for entry in self.requests.for_feature(feature["id"]):
@@ -762,13 +762,14 @@ class Agent:
             asyncio.create_task(self.build_one(feature))
 
         running = sum(bool(feature.get("small")) for feature in self.building.values())
-        for feature in [feature for feature in self.queue if feature.get("small")]:
+        ready = [feature for feature in self.queue if feature.get("retry_after", 0) <= time.time()]
+        for feature in [feature for feature in ready if feature.get("small")]:
             if running >= self.governor.small_builders_allowed():
                 break
             if feature["id"] not in self.building:
                 start(feature, None)
                 running += 1
-        for feature in [feature for feature in self.queue if not feature.get("small")]:
+        for feature in [feature for feature in ready if not feature.get("small")]:
             lane = self.lane_with_room()
             if lane is False:
                 break

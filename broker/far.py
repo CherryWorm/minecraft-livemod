@@ -134,6 +134,17 @@ def _bring_back_pictures(report, release_id):
     return [str(target / path.rsplit("/", 1)[-1]) for path in wanted]
 
 
+def _bring_back_diagnostics(report, release_id):
+    allowed = re.compile(rf"{re.escape(HOME)}/runtime/broker/reports/[\w-][\w.-]*/(?:shadow(?:-proxy)?\.log|client\.log|registry-ledger\.json|crash-[\w.-]+\.txt)")
+    wanted = [path for path in report.get("diagnostics", []) if isinstance(path, str) and allowed.fullmatch(path)][:20]
+    if not wanted:
+        return []
+    target = runtime.REPORTS / release_id
+    target.mkdir(parents=True, exist_ok=True)
+    _rsync("--max-size=16m", *(f"{MACHINE}:{path}" for path in wanted), f"{target}/")
+    return [str(target / path.rsplit("/", 1)[-1]) for path in wanted]
+
+
 def _believed(report, release_id):
     """That machine runs unchecked work, so it's not taken at its word about anything but how a test went."""
     if not isinstance(report, dict) or report.get("result") not in RESULTS:
@@ -141,6 +152,8 @@ def _believed(report, release_id):
     kept = {key: report[key] for key in ("result", "gate", "tier", "stages", "shadow", "total_seconds", "advice") if key in report}
     if "reason" in report:
         kept["reason"] = str(report["reason"])[:MOST_REASON_CHARACTERS]
+    if report.get("diagnostics"):
+        kept["diagnostics"] = _bring_back_diagnostics(report, release_id)
     return {**kept, "release": release_id, "screenshots": _bring_back_pictures(report, release_id)}
 
 

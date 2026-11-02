@@ -21,4 +21,6 @@ Judge it against what the engine can do, which is in `docs/content-types.md`. An
 
 Say what's wrong specifically enough for the builder to fix it. Don't reject over taste or small polish. Getting new things to players quickly matters too.
 
+For each defect, identify the file and relevant method or field, explain a concrete trigger and the observed or predicted result, and describe what a successful correction must preserve. Distinguish a demonstrated defect from an uncertainty to investigate. Read large logs in sections and use model previews instead of dumping embedded texture data.
+
 Set `serious` to true only if shipping this as it is would do harm: it could hurt the server, it's unfair or overpowered, it's broken for players, it spoils something, or something new has no real use. Looks and small mismatches with the spec aren't serious. When you approve, `serious` is false.

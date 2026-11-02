@@ -688,7 +688,8 @@ class WithoutMixins(Case):
     def test_a_world_that_loses_something_is_refused(self):
         with self.assertRaises(GateFailed) as caught:
             self.boot("[Server thread/ERROR] Recoverable errors when loading section [3, 1, 2]")
-        self.assertIn("doesn't load without them", caught.exception.message)
+        self.assertIn("A rollback must work without them", caught.exception.message)
+        self.assertIn("Recoverable errors when loading section", caught.exception.message)
 
 
 class TheBuild(Case):

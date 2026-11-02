@@ -57,7 +57,8 @@ MIXINS_IN_PLACE = re.compile(r"feature mixins in place: \d+ from (\d+) features"
 WONT_START = re.compile(r"feature mixin .* didn't apply|Mixin apply for mod .* failed|InvalidMixinException|MixinTransformerError")
 BOOT_TIMEOUT_SECONDS = 240
 BOOT_LOOK_SECONDS = 5
-MOST_LOG_LINE = 500
+MOST_LOG_LINE = 2000
+MOST_CONTEXT_LINES = 24
 
 
 def _fail(message):
@@ -65,8 +66,21 @@ def _fail(message):
 
 
 def scan_logs(text):
-    # Long enough for a mixin's failure to say which mixin and how, which comes after a full method description.
-    return [line[:MOST_LOG_LINE] for line in text.splitlines() if FORBIDDEN_RE.search(line)]
+    """Include nested causes and registry decoder details, which usually follow the matching error."""
+    lines = text.splitlines()
+    found = []
+    end = 0
+    for index, line in enumerate(lines):
+        if index < end or not FORBIDDEN_RE.search(line):
+            continue
+        end = index + 1
+        while end < min(len(lines), index + MOST_CONTEXT_LINES):
+            following = lines[end]
+            if re.match(r"^\[\d\d:\d\d:\d\d\].*\bINFO\b", following):
+                break
+            end += 1
+        found.append("\n".join(part[:MOST_LOG_LINE] for part in lines[index:end]))
+    return found
 
 
 def _running():
@@ -252,8 +266,9 @@ def boot_without_mixins(jars):
     # Stopped, so that the next test here starts afresh rather than finding a server with no mixins.
     runtime.stack("stop", "shadow", check=False)
     if problems:
-        _fail("The world these mixins leave behind doesn't load without them, and it has to, because that's what a rollback does. "
-              "Keep what they save in fields a game without them will ignore, and don't change the format of what the game saves:\n" + "\n".join(problems[:12]))
+        _fail("The server logged errors after the feature mixins were removed. A rollback must work without them. "
+              "Check the causes below: modules may still depend on removed mixin classes, or saved data may require them. "
+              "Make those dependencies optional and keep saved data readable without the mixins:\n" + "\n".join(problems[:12]))
 
 
 def run_gate(tier, jars, content, patches, new_mixins=()):

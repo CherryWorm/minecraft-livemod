@@ -68,7 +68,7 @@ async def run():
 
     shop = workshop.Workshop(governor, None, None)
     tree = shop._prepare_tree("demo")
-    details = {"prompt": "Make the thing.", "system": "You build things.", "session": None, "small": False, "node": "e_one", "stage": "early", "max_turns": 25, "budget": 5.0}
+    details = {"prompt": "Make the thing.", "system": "You build things.", "session": None, "small": False, "node": "e_one", "stage": "early", "budget": 5.0}
 
     first = asyncio.create_task(hub.attempt("demo", tree, details))
     running = []
