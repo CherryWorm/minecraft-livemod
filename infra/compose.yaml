@@ -102,6 +102,7 @@ services:
       - ./site/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./site/www:/srv/www:ro
       - ${RUNTIME_DIR}/friend-pack:/srv/download:ro
+      - ${RUNTIME_DIR}/world-pages:/srv/world:ro
       - ${RUNTIME_DIR}/site-auth:/etc/caddy/auth:ro
       - ${RUNTIME_DIR}/caddy/data:/data
       - ${RUNTIME_DIR}/caddy/config:/config
@@ -364,6 +365,38 @@ services:
     # backend is internal: it reaches the game's bridge and the two proxies, and nothing else.
     networks:
       - backend
+
+  # Writes the website's /world pages from what the agent has recorded about its builds, which is the only thing of the agent's it can read. What
+  # players said in private is in the agent's state beside that folder, and it isn't mounted here. No network and no secrets. See orchestrator/world_page.py.
+  world:
+    profiles: [agent]
+    image: livingmod/agent:${CLAUDE_AGENT_SDK_VERSION}
+    # Not the agent's entrypoint, which is what opens its secrets.
+    entrypoint: ["python3", "-m", "orchestrator.world_page"]
+    user: "1000:1000"
+    restart: ${AGENT_RESTART:-no}
+    init: true
+    network_mode: none
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # This must never be noticed next to the game.
+    cpus: 0.5
+    cpu_shares: 128
+    mem_limit: 512m
+    oom_score_adj: 500
+    environment:
+      PYTHONPATH: /app
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ../orchestrator:/app/orchestrator:ro
+      - ${RUNTIME_DIR}/agent-workspace/state/ledger:/in/ledger:ro
+      - ${RUNTIME_DIR}/agent-workspace/reports:/in/reports:ro
+      - ${RUNTIME_DIR}/agent-workspace/trees:/in/trees:ro
+      - ${RUNTIME_DIR}/world-pages:/out
 
 networks:
   public: {}

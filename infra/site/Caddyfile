@@ -51,6 +51,17 @@
 			file_server
 		}
 
+		# The page about this world. It's all plain files, written ahead of time by the world service in compose.yaml, and it must never go through
+		# templates, because builders' words end up in these files. /world/ is spoiler-free, and /world/spoilers/ has everything. See orchestrator/world_page.py.
+		redir /world /world/
+		handle_path /world/* {
+			header Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+			# A picture's address changes if the picture does, so these can be kept.
+			header /spoilers/img/* Cache-Control "private, max-age=2592000, immutable"
+			root * /srv/world
+			file_server
+		}
+
 		handle {
 			root * /srv/www
 			templates

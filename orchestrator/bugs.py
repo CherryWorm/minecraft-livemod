@@ -239,7 +239,8 @@ class BugDesk:
         async with self.feature_locks.setdefault(entry["feature"], asyncio.Lock()):
             while True:
                 await self._wait_until_allowed()
-                shipped = await self.agent.workshop.build(entry["feature"], entry["spec"], entry["node"], entry["stage"], small=True, about=feedback.fix_reason(self._speakable(entry.get("title"))), fix=f"bug_{number}", on_released=self._released)
+                shipped = await self.agent.workshop.build(entry["feature"], entry["spec"], entry["node"], entry["stage"], small=True, about=feedback.fix_reason(self._speakable(entry.get("title"))), fix=f"bug_{number}", on_released=self._released,
+                                                              details={"title": entry.get("title"), "queued_at": entry.get("at")})
                 if shipped is not None:  # Otherwise it had to stop for now, not because of anything wrong with it.
                     return shipped
 

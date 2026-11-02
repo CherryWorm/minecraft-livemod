@@ -8,7 +8,7 @@ import pathlib
 import re
 import time
 
-from orchestrator import bugs, feedback, icon, lanes, llm, minds, progression, research, voice, wording, worker_hub, workshop, world_index
+from orchestrator import banner, bugs, feedback, icon, lanes, ledger, llm, minds, progression, research, voice, wording, worker_hub, workshop, world_index
 from orchestrator.bridge import Bridge
 from orchestrator.governor import CONTROL, Governor
 
@@ -37,6 +37,8 @@ FEEDBACK_PLAN_SECONDS = 10 * 60  # How long new requests can wait for the direct
 REQUEST_FEATURES_PER_PLAN = 2  # However many people ask, most of what gets built comes from the world's own plan.
 PLAN_SHOWN = 12
 BOARD_SECONDS = 20
+PAGE_SECONDS = 15
+BANNER_RETRY_SECONDS = 6 * 60 * 60
 TRANSLATE_SECONDS = 10 * 60  # A translation that's missing only matters at the next release, so nothing's gained by looking more often.
 DECISIONS_REMEMBERED = 150
 STOP_AFTER_RELEASES = os.environ.get("AGENT_STOP_AFTER_RELEASES")  # Lets a test spend a known amount.
@@ -120,6 +122,9 @@ class Agent:
         self.building = self.state["in_flight"]
         self.queue[:0] = list(self.building.values())
         self.building.clear()
+        self.making_banner = False
+        self.banner_retry_at = 0
+        ledger.configure(self.private_sources)
 
     def save(self):
         self.state["interviews"] = {player: interview.saved() for player, interview in self.interviews.items()}
@@ -137,6 +142,16 @@ class Agent:
         if not path.exists():
             return set()
         return {line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()}
+
+    def private_sources(self):
+        """Who plays and what's been said in private, so the record of a build can leave those out. See orchestrator/scrub.py."""
+        names, briefs = self.private_words()
+        names = names | set(self.state.get("languages", {})) | set(self.state.get("notices", {})) | {entry.get("player") for entry in self.bugs.reports.values()}
+        said = [json.dumps(brief, ensure_ascii=False) for brief in briefs]
+        said += [entry.get("text", "") for chat in self.state["private_chats"].values() for entry in chat]
+        said += [entry.get("text", "") for interview in self.interviews.values() for entry in interview.transcript]
+        said += [entry.get("text", "") for entry in self.bugs.reports.values()]
+        return names - {None, bugs.CRASH_REPORTER}, said
 
     # Interviews -----------------------------------------------------------------------------------
 
@@ -310,7 +325,7 @@ class Agent:
         (BIBLE / "stages.yaml").write_text(STAGES_TEMPLATE, encoding="utf-8")
         progression.save(PROGRESSION, graph)
         workshop.commit_files("The direction for this world", "bible")
-        self.queue.extend(direction["first_features"])
+        self.add_to_queue(direction["first_features"])
         self.state["direction_chosen"] = True
         self.save()
         for line in direction["tease"]:
@@ -327,6 +342,16 @@ class Agent:
             await icon.make(self.governor)
         except Exception as error:  # noqa: BLE001 - a missing icon must never hold anything else up
             print(f"making the server icon failed: {error}", flush=True)
+
+    async def make_banner(self):
+        """The top of the website's page about this world. Until there is one, that page goes without."""
+        self.making_banner = True
+        try:
+            await banner.make(self.governor, progression.read(PROGRESSION))
+        except Exception as error:  # noqa: BLE001 - a missing banner must never hold anything else up
+            print(f"making the banner failed: {error}", flush=True)
+        finally:
+            self.making_banner = False
 
     # Events -----------------------------------------------------------------------------------------
 
@@ -485,7 +510,7 @@ class Agent:
                     self.requests.mark(number, feedback.DONE, why=decision.get("why", ""))
                     news.append((known[number], feedback.DONE, decision.get("why", "")))
             elif decision.get("action") == "small" and self.can_build(decision):
-                self.queue.insert(0, {"id": decision["id"], "node": decision["node"], "spec": decision["spec"], "title": decision.get("title"), "answers": numbers, "small": True})
+                self.add_to_queue([{"id": decision["id"], "node": decision["node"], "spec": decision["spec"], "title": decision.get("title"), "answers": numbers, "small": True}], first=True)
                 for number in numbers:
                     self.requests.mark(number, feedback.BUILDING, feature=decision["id"])
                     news.append((known[number], feedback.BUILDING, ""))
@@ -621,7 +646,7 @@ class Agent:
         the world's plan comes first. It's small jobs that go to the front, and they have slots of their own."""
         try:
             features = await self.next_features()
-            self.queue.extend(features)
+            self.add_to_queue(features)
             # This should hardly ever come back empty, because there's always more to build, but asking again every
             # few minutes would use up the day's limit if it did.
             self.director_rest_until = 0 if features else time.time() + DIRECTOR_REST_SECONDS
@@ -633,6 +658,15 @@ class Agent:
             self.last_planned = time.time()
             self.save()
             self.wake_director.set()
+
+    def add_to_queue(self, features, first=False):
+        """When something joined the queue is only for the page, and it keeps the first time if it comes back."""
+        for feature in features:
+            feature.setdefault("queued_at", time.time())
+        if first:
+            self.queue[:0] = features
+        else:
+            self.queue.extend(features)
 
     def waiting(self):
         return sum(not feature.get("small") for feature in self.queue)
@@ -695,14 +729,16 @@ class Agent:
             # The id comes from a model and becomes a folder and a branch name.
             if not re.fullmatch(FEATURE_ID, feature["id"]):
                 print(f"refusing a feature with a bad id: {feature['id']!r}", flush=True)
+                ledger.refused(feature, "Its id can't be used.")
                 return
             graph = progression.read(PROGRESSION)
             node = feature.get("node")
             if node not in graph["nodes"]:
                 print(f"refusing feature {feature['id']}: node {node!r} isn't in the progression", flush=True)
+                ledger.refused(feature, f"Its node {node!r} isn't in the progression.")
                 return
             shipped = await self.workshop.build(feature["id"], feature["spec"], node, progression.stage_of(graph, node), small=feature.get("small", False), lane=feature.get("lane"),
-                                                about=feedback.about(feature, graph))
+                                                about=feedback.about(feature, graph), details={"category": feature.get("category"), "title": feature.get("title"), "queued_at": feature.get("queued_at")})
         except Exception as error:  # noqa: BLE001 - one failed feature must not stop the others
             print(f"building {feature['id']} failed: {error}", flush=True)
         finally:
@@ -827,6 +863,26 @@ class Agent:
                 problem = str(error)
             await asyncio.sleep(BOARD_SECONDS)
 
+    def write_page_board(self):
+        graph = progression.read(PROGRESSION)
+        for feature in self.building.values():
+            ledger.named(feature["id"], safe_name=ledger.scrubber()(feedback.about(feature, graph), 200))
+        theme = BIBLE / "theme.md"
+        ledger.write_board(self.state["direction_chosen"], self.queue, graph, self.planning, self.state.get("release_count", 0), theme.read_text(encoding="utf-8") if theme.exists() else "")
+
+    async def page_loop(self):
+        """Keeps the website's page about this world current. Plain code decides what goes in, and it's in orchestrator/ledger.py."""
+        ledger.bring_in_the_past(STATE / "features.jsonl", STATE / "unfinished.jsonl", FEATURES, workshop.TREES, progression.read(PROGRESSION))
+        while True:
+            try:
+                self.write_page_board()
+                if self.state["direction_chosen"] and not banner.made() and not self.making_banner and time.time() >= self.banner_retry_at and not self.governor.why_not_build():
+                    self.banner_retry_at = time.time() + BANNER_RETRY_SECONDS
+                    asyncio.create_task(self.make_banner())
+            except Exception as error:  # noqa: BLE001 - the page going stale mustn't touch anything else
+                print(f"couldn't update the page: {error}", flush=True)
+            await asyncio.sleep(PAGE_SECONDS)
+
     async def translation_loop(self):
         """Whatever came out before there were translations, or while no model could be asked. It goes out with the next release."""
         while True:
@@ -848,7 +904,7 @@ class Agent:
         self.bugs.resume()
         print("agent running", flush=True)
         await asyncio.gather(readers, self.event_loop(), self.chat_loop(), self.build_loop(), self.sort_loop(), self.opening_loop(),
-                             self.status_loop(), self.watch_loop(), self.board_loop(), self.translation_loop(), self.self_hosted.serve(), self.hub.serve(),
+                             self.status_loop(), self.watch_loop(), self.board_loop(), self.page_loop(), self.translation_loop(), self.self_hosted.serve(), self.hub.serve(),
                              self.bugs.watch_for_crashed_mixins())
 
 

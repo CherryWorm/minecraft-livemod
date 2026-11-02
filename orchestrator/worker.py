@@ -16,7 +16,7 @@ import urllib.request
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
-from orchestrator import lanes, llm, research, worker_hub, workshop
+from orchestrator import lanes, ledger, llm, research, scrub, worker_hub, workshop
 
 HUB = os.environ.get("WORKER_HUB_URL", "").rstrip("/")
 SLOTS = int(os.environ.get("WORKER_SLOTS", "1"))
@@ -173,6 +173,8 @@ class Worker:
         self.running.add(job_id)
         began = time.monotonic()
         meter = Meter()
+        notes = ledger.Notebook()
+        ledger.ACTIVE.set(notes)  # This job has a task of its own, so that's all this reaches.
         try:
             async with self.git_lock:
                 tree = await asyncio.to_thread(self._sync, job_id, feature_id)
@@ -192,7 +194,7 @@ class Worker:
                 if self._is_new(commit):
                     await asyncio.to_thread(self._upload, job_id, commit)
             body = {"commit": commit, "session_id": result.session_id, "is_error": result.is_error, "stop_reason": result.stop_reason, "text": result.text[:2000],
-                    "seconds": round(time.monotonic() - began, 1), "estimate": result.estimate, "counted": self.lane is None, "rate_limits": meter.rate_limits}
+                    "seconds": round(time.monotonic() - began, 1), "estimate": result.estimate, "counted": self.lane is None, "rate_limits": meter.rate_limits, "handed_back": notes.handed_back()}
         except Exception as error:  # noqa: BLE001 - the server has to hear, so it doesn't wait for a job that's over
             print(f"{feature_id}: failed: {error}", flush=True)
             body = {"is_error": True, "stop_reason": "worker_failed", "text": str(error)[:500], "seconds": round(time.monotonic() - began, 1)}
@@ -280,6 +282,7 @@ def start():
     global self_hosted
     with os.fdopen(TOKEN_FD) as stream:
         token = stream.read().strip()
+    scrub.keep_out(token)
     self_hosted = lanes.SelfHosted()
     lane = self_hosted.lane if LANE == lanes.SELF_HOSTED else None
     if LANE == lanes.SELF_HOSTED and lane is None:

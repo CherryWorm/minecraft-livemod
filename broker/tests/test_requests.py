@@ -162,7 +162,9 @@ class Sorting(Base):
         self.asked("use for core samples", "core samples are useless")
         self.answers("director_quick", {"decisions": [{"numbers": [1, 2], "action": "small", "id": "sample_use", "node": "e_one", "spec": "Give them a use.", "title": "a use for core samples"}]})
         await self.agent.sort_requests()
-        self.assertEqual(self.agent.queue[0], {"id": "sample_use", "node": "e_one", "spec": "Give them a use.", "title": "a use for core samples", "answers": [1, 2], "small": True})
+        queued = self.agent.queue[0]
+        self.assertTrue(queued.pop("queued_at"))
+        self.assertEqual(queued, {"id": "sample_use", "node": "e_one", "spec": "Give them a use.", "title": "a use for core samples", "answers": [1, 2], "small": True})
         self.assertEqual((self.status(1), self.status(2)), (feedback.BUILDING, feedback.BUILDING))
         self.assertEqual(len(self.told()), 1, "one message for both")
 

@@ -7,7 +7,7 @@ reviewer on Claude still has to pass everything it makes, so it can't lower what
 import dataclasses
 import os
 
-from orchestrator import model_bridge
+from orchestrator import model_bridge, scrub
 
 SELF_HOSTED = "self_hosted"
 REMOTE = "remote"
@@ -37,7 +37,9 @@ def _read_key():
     """Handed over as an open file, so the key is never in an environment that anything else could inherit or read."""
     try:
         with os.fdopen(MODEL_KEY_FD) as stream:
-            return stream.read().strip()
+            key = stream.read().strip()
+        scrub.keep_out(key)
+        return key
     except OSError:
         return ""
 
@@ -51,6 +53,7 @@ class SelfHosted:
         self.roles = set(os.environ.get("AGENT_SELFHOSTED_ROLES", "").split(",")) & set(MOVABLE)
         self.bridge = None
         self.lane = None
+        scrub.keep_out(self.url)
         if self.url and self.slots > 0:
             vision = os.environ.get("AGENT_SELFHOSTED_VISION", "") == "1"
             self.bridge = model_bridge.ModelBridge(self.url, _read_key(), os.environ.get("AGENT_SELFHOSTED_MODEL", ""),

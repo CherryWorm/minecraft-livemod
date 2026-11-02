@@ -23,7 +23,7 @@ from starlette.background import BackgroundTask
 from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route
 
-from orchestrator import lanes, llm, model_bridge, others, world_index
+from orchestrator import lanes, ledger, llm, model_bridge, others, world_index
 
 PORT = 8790
 MACHINES = pathlib.Path(os.environ.get("CONTROL_DIR", "/control")) / "workers.json"
@@ -32,7 +32,7 @@ SEEN_WITHIN_SECONDS = 90
 SILENT_JOB_SECONDS = 180
 CLAIM_WAIT_SECONDS = 20
 MOST_UPLOAD_BYTES = 300 * 1024 * 1024
-ASKABLE = ("lint", "check", "javap")  # Never gates or a release. Those only ever start from the main server's own code.
+ASKABLE = ("lint", "check", "javap", "status")  # Never gates or a release. Those only ever start from the main server's own code.
 
 
 def code_version():
@@ -241,6 +241,9 @@ class WorkerHub:
         if commit and not self._known(job, commit):
             return JSONResponse({"problem": "That commit hasn't been uploaded for this job."}, status_code=400)
         job.last_heard = time.time()
+        if kind == "status":
+            ledger.status_of(job.feature_id, fields.get("phase"), fields.get("doing"))
+            return JSONResponse({"answer": {"result": "noted"}, "main": self._git("rev-parse", "main")})
         answer = await self.ask(kind, **{key: value for key, value in fields.items() if key in ("commit", "class_name", "private", "code")})
         return JSONResponse({"answer": answer, "main": self._git("rev-parse", "main")})
 
@@ -281,7 +284,7 @@ class WorkerHub:
             for status, resets_at in body.get("rate_limits", []):
                 self.governor.record_rate_limit(status, resets_at)
         job.future.set_result(llm.Result(body.get("text", ""), None, body.get("session_id", ""), float(body.get("estimate") or 0), bool(body.get("is_error")),
-                                         body.get("stop_reason", ""), float(body.get("seconds") or 0)))
+                                         body.get("stop_reason", ""), float(body.get("seconds") or 0), body.get("handed_back")))
         return JSONResponse({"ok": True})
 
     def _take_feature(self, job, commit):

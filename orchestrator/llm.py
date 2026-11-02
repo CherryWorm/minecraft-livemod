@@ -6,6 +6,7 @@ import time
 
 from claude_agent_sdk import ClaudeAgentOptions, RateLimitEvent, ResultMessage, query
 
+from orchestrator import ledger, scrub
 from orchestrator.governor import Governor
 
 PROMPTS = pathlib.Path(__file__).parent / "prompts"
@@ -33,6 +34,7 @@ ROLES = {
     "bug_fixer": {"model": "claude-opus-5-5", "effort": "medium"},
     "artist": {"model": "claude-opus-5-5", "effort": "low"},
     "modeller": {"model": "claude-opus-5-5", "effort": "medium"},
+    "banner": {"model": "claude-opus-5-5", "effort": "medium"},
 }
 WORKER = {"model": "claude-opus-5-5", "effort": "low"}
 MOVED = {}  # The roles the owner has moved off Claude, and the lane each now runs on.
@@ -48,6 +50,7 @@ class Result:
     is_error: bool
     stop_reason: str
     seconds: float
+    handed_back: dict = None  # What a builder on another machine said along the way, for the page.
 
 
 def prompt_text(name):
@@ -91,6 +94,7 @@ async def _ask(governor, role, prompt, *, system=None, schema=None, resume=None,
                allowed_tools=None, disallowed_tools=None, cwd=None, agents=None, max_turns=4, mcp_servers=None,
                permission_mode="dontAsk", budget=None, env=None, lane=None):
     config = ROLES[role]
+    scrub.keep_out_environment(lane.env if lane else {})
     options = ClaudeAgentOptions(
         model=config["model"],
         effort=config["effort"],
@@ -112,7 +116,9 @@ async def _ask(governor, role, prompt, *, system=None, schema=None, resume=None,
     )
     started = time.monotonic()
     final = None
+    recording = ledger.call(role, prompt)
     async for message in query(prompt=prompt, options=options):
+        recording.heard(message)
         if isinstance(message, RateLimitEvent) and lane is None:
             info = message.rate_limit_info
             governor.record_rate_limit(info.status, info.resets_at)
@@ -121,6 +127,7 @@ async def _ask(governor, role, prompt, *, system=None, schema=None, resume=None,
     seconds = round(time.monotonic() - started, 1)
     if final is None:
         return Result("", None, "", 0.0, True, "no_result", seconds)
+    recording.answered(final, final.total_cost_usd)
     # What Claude Code estimates for a model it doesn't know says nothing about the plan, which this doesn't touch.
     if lane is None or lane.counted:
         governor.record_usage(final.total_cost_usd)

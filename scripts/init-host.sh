@@ -10,7 +10,7 @@ if [[ "${1:-}" == "--public" ]]; then
 fi
 
 runtime="$(pwd)/../runtime"
-mkdir -p "$runtime"/{secrets,velocity,prod,shadow,shadow-proxy,cache/gradle,cache/home,releases/current,releases/candidate,releases/history,broker,backups,control,agent-workspace,friend-pack,site-auth,caddy/data,caddy/config}
+mkdir -p "$runtime"/{secrets,velocity,prod,shadow,shadow-proxy,cache/gradle,cache/home,releases/current,releases/candidate,releases/history,broker,backups,control,agent-workspace,friend-pack,world-pages,site-auth,caddy/data,caddy/config}
 runtime=$(cd "$runtime" && pwd)
 
 for name in forwarding rcon bridge web_proxy; do

@@ -22,5 +22,5 @@ if ! systemctl is-enabled --quiet livingmod-broker 2>/dev/null; then
   echo $! >"$pid_file"
 fi
 
-./scripts/stack.sh --profile agent up -d --force-recreate agent </dev/null
+./scripts/stack.sh --profile agent up -d --force-recreate agent world </dev/null
 echo "agent and broker started"

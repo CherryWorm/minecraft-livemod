@@ -12,7 +12,7 @@ import re
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
-from orchestrator import llm, voice
+from orchestrator import llm, scrub, voice
 from orchestrator.governor import CONTROL
 
 SECRET_FD = 4  # Opened for us by the container's entrypoint, like the game connection's secret.
@@ -50,6 +50,7 @@ class Research:
         try:
             with os.fdopen(SECRET_FD) as stream:
                 self.secret = stream.read().strip()
+                scrub.keep_out(self.secret)
         except OSError:
             self.secret = None
 

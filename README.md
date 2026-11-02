@@ -76,6 +76,7 @@ Inside the distro:
 | Command | What it proves |
 |---|---|
 | `python3 -m unittest broker.tests.test_balance broker.tests.test_bytecode broker.tests.test_hooks broker.tests.test_sign broker.tests.test_prune broker.tests.test_progression broker.tests.test_player_guide broker.tests.test_guide broker.tests.test_daemon_order` | The gates' rules, the world's progression, `tune` and pruning, with no servers |
+| `python3 -m unittest broker.tests.test_world_page broker.tests.test_ledger`, in the agent's image | The website's `/world` pages: nothing concrete on a spoiler-free page, nothing private or secret on any page, and a builder's words staying text |
 | `python3 -m broker.tests.m2_test` | Bad releases are stopped at the right gate, and a crash rolls back |
 | `python3 -m broker.tests.m3_test` | Records survive a restart, modules hot-swap, and a crash holds players |
 | `python3 -m broker.tests.m7_test` | Signed modules run on a real client, and unsigned or unsafe ones are refused |

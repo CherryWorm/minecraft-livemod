@@ -15,7 +15,7 @@ import uuid
 
 from claude_agent_sdk import AgentDefinition, create_sdk_mcp_server, tool
 
-from orchestrator import feedback, lanes, llm, others, preview, research, templates, translation, tuning, wording, world_index
+from orchestrator import feedback, lanes, ledger, llm, others, preview, research, templates, translation, tuning, wording, world_index
 
 REPO = pathlib.Path("/workspace/repo")
 PROGRESSION = "bible/progression.json"
@@ -54,6 +54,13 @@ FIX_NOTE = ("This is a bug a player reported in something that's already out, an
             "brief below, so check it against the code, fix the cause and change nothing else: what it otherwise does, its art, names, recipes and balance all stay as "
             "they are. Do it yourself, with no subagents and no research, and say what changed in `changes_reached`. If the cause or part of the fix is in another "
             "feature, change it there and say why in `changes_features`.\n\n")
+
+STATUS_SECONDS = 4 * 60  # How long a builder can go without saying where it's got to before it gets reminded.
+STATUS_TEXT = ("Says where you've got to, for the page where people follow this build. Call it each time you start on something new, and at least every few minutes, "
+               "and carry on straight away. `phase` is the nearest of a short list, and `doing` is one short plain sentence. It's only a note for people reading along, and it changes nothing.")
+STATUS_SCHEMA = {"type": "object", "required": ["phase", "doing"], "properties": {"phase": {"type": "string", "enum": list(ledger.PHASES)}, "doing": {"type": "string"}}}
+# In the prompt itself, because in the system prompt alone a real builder on a quick job never got round to it.
+STATUS_ASK = "\n\nFirst, say what you're starting on with `report_status`, and say again each time you move on to something else."
 
 VERDICT_SCHEMA = {
     "type": "object",
@@ -407,18 +414,25 @@ def _template_tool(name, function, folder):
     return run_template
 
 
+def _reminder(run):
+    said = (run.data.get("status") or {}).get("at") if run else None
+    return "" if not run or (said and time.time() - said < STATUS_SECONDS) else "\n\nIt's been a while since report_status said where you've got to."
+
+
 def _tools_for(feature_id, tree, node, ask=None):
     folder = tree / "mods/genesis/features" / feature_id
+    remote = ask is not None
     ask = ask or request
+    run = ledger.ACTIVE.get()
 
     @tool("lint_feature", "Instantly checks this feature against the release rules, with no compile, and gives advice. Use it as often as you like.", {})
     async def lint_feature(args):
         print(f"{feature_id}: used lint_feature", flush=True)
-        return _text(_verdict(await checked_against_main("lint", f"{feature_id}: work in progress", tree, feature_id, node, ask=ask), ("passed_lint",), feature_id))
+        return _text(_verdict(await checked_against_main("lint", f"{feature_id}: work in progress", tree, feature_id, node, ask=ask), ("passed_lint",), feature_id) + _reminder(run))
 
     @tool("check_feature", "Compiles this feature and runs the static checks. Takes about 10 seconds.", {})
     async def check_feature(args):
-        return _text(_verdict(await checked_against_main("check", f"{feature_id}: work in progress", tree, feature_id, node, ask=ask), ("passed_gates", "nothing_to_release"), feature_id))
+        return _text(_verdict(await checked_against_main("check", f"{feature_id}: work in progress", tree, feature_id, node, ask=ask), ("passed_gates", "nothing_to_release"), feature_id) + _reminder(run))
 
     @tool("preview_feature", "Draws this feature's art beside vanilla's in about a second, and says where the picture is, so read it with Read.", {})
     async def preview_feature(args):
@@ -435,12 +449,20 @@ def _tools_for(feature_id, tree, node, ask=None):
         answer = await ask("javap", class_name=args["class_name"], private=args.get("private", False), code=args.get("code", ""))
         return _text(answer.get("output") or answer.get("reason", "Not found."))
 
+    @tool("report_status", STATUS_TEXT, STATUS_SCHEMA)
+    async def report_status(args):
+        if remote:
+            await ask("status", phase=args.get("phase"), doing=args.get("doing"))
+        elif run:
+            run.status(args.get("phase"), args.get("doing"))
+        return _text("Thanks. Carry on.")
+
     made = [_template_tool(name, function, folder) for name, function in templates.TEMPLATES.items()]
-    return create_sdk_mcp_server("broker", tools=[lint_feature, check_feature, preview_feature, java_api, *made])
+    return create_sdk_mcp_server("broker", tools=[lint_feature, check_feature, preview_feature, java_api, report_status, *made])
 
 
 BUILDER_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Agent", "Task", "mcp__broker__lint_feature",
-                 "mcp__broker__check_feature", "mcp__broker__preview_feature", "mcp__broker__java_api",
+                 "mcp__broker__check_feature", "mcp__broker__preview_feature", "mcp__broker__java_api", "mcp__broker__report_status",
                  "mcp__world__world_index", research.TOOL_NAME, *(f"mcp__broker__{name}" for name in templates.TEMPLATES)]
 # Only Bash runs in the sandbox, so file tools need their own limits on where secrets could be found. Builders can run
 # things and write code, so they never read a web page themselves: they ask the research tool.
@@ -449,7 +471,7 @@ BUILDER_DENIED = ["Read(//proc/**)", "Read(//run/**)", "Read(//home/agent/.claud
                   "Grep(//proc/**)", "Grep(//run/**)", "Grep(//workspace/state/**)",
                   "Glob(//workspace/state/**)", "WebFetch", "WebSearch",
                   # What's out is theirs to read and not to change. A shell can still reach it, which is why nothing commits or keeps what's left there.
-                  "Write(//workspace/repo/**)", "Edit(//workspace/repo/**)"]
+                  "Write(//workspace/repo/**)", "Edit(//workspace/repo/**)", "Write(//workspace/state/**)", "Edit(//workspace/state/**)"]
 
 
 def _art_in(folder):
@@ -699,8 +721,12 @@ class Workshop:
                 ready_commit(f"{feature_id}: before going to another machine", tree, feature_id, node)
             except Refused:
                 pass  # It's committed as far as it can be, and sorting out the rest is what the machine's being asked to do.
-            return await self.hub.attempt(feature_id, tree, {"prompt": prompt, "system": llm.prompt_text("builder"), "session": session, "small": small,
+            done = await self.hub.attempt(feature_id, tree, {"prompt": prompt, "system": llm.prompt_text("builder"), "session": session, "small": small,
                                                              "node": node, "stage": stage, "max_turns": max_turns, "budget": usage})
+            run = ledger.ACTIVE.get()
+            if run and done.handed_back:
+                run.add_entries(done.handed_back.get("transcript"), done.handed_back.get("usage"), role)
+            return done
         chosen = self._lane_for(role, lane)
         names = [*tools, ART_TOOL] if chosen else tools
         helpers = {name: helper for name, helper in SUBAGENTS.items() if not chosen or name not in ART_KINDS}
@@ -761,10 +787,25 @@ class Workshop:
         self._remember_art(feature_id, {path: blob for path, blob in _art_in(folder).items() if path in left})
         return True
 
-    async def build(self, feature_id, spec, node, stage, small=False, lane=None, about="", fix=None, on_released=None):
-        """Takes one feature from spec to released. Returns True if it reached players, False if it couldn't be done,
-        and None if it had to stop for now and should be picked up again later. With fix, it's the name of a bug fix to an
-        existing feature rather than the feature itself being built."""
+    async def build(self, feature_id, spec, node, stage, small=False, lane=None, about="", fix=None, on_released=None, details=None):
+        """Takes one feature from spec to released, keeping a record of it for the page. Returns True if it reached players, False if it couldn't
+        be done, and None if it had to stop for now and should be picked up again later. With fix, it's the name of a bug fix to an existing
+        feature rather than the feature itself being built."""
+        run = ledger.open_run(fix or feature_id, feature_id, spec=spec, node=node, stage=stage, lane=lane, safe_name=about, kind="fix" if fix else "small" if small else "feature", **(details or {}))
+        recording = ledger.ACTIVE.set(run)
+        try:
+            shipped = await self._build(run, feature_id, spec, node, stage, small, lane, about, fix, on_released)
+        except Exception as error:
+            if run.data.get("outcome") is None:
+                run.finish("failed", kind=ledger.CRASHED, reason=f"{type(error).__name__}: {error}")
+            raise
+        finally:
+            ledger.ACTIVE.reset(recording)
+        if shipped is None:
+            run.pause()
+        return shipped
+
+    async def _build(self, run, feature_id, spec, node, stage, small, lane, about, fix, on_released):
         started = time.monotonic()
         tree = self._prepare_tree(feature_id, fix)
         (tree / "mods/genesis/features" / feature_id).mkdir(parents=True, exist_ok=True)
@@ -772,6 +813,11 @@ class Workshop:
         feedback = None
         last_problem = ""
         timings = {}
+
+        def took(name, seconds):
+            timings[name] = seconds
+            run.took(name, seconds)
+
         web = self.web_research.server(FEATURE_RESEARCH)
         max_turns, usage, attempts = FIX_LIMITS if fix else SMALL_LIMITS if small else STAGE_LIMITS[stage]
         tools = SMALL_TOOLS if small else BUILDER_TOOLS
@@ -786,7 +832,9 @@ class Workshop:
             prompt = feedback or ((FIX_NOTE if fix else SMALL_NOTE if small else "") + f"Build this feature, with id `{feature_id}`, in node `{node}`, which is in the {stage} game. Its place "
                                   f"in the world is in bible/progression.json.\n\n{llm.untrusted('spec', spec)}\n\n"
                                   f"Your feature folder is mods/genesis/features/{feature_id}/.")
+            prompt += STATUS_ASK
             began = time.monotonic()
+            run.stage(ledger.BUILDING, attempt)
             chosen = self._lane_for(self._role(small, fix), lane)
             try:
                 result = await self._attempt(feature_id, tree, prompt, session, small, lane, node, stage, max_turns, usage, tools, web, fix)
@@ -799,7 +847,7 @@ class Workshop:
             if result.stop_reason in lanes.MACHINE_GONE:
                 print(f"{feature_id}: the machine it was on has gone, so it's going back in the queue", flush=True)
                 return None
-            timings[f"build_{attempt}"] = round(time.monotonic() - began, 1)
+            took(f"build_{attempt}", round(time.monotonic() - began, 1))
             session = result.session_id or session
             if result.is_error:
                 print(f"{feature_id}: builder failed: {result.stop_reason} {result.text[:200]}", flush=True)
@@ -807,47 +855,57 @@ class Workshop:
                     print(f"{feature_id}: its model isn't answering, which says nothing about the feature, so it's going back in the queue", flush=True)
                     return None
                 last_problem = f"The builder stopped: {result.stop_reason}"
+                run.problem(last_problem)
                 continue
 
+            run.stage(ledger.ART)
             if (chosen or lane == lanes.REMOTE) and not await self._finish_art(feature_id, spec, tree, node, web):
                 print(f"{feature_id}: pausing until Claude can finish its art", flush=True)
                 return None
-            timings[f"art_{attempt}"] = round(time.monotonic() - began - timings[f"build_{attempt}"], 1)
+            took(f"art_{attempt}", round(time.monotonic() - began - timings[f"build_{attempt}"], 1))
             # Goes to main, so the commit just below picks it up, and it goes out with this feature.
             began = time.monotonic()
+            run.stage(ledger.TRANSLATING)
             await self.translator.feature(tree / "mods/genesis/features" / feature_id)
-            timings[f"translate_{attempt}"] = round(time.monotonic() - began, 1)
+            took(f"translate_{attempt}", round(time.monotonic() - began, 1))
 
             began = time.monotonic()
+            run.stage(ledger.TESTING)
             gates = await checked_against_main("gates", f"{feature_id}: attempt {attempt}", tree, feature_id, node, release_id=f"{fix or feature_id}-{attempt}", hurry=small, first=bool(fix))
-            timings[f"gates_{attempt}"] = round(time.monotonic() - began, 1)
+            took(f"gates_{attempt}", round(time.monotonic() - began, 1))
             if gates.get("result") not in ("passed_gates", "nothing_to_release"):
                 conflicts = min(MOST_CONFLICTS, conflicts + (gates.get("gate") == "merge"))
                 feedback = f"The automated gates stopped this at {gates.get('gate')}:\n{gates.get('reason')}\n\nFix it."
                 last_problem = f"Gate {gates.get('gate')}: {str(gates.get('reason'))[:300]}"
+                run.problem(f"Gate {gates.get('gate')}: {gates.get('reason')}")
                 print(f"{feature_id}: blocked at {gates.get('gate')}", flush=True)
                 continue
 
             began = time.monotonic()
+            run.stage(ledger.REVIEWING)
+            run.screenshots(gates.get("screenshots", []))
             verdict = await self._review(spec, feature_id, tree, gates.get("screenshots", []))
-            timings[f"review_{attempt}"] = round(time.monotonic() - began, 1)
+            took(f"review_{attempt}", round(time.monotonic() - began, 1))
             if not verdict.get("approve"):
                 # Not a failure of the machinery, so this doesn't count towards the breaker. Every automated gate has
                 # passed, so on the last try anything short of harmful ships: something real today beats perfect later.
                 print(f"{feature_id}: review rejected it: {verdict.get('problems')}", flush=True)
                 last_problem = "Review: " + "; ".join(verdict.get("problems", []))[:300]
+                run.problem("Review: " + "; ".join(verdict.get("problems", [])))
                 if verdict.get("serious", True) or attempt - conflicts < attempts:
                     feedback = "A reviewer found problems:\n- " + "\n- ".join(verdict.get("problems", [])) + "\n\nFix them."
                     continue
                 print(f"{feature_id}: shipping anyway: the problems aren't serious and the gates passed", flush=True)
 
             began = time.monotonic()
+            run.stage(ledger.RELEASING)
             released = await self._release(feature_id, tree, node, about, fix)
-            timings["release"] = round(time.monotonic() - began, 1)
+            took("release", round(time.monotonic() - began, 1))
             if released.get("result") not in WENT_OUT:
                 conflicts = min(MOST_CONFLICTS, conflicts + (released.get("gate") == "merge"))
                 feedback = f"Release failed at {released.get('gate')}: {released.get('reason')}\n\nFix it."
                 last_problem = f"Release: {str(released.get('reason'))[:300]}"
+                run.problem(f"Release: {released.get('reason')}")
                 print(f"{feature_id}: release failed: {released.get('reason')}", flush=True)
                 continue
 
@@ -855,10 +913,14 @@ class Workshop:
                 self.governor.record_gate_result(True)
             timings["total"] = round(time.monotonic() - started, 1)
             self._log_timing(feature_id, timings, released)
+            run.finish("released", timings=timings, tier=released.get("tier"))
+            ledger.ACTIVE.set(None)  # What comes next is about players, and not about this build.
             print(f"{feature_id}: released in {timings['total']}s: {timings}", flush=True)
             await (on_released or self.on_released)(feature_id, tree)
             return True
         print(f"{feature_id}: giving up after {attempts} attempts", flush=True)
+        timings["total"] = round(time.monotonic() - started, 1)
+        run.finish("failed", timings=timings)
         # What players report shouldn't be able to stop everything else, or send the director off after something it never asked for.
         if fix:
             return False

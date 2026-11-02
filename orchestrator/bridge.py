@@ -3,6 +3,8 @@ import asyncio
 import json
 import os
 
+from orchestrator import scrub
+
 
 SECRET_FD = 3  # Opened for us by the container's entrypoint, which is the only thing able to read the file.
 
@@ -13,6 +15,7 @@ class Bridge:
         self.port = port
         with os.fdopen(SECRET_FD) as stream:
             self.secret = stream.read().strip()
+        scrub.keep_out(self.secret)
         self.reader = None
         self.writer = None
         self.next_id = 1

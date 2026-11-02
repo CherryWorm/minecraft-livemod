@@ -74,6 +74,36 @@ Everything new has to be worth having the day it ships, so the director puts wha
 
 JEI shows this world's recipes through a plugin in the companion, under "Recipes you know". The server sends each player only what they've earned: open recipes once they've held something it uses, gated ones once learned, and machine recipes the same way, or once made if they're there to be worked out. Players with an older companion just don't get it.
 
+## The page about the world
+
+`/world/` on the website shows the world's theme and what's become of everything: what's finished, what's being built and what's planned. Until the theme's been chosen, it only says there's nothing to see yet.
+
+**Spoiler-free is the default, and it's enforced by what the server has.** The agent records each build as it happens (`orchestrator/ledger.py`, into `agent-workspace/state/ledger`). The `world` service writes that out as plain pages in `runtime/world-pages`, every 20 seconds (`orchestrator/world_page.py`), and the site just serves the files. There are two trees: `/world/` and `/world/spoilers/`, and each page's toggle goes to the same page in the other. So there's no per-request work, and if `world` stops, the pages stay as they were.
+
+| | `/world/` | `/world/spoilers/` |
+|---|---|---|
+| The theme | A mosaic of the banner, so only its colours, and a title and a line written to give nothing away, checked against what's in the world | The banner, the theme's name and its text |
+| A build | The line players have already seen on the sidebar, or else stage and category, as in `/plan`. Times, tokens, tries, and what kind of problem stopped it, in fixed words | Its real name, prompt, spec, every reason it went back, tokens per role, screenshots, assets, sounds and transcript |
+| What's being built | The same, with the step it's on and the builder's phase, from a fixed list | What its builder last said, with `report_status` |
+| What's planned | The order, those same lines, and how many parts the plan has | Each spec, the goal and every part of the progression |
+| Page addresses | A salted hash, in both trees, so an address names nothing | The same |
+
+**Never on any page, either way:** private chats, interviews, briefs, what players asked for and who asked, secrets and addresses. The `world` service runs with no network and no secrets, and can only read the ledger folder, the reports and the trees, so `opening.json` isn't even there for it to read. The agent scrubs everything before it goes in the ledger (`orchestrator/scrub.py`): player names, any run of five words from a private chat, an interview, a brief or a bug report, known secrets, and anything shaped like one. The result of any tool call that went near somewhere private is dropped from a transcript. Pictures are written out again from their pixels and links aren't followed, because a builder has a shell. To check what's really on the pages, on the machine that has them, run this. It prints only counts and page addresses, so anyone can run it:
+
+```bash
+sudo PYTHONPATH=. python3 scripts/check-world-pages.py runtime
+```
+
+**What's left of that risk:** a reworded private remark gets past the scrubber, as it does in chat. A real builder's shell was refused when it tried to read `opening.json` or write in the ledger folder, because of `BUILDER_DENIED` in `orchestrator/workshop.py`, so keep those lines there. The page doesn't rely on that either: anything in a record is escaped, no script can run, and a spoiler-free page only takes fixed words, numbers and one checked line from it.
+
+**The banner** is drawn once per world by Opus (`orchestrator/banner.py`, up to 3 usage units per try, and it uses the plan), when the theme's been chosen, or the next time the agent starts on a world that has none. If it fails, the page goes without and it tries again in 6 hours. Delete `state/ledger/world.json` to have it made again.
+
+**Builds from before this page** have only what the logs kept: when, how long, and why one failed. They're brought in once from `features.jsonl` and `unfinished.jsonl`, into `state/ledger/old_builds.json`. Their screenshots are taken from whichever report folder is the last before they finished, because nothing recorded which ones the reviewer saw, and they have no prompt, tokens or transcript.
+
+**Keeping an eye on it:** `docker logs livingmod-world-1`. The agent's record of a build is about 1 KB, plus its transcript, which is cut at 30 MB. Transcripts are shown for the latest 200 finished builds, and the older ones stay in the ledger. If you want the room back, it's safe to delete `runtime/world-pages`, which is written again, but not `state/ledger`, which isn't.
+
+Starting it the first time on a server that doesn't have it: `./scripts/agent-up.sh` starts the service and makes its folders, and `./scripts/stack.sh up -d --no-deps --force-recreate site` gives the site its new folder and `Caddyfile`. That only restarts the site, so the game keeps running, though anyone fetching a resource pack at that moment will have to try again.
+
 ## Languages
 
 Each player reads this world in the language their game is set to, English or German so far, and changing it in the game's options is all it takes. Builders write everything in English. Just before a feature goes to its gates, a role on the cheapest model puts anything new into German, and that's kept on main in `bible/lang/de_de.json`, by the English it came from. So only what's changed ever gets asked about, it costs a few seconds per feature, and the same words always come out the same, which means a name players have learned doesn't change between releases. To change a German name by hand, edit that file. What's already out gets caught up within about 10 minutes of the agent starting, and goes out with the next release. A translation that loses a token or a colour code is thrown away, and English shows until a later try gets it right, so nothing ever shows a raw key or an id.
@@ -123,7 +153,7 @@ Once anyone runs a client module, everyone needs the companion. Turn that on wit
 | To do this | Run this |
 |---|---|
 | See what the agent's doing | `docker logs -f livingmod-agent-1` |
-| See what it's released | `tail runtime/timeline.jsonl` and `cat runtime/agent-workspace/state/features.jsonl` |
+| See what it's released | `tail runtime/timeline.jsonl` and `cat runtime/agent-workspace/state/features.jsonl`, or `/world/spoilers/` on the website |
 | See what it's asked the engine to add | `cat runtime/agent-workspace/state/host_requests.jsonl` |
 | See what players have reported with `/bug`, and what became of it | `cat runtime/agent-workspace/state/bugs.jsonl` |
 | See how much of your plan it's used | `cat runtime/agent-workspace/state/governor.json` |
