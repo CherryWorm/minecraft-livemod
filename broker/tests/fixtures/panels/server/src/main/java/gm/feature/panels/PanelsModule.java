@@ -11,6 +11,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -41,6 +42,38 @@ public final class PanelsModule implements ServerModule {
 				return InteractionResult.SUCCESS;
 			}
 		});
+		context.bindBlock("panel_sieve", new BlockBehavior() {
+			@Override
+			public InteractionResult use(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
+				if (player instanceof ServerPlayer serverPlayer) {
+					context.openPanel(serverPlayer, "sieve", new Sieve(serverPlayer), new PanelBehavior() {});
+				}
+				return InteractionResult.SUCCESS;
+			}
+		});
+	}
+
+	/** Only remembers what it's shown, and hands it straight back, the way a filter's slot does. */
+	private final class Sieve extends SimpleContainer {
+		private final ServerPlayer player;
+
+		Sieve(ServerPlayer player) {
+			super(1);
+			this.player = player;
+		}
+
+		@Override
+		public int getMaxStackSize() {
+			return 1;
+		}
+
+		@Override
+		public void setItem(int slot, ItemStack stack) {
+			if (!stack.isEmpty()) {
+				say("remembers " + stack.getItem());
+				this.player.getInventory().add(stack.copy());
+			}
+		}
 	}
 
 	private final class Kiln implements PanelBehavior {

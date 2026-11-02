@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """A panel on a real client: a machine's own screen with its art, real item slots, a button, a bar that moves while it's open, tabs, a
-list and a text field, all with the real mouse and keyboard. Then the same panel for someone whose companion can't draw it, who gets a
-plain chest that does the same things. And the release gate's own photograph of it. Start with a blank world from reset-dev-world.sh,
-and reset it afterwards. With --again it plays through once more on what the last run released, which is enough if no Java has changed.
+list and a text field, all with the real mouse and keyboard. Then a shift-click into a slot that hands back what it's given, and the same
+panel for someone whose companion can't draw it, who gets a plain chest that does the same things. And the release gate's own photograph
+of it. Start with a blank world from reset-dev-world.sh, and reset it afterwards. With --again it plays through once more on what the last run released, which is enough if no Java has changed.
 
 Usage: python3 -m broker.tests.m20_test [--again]
 """
@@ -46,6 +46,11 @@ START_PLACE = 4
 TABS_PLACE = 5
 # After its two rows of chest, and the player's three rows.
 HOTBAR_PLACE = 45
+# The same on the panel with one slot, which has one row of chest.
+SIEVE_HOTBAR_PLACE = 36
+GIVEN = "minecraft:iron_ingot"
+# A server that's hung doesn't answer at all until its watchdog kills it, which takes a minute.
+ANSWERS_WITHIN_SECONDS = 20
 
 
 def build_source():
@@ -136,6 +141,7 @@ def play_panel(client, results, shots, kiln):
         rcon(*command)
     rcon("setblock", x, y, z + 2, kiln)
     rcon("tp", PLAYER, x, y, z, 0, 0)
+    time.sleep(1)
     rcon("gamemode", "survival", PLAYER)
     rcon("clear", PLAYER)
     rcon("item", "replace", "entity", PLAYER, "hotbar.0", "with", "minecraft:iron_ingot", 3)
@@ -210,6 +216,49 @@ def play_panel(client, results, shots, kiln):
     results.append(report("what was in the machine stays there", "iron_ingot" in answer, answer[:120]))
 
 
+def carried(item):
+    found = re.search(r"Found (\d+)", rcon("clear", PLAYER, item, 0))
+    return int(found.group(1)) if found else 0
+
+
+def carries_on(since):
+    started = time.monotonic()
+    answer = rcon("list")
+    took = time.monotonic() - started
+    watchdog = "A single server tick took" in runtime.logs_since("prod", since)
+    return "players online" in answer and took < ANSWERS_WITHIN_SECONDS and not watchdog, f"{took:.0f}s, {answer[:60]}"
+
+
+def play_giving_back(client, results, sieve):
+    """The game repeats a shift-click for as long as the menu says something moved, so a slot that hands back what it's given could hang the
+    server until its watchdog killed it, and the last of a stack could vanish. Says whether the server's still there to carry on with."""
+    x, y, z = SPOT
+    rcon("setblock", x, y, z - 2, sieve)
+    since = runtime.utc_now()
+    # The single item first, because going wrong the other way ends the test.
+    for count, what in ((1, "a single item"), (3, "a stack")):
+        rcon("clear", PLAYER)
+        rcon("item", "replace", "entity", PLAYER, "hotbar.0", "with", GIVEN, count)
+        time.sleep(1)
+        client.ask(f"useblock {x} {y} {z - 2}")
+        time.sleep(1)
+        before = said(client, f"remembers {GIVEN}")
+        client.ask(f"click {SIEVE_HOTBAR_PLACE} shift")
+        time.sleep(1)
+        alive, shown = carries_on(since)
+        results.append(report(f"shift-clicking {what} into a slot that hands it back leaves the server running, with no watchdog", alive, shown))
+        if not alive:
+            return False
+        results.append(report("and the slot really was given it", said(client, f"remembers {GIVEN}") > before))
+        found = carried(GIVEN)
+        results.append(report("and the player still has all of it", found == count, str(found)))
+        client.ask("held")
+        held = last(client, r"\[M8\] holding (\d+)")
+        results.append(report("and their client shows all of it", held == str(count), str(held)))
+        client.ask("closemenu")
+    return True
+
+
 def play_without_companion(client, results):
     x, y, z = SPOT
     client.ask("nopanels", 300)
@@ -260,7 +309,8 @@ def main():
         client.wait(r"\[M8\] joined as [A-Za-z0-9_]+$", 420)
         time.sleep(5)
         play_panel(client, results, shots, kiln)
-        play_without_companion(client, results)
+        if play_giving_back(client, results, slot("panel_sieve")):
+            play_without_companion(client, results)
         results.append(report("nothing went wrong in the client", "PanelScreen." not in client.text() and "PanelClient." not in client.text()))
     finally:
         client.stop()

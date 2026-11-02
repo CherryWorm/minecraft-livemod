@@ -1,11 +1,21 @@
 {
   "id": "panels",
   "phase": 1,
-  "summary": "Test fixture for panels: a machine's own screen, with item slots, a live bar, a button, tabs, a list, a mob and a text field.",
+  "summary": "Test fixture for panels: a machine's own screen, with item slots, a live bar, a button, tabs, a list, a mob and a text field, and a slot that hands back what it's given.",
   "blocks": {
-    "panel_kiln": {"family": "machine", "display": "Panel Kiln", "texture": "panel_block", "retired": true, "inventory": {"inputs": 1, "outputs": 1}}
+    "panel_kiln": {"family": "machine", "display": "Panel Kiln", "texture": "panel_block", "retired": true, "inventory": {"inputs": 1, "outputs": 1}},
+    "panel_sieve": {"family": "machine", "display": "Panel Sieve", "texture": "panel_block", "retired": true, "inventory": {"inputs": 1, "outputs": 1}}
   },
   "panels": {
+    "sieve": {
+      "title": "Panel Sieve",
+      "width": 176,
+      "height": 166,
+      "inventory": {"x": 8, "y": 84},
+      "widgets": [
+        {"type": "slot", "x": 80, "y": 35, "slot": 0}
+      ]
+    },
     "kiln": {
       "title": "Panel Kiln",
       "width": 176,
