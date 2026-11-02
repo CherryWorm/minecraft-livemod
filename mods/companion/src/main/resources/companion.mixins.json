@@ -8,6 +8,8 @@
 		"GameRendererMixin",
 		"HudMixin",
 		"KeyboardHandlerMixin",
+		"KeyMappingAccessor",
+		"OptionsAccessor",
 		"PostPassMixin",
 		"ShaderManagerMixin",
 		"MenuScreensMixin"

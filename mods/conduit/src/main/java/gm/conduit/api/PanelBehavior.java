@@ -1,5 +1,7 @@
 package gm.conduit.api;
 
+import net.minecraft.world.item.ItemStack;
+
 /**
  * What a panel from this feature's "panels" does while it's open. Runs on the server only. A method left out does nothing.
  * Everything a player can do reaches here as an id from the panel, and the server has already checked it's theirs to do.
@@ -13,6 +15,9 @@ public interface PanelBehavior {
 
 	/** A button, a tab or a row of a list was clicked. The row is 0 for anything that isn't a list. */
 	default void clicked(PanelView panel, String id, int row, boolean rightClick, boolean shift) {}
+
+	/** Someone clicked a filter slot with an item, which sets it to one of that item, or with an empty hand, which clears it and gives an empty stack. They still have the item. */
+	default void filtered(PanelView panel, String id, ItemStack stack) {}
 
 	/** What's in a text field changed. It's never longer than the field's max_length, and someone with no companion can't type at all, so never depend on it. */
 	default void typed(PanelView panel, String id, String value) {}

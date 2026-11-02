@@ -225,6 +225,7 @@ class TheModule(unittest.TestCase):
             "new_world_effect": "name color seed",
             "new_blueprint": "name display color layout seed",
             "new_minimap": "name size step seed",
+            "new_shop": "name display color offers seed",
         }
         self.assertEqual(set(templates.TEMPLATES), set(wanted))
         for name, function in templates.TEMPLATES.items():
@@ -792,6 +793,9 @@ class Minimaps(Case):
         self.assertEqual((self.at("atlas") / "client/src/main/resources/module.properties").read_text(encoding="utf-8"), "entry=gm.feature.atlas.AtlasClient\n")
         self.assertNotIn("@", client.replace("@Override", "") + server.replace("@Override", ""))
         self.assertEqual(self.manifest("atlas")["texts"], {"around_near": "Nearby: %s"})
+        self.assertEqual(self.manifest("atlas")["keys"], {"around_toggle": "Show or Hide the Map"})
+        self.assertIn('context.key("around_toggle"', client)
+        static.check_keys({"atlas": {"manifest": self.manifest("atlas"), "dir": self.at("atlas")}})
         self.assertIn("AtlasClient", result["summary"])
         features = {"atlas": {"manifest": self.manifest("atlas"), "dir": self.at("atlas")}}
         static.check_texts(features)
@@ -809,6 +813,42 @@ class Minimaps(Case):
             with self.assertRaises(TemplateError):
                 templates.new_minimap(self.at("atlas"), name="around", **arguments)
         self.assertFalse((self.at("atlas") / "feature.json").exists())
+
+
+class Shops(Case):
+    OFFERS = [{"sells": "minecraft:bread", "count": 2, "costs": "minecraft:emerald", "price": 3, "name": "Bread", "note": "Fresh today"},
+              {"sells": "$item:other/thing", "costs": "$item:coin", "price": 1, "name": "Thing"}]
+
+    def test_a_shop_is_an_item_a_panel_and_a_module(self):
+        result = templates.new_shop(self.at("market"), name="stall", display="Stall", color="#a06030", offers=self.OFFERS)
+        manifest = self.manifest("market")
+        self.assertEqual(manifest["items"]["stall"]["display"], "Stall")
+        panel = manifest["panels"]["stall"]
+        self.assertEqual(panel["title"], "Stall")
+        self.assertGreaterEqual(next(widget for widget in panel["widgets"] if widget["type"] == "list")["row_height"], 22)
+        module = (self.at("market") / "server/src/main/java/gm/feature/market/MarketModule.java").read_text(encoding="utf-8")
+        self.assertIn('new Offer(new ItemStack(BuiltInRegistries.ITEM.getValue(Identifier.parse("minecraft:bread")), 2), new ItemStack(BuiltInRegistries.ITEM.getValue(Identifier.parse("minecraft:emerald")), 3), "stall_0", "stall_0_note")', module)
+        self.assertIn('new Offer(new ItemStack(context.item("other/thing"), 1), new ItemStack(context.item("coin"), 1), "stall_1", "")', module)
+        self.assertEqual(manifest["texts"], {"stall_0": "Bread", "stall_0_note": "Fresh today", "stall_1": "Thing"})
+        self.assertNotIn("@", module.replace("@Override", ""))
+        self.assertIn("MarketModule", result["summary"])
+        features = {"market": {"manifest": manifest, "dir": self.at("market")}}
+        static.check_panels(features)
+        static.check_texts(features)
+
+    def test_a_module_thats_already_there_is_left_alone(self):
+        templates.new_world_effect(self.at("market"), name="shimmer")
+        before = (self.at("market") / "server/src/main/java/gm/feature/market/MarketModule.java").read_bytes()
+        result = templates.new_shop(self.at("market"), name="stall", display="Stall", color="#a06030", offers=self.OFFERS)
+        self.assertEqual((self.at("market") / "server/src/main/java/gm/feature/market/MarketModule.java").read_bytes(), before)
+        self.assertIn('context.openPanel(player, \"stall\"', result["summary"])
+
+    def test_offers_it_cant_read_are_refused(self):
+        for offers in ([], "bread", [{"price": 2, "name": "Bread"}], [{"sells": "bread", "price": 2, "name": "Bread"}], [{"sells": "minecraft:bread", "price": 0, "name": "Bread"}],
+                       [{"sells": "minecraft:bread", "price": 2}], [{"sells": "minecraft:bread", "costs": "coin", "price": 2, "name": "Bread"}]):
+            with self.assertRaises(TemplateError):
+                templates.new_shop(self.at("market"), name="stall", display="Stall", color="#a06030", offers=offers)
+        self.assertFalse((self.at("market") / "feature.json").exists())
 
 
 class Machines(Case):
@@ -1035,6 +1075,7 @@ class Refusals(Case):
         "new_world_effect": lambda folder: templates.new_world_effect(folder, name="shimmer"),
         "new_blueprint": lambda folder: templates.new_blueprint(folder, name="kiln_plans", display="Kiln Plans", color="#4466cc", layout=[{"x": 0, "y": 1, "z": 0, "block": "minecraft:hopper"}]),
         "new_minimap": lambda folder: templates.new_minimap(folder, name="around"),
+        "new_shop": lambda folder: templates.new_shop(folder, name="stall", display="Stall", color="#a06030", offers=[{"sells": "minecraft:bread", "price": 2, "name": "Bread"}]),
     }
 
     def test_every_template_covers_this_table(self):
@@ -1246,6 +1287,7 @@ class NodeAndPhase(Case):
             "new_world_effect": {"name": "a"},
             "new_blueprint": {"name": "a", "display": "A", "color": "#4466cc", "layout": [{"x": 0, "y": 1, "z": 0, "block": "minecraft:hopper"}]},
             "new_minimap": {"name": "a"},
+            "new_shop": {"name": "a", "display": "A", "color": "#a06030", "offers": [{"sells": "minecraft:bread", "price": 2, "name": "Bread"}]},
         }
         self.assertEqual(set(calls), set(templates.TEMPLATES))
         for name, arguments in calls.items():

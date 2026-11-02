@@ -1,0 +1,29 @@
+{
+  "id": "clientgaps",
+  "phase": 1,
+  "summary": "Test fixture for the smaller client abilities: a key in the controls menu, bursts of particles, and everything newer that a panel can have.",
+  "blocks": {
+    "cg_block": {"family": "stone", "display": "Client Gaps Block", "texture": "cg_block", "tool": "pickaxe", "retired": true}
+  },
+  "keys": {"act": "Do the Thing"},
+  "world_images": ["speck"],
+  "panels": {
+    "gaps": {
+      "width": 256,
+      "height": 230,
+      "inventory": {"x": 47, "y": 150},
+      "widgets": [
+        {"type": "tabs", "id": "tabs", "x": 4, "y": 4, "tabs": [
+          {"id": "shop", "text": "Shop", "icon": "minecraft:emerald"},
+          {"id": "long", "text": "All", "icon": "minecraft:book"},
+          {"id": "only", "icon": "minecraft:compass"}
+        ]},
+        {"type": "list", "id": "offers", "page": "shop", "x": 8, "y": 28, "width": 200, "height": 84, "row_height": 28},
+        {"type": "filter", "id": "want", "page": "shop", "x": 222, "y": 30, "tooltip": "What to look for", "text": "Looking for"},
+        {"type": "button", "id": "reveal", "page": "shop", "x": 8, "y": 116, "width": 50, "height": 18, "text": "Show"},
+        {"type": "image", "id": "gem", "page": "shop", "x": 66, "y": 116, "width": 16, "height": 16, "image": "gem", "visible": false},
+        {"type": "list", "id": "all", "page": "long", "x": 8, "y": 28, "width": 200, "height": 100, "max_rows": 200}
+      ]
+    }
+  }
+}

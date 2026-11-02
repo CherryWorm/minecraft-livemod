@@ -16,8 +16,8 @@ final class WorldPayloads {
 	private static final int FLAG_GLOWING = 1;
 	private static final int FLAG_THROUGH_WALLS = 2;
 	private static final int PLACES = 9;
-	// How many of the nine numbers each kind of thing has, in WorldDrawing's order: a box, a sheet, a beam, a billboard and a block.
-	private static final int[] PLACES_USED = {6, 9, 6, 3, 3};
+	// How many of the nine numbers each kind of thing has, in WorldDrawing's order: a box, a sheet, a beam, a billboard, a block and a burst.
+	private static final int[] PLACES_USED = {6, 9, 6, 3, 3, 6};
 
 	private WorldPayloads() {}
 
@@ -113,7 +113,20 @@ final class WorldPayloads {
 		}
 	}
 
+	/** Never sent. Listening for it is how the server tells this companion from one that would be thrown off by a burst. */
+	record BurstsUnderstood() implements CustomPacketPayload {
+		static final Type<BurstsUnderstood> TYPE = new Type<>(Identifier.fromNamespaceAndPath("gm", "world_burst"));
+		static final StreamCodec<FriendlyByteBuf, BurstsUnderstood> CODEC = StreamCodec.unit(new BurstsUnderstood());
+
+		@Override
+		public Type<BurstsUnderstood> type() {
+			return TYPE;
+		}
+	}
+
 	static void register(ModuleHost host) {
+		PayloadTypeRegistry.clientboundPlay().register(BurstsUnderstood.TYPE, BurstsUnderstood.CODEC);
+		ClientPlayNetworking.registerGlobalReceiver(BurstsUnderstood.TYPE, (payload, context) -> {});
 		PayloadTypeRegistry.clientboundPlay().register(Show.TYPE, Show.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(TakeAway.TYPE, TakeAway.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(Shake.TYPE, Shake.CODEC);

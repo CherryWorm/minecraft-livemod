@@ -60,10 +60,40 @@ public final class PanelClient {
 		}
 	}
 
+	record RowClicked(int containerId, String id, int row, boolean rightClick, boolean shift) implements CustomPacketPayload {
+		static final Type<RowClicked> TYPE = new Type<>(Identifier.fromNamespaceAndPath("gm", "panel_row"));
+		static final StreamCodec<RegistryFriendlyByteBuf, RowClicked> CODEC = StreamCodec.composite(
+				ByteBufCodecs.VAR_INT, RowClicked::containerId,
+				ByteBufCodecs.stringUtf8(MOST_TYPED), RowClicked::id,
+				ByteBufCodecs.VAR_INT, RowClicked::row,
+				ByteBufCodecs.BOOL, RowClicked::rightClick,
+				ByteBufCodecs.BOOL, RowClicked::shift,
+				RowClicked::new);
+
+		@Override
+		public Type<RowClicked> type() {
+			return TYPE;
+		}
+	}
+
+	/** Never sent. Listening for it is how the server tells this companion from one too old for filter slots, icons on tabs and very long lists. */
+	record NewerWidgets() implements CustomPacketPayload {
+		static final Type<NewerWidgets> TYPE = new Type<>(Identifier.fromNamespaceAndPath("gm", "panel_newer"));
+		static final StreamCodec<RegistryFriendlyByteBuf, NewerWidgets> CODEC = StreamCodec.unit(new NewerWidgets());
+
+		@Override
+		public Type<NewerWidgets> type() {
+			return TYPE;
+		}
+	}
+
 	static void register() {
 		PayloadTypeRegistry.clientboundPlay().register(Shown.TYPE, Shown.CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(NewerWidgets.TYPE, NewerWidgets.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(Typed.TYPE, Typed.CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RowClicked.TYPE, RowClicked.CODEC);
 		ClientPlayNetworking.registerGlobalReceiver(Shown.TYPE, (payload, context) -> receive(payload));
+		ClientPlayNetworking.registerGlobalReceiver(NewerWidgets.TYPE, (payload, context) -> {});
 	}
 
 	private static void receive(Shown shown) {
@@ -81,6 +111,10 @@ public final class PanelClient {
 
 	static void typed(int containerId, String id, String value) {
 		ClientPlayNetworking.send(new Typed(containerId, id, value));
+	}
+
+	static void rowClicked(int containerId, String id, int row, boolean rightClick, boolean shift) {
+		ClientPlayNetworking.send(new RowClicked(containerId, id, row, rightClick, shift));
 	}
 
 	/** Whether this chest is really a panel, in which case it's on screen now and the game has nothing more to do. */

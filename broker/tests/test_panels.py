@@ -56,6 +56,25 @@ class Rules(unittest.TestCase):
             {"type": "text_field", "id": "name", "x": 8, "y": 130, "width": 60, "height": 14, "max_length": 12},
             background="framed", inventory=False))
 
+    def test_newer_things_a_panel_can_have(self):
+        self.check(panel(
+            {"type": "filter", "id": "want", "x": 8, "y": 8},
+            {"type": "image", "id": "gem", "x": 30, "y": 8, "width": 16, "height": 16, "image": "bright", "visible": False},
+            {"type": "tabs", "id": "tabs", "x": 60, "y": 4, "tabs": [{"id": "main", "text": "Main", "icon": "minecraft:emerald"}, {"id": "more", "icon": "minecraft:book"}]},
+            {"type": "list", "id": "all", "x": 8, "y": 40, "width": 100, "height": 40, "row_height": 24, "max_rows": 1000},
+            inventory=False))
+
+    def test_what_nothing_could_ever_show_is_refused(self):
+        self.refused(panel({"type": "image", "x": 30, "y": 8, "width": 16, "height": 16, "image": "bright", "visible": False}, inventory=False), "starts hidden")
+        self.refused(panel({"type": "image", "id": "gem", "x": 30, "y": 8, "width": 16, "height": 16, "image": "bright", "visible": "no"}, inventory=False), "visible")
+
+    def test_a_filter_needs_an_id_and_a_tab_needs_something_on_it(self):
+        self.refused(panel({"type": "filter", "x": 8, "y": 8}, inventory=False), "filter needs an id")
+        self.refused(panel({"type": "tabs", "id": "tabs", "x": 60, "y": 4, "tabs": [{"id": "main"}]}, inventory=False), "some text or an icon")
+
+    def test_a_list_can_be_long_but_not_endless(self):
+        self.refused(panel({"type": "list", "id": "all", "x": 8, "y": 40, "width": 100, "height": 40, "max_rows": 1001}, inventory=False), "up to 1000")
+
     def test_a_panel_must_fit_on_a_small_screen(self):
         self.refused(panel(width=900), "900", "at most")
         self.refused(panel(height=400), "400", "at most")
@@ -134,6 +153,15 @@ class Rules(unittest.TestCase):
 
 
 class Bundling(unittest.TestCase):
+    def test_a_long_list_only_takes_a_page_of_the_chest(self):
+        shown = {"widgets": [{"type": "filter", "id": "want"}, {"type": "list", "id": "all", "max_rows": 500}, {"type": "list", "id": "few", "max_rows": 45}]}
+        self.assertEqual(bundles.panel_chest_slots(shown), 1 + bundles.LONG_LIST_PLACES + 45)
+        self.assertEqual(shown["widgets"][0]["chest_size"], 1)
+        self.assertEqual(shown["widgets"][1]["chest_size"], bundles.LONG_LIST_PLACES)
+        self.assertTrue(shown["widgets"][1]["paged"])
+        self.assertEqual(shown["widgets"][1]["max_rows"], 500)
+        self.assertNotIn("paged", shown["widgets"][2])
+
     def test_a_panel_gets_its_places_in_the_chest_in_order(self):
         shown = panel(slot(), {"type": "image", "x": 0, "y": 0, "width": 1, "height": 1, "image": "a"}, {"type": "label", "x": 0, "y": 0, "text": "Just words"},
                       {"type": "button", "id": "go"}, {"type": "tabs", "id": "t", "tabs": [{"id": "a"}, {"id": "b"}]}, {"type": "list", "id": "l", "max_rows": 3}, {"type": "list", "id": "m"})

@@ -36,6 +36,10 @@ CUBE_FACES = ("down", "up", "north", "south", "west", "east")
 LIGHT_EMISSION_FULL = 15
 USE_SOUND = "minecraft:intentionally_empty"
 DEFAULT_LIST_ROWS = 9
+# A list with more rows than this can't have a place for each in a chest, so it has a page of them there, and two places for turning the page.
+MOST_LIST_ROWS_IN_CHEST = 45
+LONG_LIST_PLACES = 11
+TAB_ICON_ROOM = 18
 CHEST_ROW = 9
 PANEL_IMAGE_FIELDS = ("image", "hover_image", "disabled_image", "portrait")
 # The padding of a tab and the gap after it.
@@ -623,12 +627,20 @@ def panel_chest_slots(panel):
     used = 0
     for widget in panel.get("widgets", []):
         kind = widget.get("type")
-        size = {"slot": 1, "button": 1, "text_field": 1, "tabs": len(widget.get("tabs", [])), "list": widget.get("max_rows", DEFAULT_LIST_ROWS),
+        size = {"slot": 1, "button": 1, "filter": 1, "text_field": 1, "tabs": len(widget.get("tabs", [])), "list": _list_places(widget) if kind == "list" else 0,
                 "label": 1 if widget.get("id") else 0, "bar": 1 if widget.get("id") else 0, "icon": 1 if widget.get("id") else 0}.get(kind, 0)
         if size:
             widget["chest_slot"], widget["chest_size"] = used, size
             used += size
     return used
+
+
+def _list_places(widget):
+    rows = widget.get("max_rows", DEFAULT_LIST_ROWS)
+    if isinstance(rows, int) and rows > MOST_LIST_ROWS_IN_CHEST:
+        widget["paged"] = True
+        return LONG_LIST_PLACES
+    return rows
 
 
 def _panel_image(feature, feature_id, panel_name, name, pack):
@@ -687,7 +699,8 @@ def translated_panel(panel, words):
             said(widget, field, widget)
         tabs = widget.get("tabs", [])
         shown = [words.text(tab.get("text", "")) for tab in tabs]
-        if widget.get("x", 0) + sum(len(text) * wording.CHARACTER_WIDTH + TAB_GAP for text in shown) <= panel.get("width", 0):
+        icons = sum(TAB_ICON_ROOM for tab in tabs if tab.get("icon"))
+        if widget.get("x", 0) + icons + sum(len(text) * wording.CHARACTER_WIDTH + TAB_GAP for text in shown) <= panel.get("width", 0):
             for tab, text in zip(tabs, shown):
                 tab["text"] = text
     return copied
@@ -1130,6 +1143,8 @@ def render(features, ledger, out, data_format, vanilla_biome=None, scope="shared
             })
         for name, text in manifest.get("texts", {}).items():
             lang.text(f"text.gm.{wording.text_id(feature_id, name)}", text)
+        for name, text in manifest.get("keys", {}).items():
+            lang.text(f"key.gm.{wording.text_id(feature_id, name)}", text)
         lang_file = feature["dir"] / "assets" / "lang.json"
         if lang_file.exists():
             for key, text in json.loads(lang_file.read_text(encoding="utf-8")).items():

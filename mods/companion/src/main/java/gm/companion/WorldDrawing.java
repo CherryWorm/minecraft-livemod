@@ -93,11 +93,16 @@ public final class WorldDrawing {
 	private static final int BEAM = 2;
 	private static final int BILLBOARD = 3;
 	private static final int BLOCK = 4;
+	static final int BURST = 5;
+	private static final int MOST_SPECKS = 512;
+	// How far a speck's speed can fall short of the burst's, so that they don't all make one neat ball.
+	private static final double SLOWEST_SPECK = 0.4;
 
 	private final List<Item> frame = new ArrayList<>();
 	private final Map<String, Kept> kept = new LinkedHashMap<>();
 	private final Map<PipelineKey, RenderPipeline> pipelines = new HashMap<>();
 	private final Map<Identifier, Boolean> readsScene = new HashMap<>();
+	private int burstsMade;
 	private final Set<Identifier> failedShaders = new HashSet<>();
 	private final Map<Integer, List<BakedQuad>> blockQuads = new HashMap<>();
 	private final RandomSource random = RandomSource.create(0);
@@ -339,9 +344,43 @@ public final class WorldDrawing {
 			float left = each.seconds() - age;
 			float alpha = each.seconds() > 0 && each.fade() > 0 && left < each.fade() ? left / each.fade() : 1;
 			for (Shape shape : each.shapes()) {
-				addToFrame(shape, each.moveX() * age, each.moveY() * age, each.moveZ() * age, alpha);
+				if (shape.kind() == BURST) {
+					addBurst(shape, age, alpha, each.moveX() * age, each.moveY() * age, each.moveZ() * age);
+				} else {
+					addToFrame(shape, each.moveX() * age, each.moveY() * age, each.moveZ() * age, alpha);
+				}
 			}
 		}
+	}
+
+	/** Where each speck is comes from its number and how old the burst is, so nothing has to be kept for each one, however many there are. */
+	private void addBurst(Shape burst, float age, float alpha, double moveX, double moveY, double moveZ) {
+		long seed = (long) burst.z2();
+		int count = Math.min((int) burst.height(), MOST_SPECKS);
+		for (int index = 0; index < count; index++) {
+			double angle = Mth.TWO_PI * unit(seed, index, 1);
+			double up = 2 * unit(seed, index, 2) - 1;
+			double out = Math.sqrt(1 - up * up);
+			double distance = burst.x2() * age * (SLOWEST_SPECK + (1 - SLOWEST_SPECK) * unit(seed, index, 3));
+			double x = burst.x1() + Math.cos(angle) * out * distance;
+			double y = burst.y1() + up * distance - burst.y2() * age * age / 2;
+			double z = burst.z1() + Math.sin(angle) * out * distance;
+			addToFrame(new Shape(BILLBOARD, x, y, z, 0, 0, 0, 0, 0, 0, burst.width(), burst.width(), 0, burst.color(), burst.image(), burst.shader(), burst.glowing(), burst.throughWalls()), moveX, moveY, moveZ, alpha);
+		}
+	}
+
+	/** A number from 0 to 1 that's always the same for the same three, and looks random. */
+	private static double unit(long seed, int index, int which) {
+		long mixed = (seed * 1_000_003L + index) * 1_000_003L + which;
+		mixed = (mixed ^ (mixed >>> 33)) * 0xFF51AFD7ED558CCDL;
+		mixed = (mixed ^ (mixed >>> 33)) * 0xC4CEB9FE1A85EC53L;
+		return ((mixed ^ (mixed >>> 33)) >>> 11) * 0x1.0p-53;
+	}
+
+	/** A burst from a client module, which goes by itself when its time is up. */
+	void keepBurst(String moduleId, WorldLook look, double x, double y, double z, int count, float speed, float size, float gravity, float seconds) {
+		Shape burst = shape(BURST, x, y, z, speed, gravity, ++this.burstsMade, 0, 0, 0, size, count, 0, look, moduleId);
+		keep(moduleId, "burst " + this.burstsMade, List.of(burst), seconds, 0, seconds / 2, 0, 0, 0);
 	}
 
 	private static AABB bounds(Shape shape, double moveX, double moveY, double moveZ) {

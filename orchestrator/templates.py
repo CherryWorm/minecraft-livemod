@@ -1201,6 +1201,77 @@ public final class @CLASS@ implements ServerModule {
 """
 
 
+SHOP_MODULE = """package gm.feature.@ID@;
+
+import gm.conduit.api.ItemBehavior;
+import gm.conduit.api.PanelBehavior;
+import gm.conduit.api.PanelRow;
+import gm.conduit.api.PanelView;
+import gm.conduit.api.ServerModule;
+import gm.conduit.api.ServerModuleContext;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.Prediction;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/** A starting point: using the item opens a shop. Each row shows what it sells and what that costs, turns itself off when they can't pay, and swaps one for the other when it's clicked. */
+public final class @CLASS@ implements ServerModule {
+	private record Offer(ItemStack sells, ItemStack costs, String name, String note) {}
+
+	private ServerModuleContext context;
+	private List<Offer> offers;
+
+	@Override
+	public void enable(ServerModuleContext context) {
+		this.context = context;
+		this.offers = List.of(@OFFERS@);
+		context.bindItem("@MACHINE@", new ItemBehavior() {
+			@Override
+			public InteractionResult use(Level level, Player player, InteractionHand hand) {
+				if (player instanceof ServerPlayer shopper) {
+					context.openPanel(shopper, "@MACHINE@", new Shop());
+				}
+				return InteractionResult.SUCCESS;
+			}
+		});
+	}
+
+	private static boolean canPay(ServerPlayer player, ItemStack cost) {
+		return player.getInventory().countItem(cost.getItem()) >= cost.getCount();
+	}
+
+	private final class Shop implements PanelBehavior {
+		@Override
+		public void tick(PanelView panel) {
+			List<PanelRow> rows = new ArrayList<>();
+			for (Offer offer : offers) {
+				String note = offer.note().isEmpty() ? "" : context.textFor(panel.player(), offer.note());
+				rows.add(new PanelRow(context.textFor(panel.player(), offer.name()), offer.sells(), canPay(panel.player(), offer.costs()), "").detail(note).icons(offer.costs()));
+			}
+			panel.setRows("offers", rows);
+		}
+
+		@Override
+		public void clicked(PanelView panel, String id, int row, boolean rightClick, boolean shift) {
+			Offer offer = offers.get(row);
+			ServerPlayer player = panel.player();
+			if (canPay(player, offer.costs())) {
+				player.getInventory().clearOrCountMatchingItems(stack -> stack.is(offer.costs().getItem()), false, offer.costs().getCount(), player.inventoryMenu.getCraftSlots());
+				player.getInventory().placeItemBackInInventory(offer.sells().copy(), Prediction.SERVER_ONLY);
+			}
+		}
+	}
+}
+"""
+
 MINIMAP_SIZES = (16, 256)
 MINIMAP_STEPS = (1, 16)
 MINIMAP_MARKERS = ("0xFFFFFFFF", "0xFFFF4040", "0xFF40FF40", "0xFFFFFF40")
@@ -1208,8 +1279,10 @@ MINIMAP_MARKERS = ("0xFFFFFFFF", "0xFFFF4040", "0xFF40FF40", "0xFFFFFF40")
 MINIMAP_CLIENT = """package gm.feature.@ID@;
 
 import gm.companion.api.ClientModule;
+import gm.companion.api.KeyInput;
 import gm.companion.api.ModuleContext;
 import gm.companion.api.ModuleImage;
+import gm.companion.api.ModuleKey;
 import gm.companion.api.WorldView;
 import net.minecraft.client.Minecraft;
 
@@ -1225,15 +1298,19 @@ public final class @CLASS@ implements ClientModule {
 
 	private final int[] colors = new int[SIZE * SIZE];
 	private String near = "0";
+	private boolean shown = true;
 	private int ticks;
 
 	@Override
 	public void enable(ModuleContext context) {
 		WorldView world = context.world();
 		ModuleImage map = context.newImage(SIZE, SIZE);
+		// A key the player can change in the controls menu, which is called what "keys" says in feature.json.
+		ModuleKey toggle = context.key("@MACHINE@_toggle", KeyInput.of('M'));
+		toggle.onPressed(() -> this.shown = !this.shown);
 		context.onServerValue("@MACHINE@", value -> this.near = value);
 		context.onClientTick(client -> {
-			if (this.ticks++ % EVERY_TICKS == 0 && world.inWorld()) {
+			if (this.shown && this.ticks++ % EVERY_TICKS == 0 && world.inWorld()) {
 				int half = SIZE * STEP / 2;
 				world.readMap((int) Math.floor(world.playerX()) - half, (int) Math.floor(world.playerZ()) - half, SIZE, SIZE, STEP, this.colors);
 				map.setPixels(this.colors);
@@ -1241,6 +1318,9 @@ public final class @CLASS@ implements ClientModule {
 			}
 		});
 		context.onHud((graphics, delta) -> {
+			if (!this.shown) {
+				return;
+			}
 			map.drawTurned(graphics, MARGIN, MARGIN, SIZE, SIZE, 180 - world.yaw());
 			int middle = MARGIN + SIZE / 2;
 			graphics.fill(middle - 1, middle - 1, middle + 1, middle + 1, MARKER);
@@ -1351,6 +1431,7 @@ def new_minimap(folder, *, name, size=64, step=2, seed=1, node=None, phase=None)
     marker = MINIMAP_MARKERS[seed % len(MINIMAP_MARKERS)]
     client = _client_module_files(draft, MINIMAP_CLIENT.replace("@SIZE@", str(size)).replace("@STEP@", str(step)).replace("@MARKER@", marker).replace("@MACHINE@", name))
     draft.manifest.setdefault("texts", {})[f"{name}_near"] = "Nearby: %s"
+    draft.manifest.setdefault("keys", {})[f"{name}_toggle"] = "Show or Hide the Map"
     draft.added.append(name)
     if (draft.folder / "server" / "src").exists():
         module = f"The module that's already in server/ needs its own context.sendClientValue(player, \"{name}\", value)."
@@ -1359,5 +1440,49 @@ def new_minimap(folder, *, name, size=64, step=2, seed=1, node=None, phase=None)
     return draft.commit(f"{name}: a map in the corner of the screen.", f"Added a map. {client} draws it, in client/. {module} Left to decide: what it marks, what the server tells it and what it looks like.")
 
 
+def _offer_item(item, count, label):
+    found = TOKEN.fullmatch(item) if isinstance(item, str) else None
+    if found and found.group(1) == "item":
+        return f"new ItemStack(context.item(\"{found.group(2)}{'/' + found.group(3) if found.group(3) else ''}\"), {count})"
+    if isinstance(item, str) and VANILLA.fullmatch(item) and not item.startswith("#"):
+        return f"new ItemStack(BuiltInRegistries.ITEM.getValue(Identifier.parse(\"{item}\")), {count})"
+    raise TemplateError(f"{label} is $item:name or minecraft:name, not {item!r}.")
+
+
+def new_shop(folder, *, name, display, color, offers, seed=1, node=None, phase=None):
+    """An item that opens a shop on the game's own kind of screen, with a row for each offer showing what it sells and what that costs, turned off when they can't pay. offers is a list of
+    {"sells": "minecraft:bread", "count": 2, "costs": "$item:coin", "price": 3, "name": "Bread", "note": "Fresh today"}, where count, costs and note can be left out, and costs is an emerald unless you say. It needs a recipe
+    or some other source before it can pass. To have a mob or a block open it, or tabs, stock that runs out or prices that change, the panel and the module are yours to change. See Panels in docs/feature-format.md."""
+    draft = _Draft(folder, node, phase)
+    _check_name(name)
+    _check_text(display, "display")
+    _check_color(color, "color")
+    if not isinstance(offers, (list, tuple)) or not offers:
+        raise TemplateError(f"offers must be a list like [{{\"sells\": \"minecraft:bread\", \"price\": 2, \"name\": \"Bread\"}}], not {offers!r}.")
+    parts, texts = [], {}
+    for index, offer in enumerate(offers):
+        if not isinstance(offer, dict) or not isinstance(offer.get("price"), int) or isinstance(offer.get("price"), bool) or offer["price"] < 1 or not isinstance(offer.get("name"), str) or not offer["name"].strip():
+            raise TemplateError(f"Each offer needs a price of at least 1 and a name, like {{\"sells\": \"minecraft:bread\", \"price\": 2, \"name\": \"Bread\"}}, not {offer!r}.")
+        count = offer.get("count", 1)
+        if not isinstance(count, int) or isinstance(count, bool) or count < 1:
+            raise TemplateError(f"An offer's count is how many it sells at once, not {count!r}.")
+        sells = _offer_item(offer.get("sells"), count, "What an offer sells")
+        costs = _offer_item(offer.get("costs", "minecraft:emerald"), offer["price"], "What an offer costs")
+        texts[f"{name}_{index}"] = offer["name"]
+        note = f"{name}_{index}_note" if offer.get("note") else ""
+        if note:
+            texts[note] = offer["note"]
+        parts.append(f"new Offer({sells}, {costs}, \"{name}_{index}\", \"{note}\")")
+    draft.thing("items", name, {"display": display, "texture": name})
+    draft.texture(name, tx.gem(color, seed=seed))
+    draft.manifest.setdefault("panels", {})[name] = {"title": display, "width": 176, "height": 166, "widgets": [{"type": "list", "id": "offers", "x": 8, "y": 17, "width": 160, "height": 54, "row_height": 26, "max_rows": max(9, len(offers))}]}
+    draft.manifest.setdefault("texts", {}).update(texts)
+    if (draft.folder / "server" / "src").exists():
+        module = f"The module that's already in server/ needs its own context.bindItem(\"{name}\", ...), which calls context.openPanel(player, \"{name}\", behavior) and sets the rows."
+    else:
+        module = f"{_module_files(draft, name, display, SHOP_MODULE.replace('@OFFERS@', ', '.join(parts)))} is its module, in server/."
+    return draft.commit(f"{display}: a shop on a screen of its own.", f"Added {display}. {module} It needs a source before it can pass, so add a recipe, and replace its texture with something of your own.")
+
+
 TEMPLATES = {"new_ore": new_ore, "new_tool_set": new_tool_set, "new_armor_set": new_armor_set, "new_plant": new_plant,
-             "new_mob": new_mob, "new_machine": new_machine, "new_world_effect": new_world_effect, "new_blueprint": new_blueprint, "new_minimap": new_minimap}
+             "new_mob": new_mob, "new_machine": new_machine, "new_world_effect": new_world_effect, "new_blueprint": new_blueprint, "new_minimap": new_minimap, "new_shop": new_shop}

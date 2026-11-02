@@ -54,8 +54,18 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 	private static final int ROW_HEIGHT = 18;
 	private static final int TAB_HEIGHT = 16;
 	private static final int TAB_PADDING = 10;
+	// Tabs with icons are taller, so that a whole item fits inside the edge.
+	private static final int TAB_HEIGHT_WITH_ICONS = 20;
+	private static final int TAB_ICON_INSET = 3;
+	private static final int TAB_ICON_GAP = 2;
+	private static final int TAB_TEXT_INSET = 5;
 	private static final int ICON_SIZE = 16;
 	private static final int TEXT_HEIGHT = 9;
+	private static final int TEXT_LINE = 10;
+	private static final int TWO_LINE_ROW = 22;
+	// What the game lays over a recipe's ghost items, and over the slot under the mouse.
+	private static final int GHOST_OVERLAY = 0x30FFFFFF;
+	private static final int SLOT_HOVER = 0x80FFFFFF;
 	// The colours of the game's own containers.
 	private static final int PANEL_COLOUR = 0xFFC6C6C6;
 	private static final int OUTLINE = 0xFF000000;
@@ -66,6 +76,8 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 	private static final int TAB_HOVER = 0xFFA8A8A8;
 	private static final int TEXT_ON_BUTTON = 0xFFFFFFFF;
 	private static final int TEXT_OFF = 0xFFA0A0A0;
+	private static final int DETAIL_ON_BUTTON = 0xFFC8C8C8;
+	private static final int DETAIL_OFF = 0xFF707070;
 	private static final int TEXT_ON_PANEL = 0xFF404040;
 	private static final int BAR_COLOUR = 0xFF55CC55;
 	private static final int SCROLLER_WIDTH = 6;
@@ -102,7 +114,7 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 	private int inventoryLeft;
 	private int inventoryTop;
 
-	private record Row(String text, ItemStack icon, boolean enabled, String tooltip) {}
+	private record Row(String text, ItemStack icon, boolean enabled, String tooltip, String detail, List<ItemStack> more) {}
 
 	PanelScreen(ChestMenu menu, Inventory inventory, Component title, JsonObject definition) {
 		super(menu, inventory, title, number(definition, "width", DEFAULT_WIDTH), number(definition, "height", DEFAULT_HEIGHT));
@@ -222,8 +234,12 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 		List<Row> found = new ArrayList<>();
 		for (JsonElement element : list) {
 			JsonObject row = element.getAsJsonObject();
+			List<ItemStack> more = new ArrayList<>();
+			if (row.has("icons")) {
+				row.getAsJsonArray("icons").forEach(index -> more.add(stacks.get(index.getAsInt())));
+			}
 			found.add(new Row(string(row, "text"), row.has("icon") ? stacks.get(row.get("icon").getAsInt()) : ItemStack.EMPTY,
-					!row.has("enabled") || row.get("enabled").getAsBoolean(), string(row, "tooltip")));
+					!row.has("enabled") || row.get("enabled").getAsBoolean(), string(row, "tooltip"), string(row, "detail"), more));
 		}
 		return found;
 	}
@@ -348,12 +364,28 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 				graphics.item(stack, x, y);
 			}
 			case "image" -> image(graphics, string(widget, "image"), x, y, width, height);
+			case "filter" -> drawFilter(graphics, id, x, y, mouseX, mouseY);
 			case "bar" -> drawBar(graphics, widget, id, x, y, width, height);
 			case "button" -> drawButton(graphics, widget, id, x, y, width, height, mouseX, mouseY);
 			case "tabs" -> drawTabs(graphics, widget, x, y, mouseX, mouseY);
 			case "list" -> drawList(graphics, widget, id, x, y, width, height, mouseX, mouseY);
 			case "mob" -> drawMob(graphics, widget, x, y, width, height, mouseX, mouseY);
 			default -> {}
+		}
+	}
+
+	/** Like a slot with a recipe's ghost in it, because the item isn't really there. */
+	private void drawFilter(GuiGraphicsExtractor graphics, String id, int x, int y, int mouseX, int mouseY) {
+		if (string(this.definition, "background").isEmpty()) {
+			graphics.blitSprite(RenderPipelines.GUI_TEXTURED, SLOT_SPRITE, x - 1, y - 1, SLOT_SIZE, SLOT_SIZE);
+		}
+		ItemStack stack = this.items.getOrDefault(id, ItemStack.EMPTY);
+		if (!stack.isEmpty()) {
+			graphics.item(stack, x, y);
+			graphics.fill(x, y, x + ICON_SIZE, y + ICON_SIZE, GHOST_OVERLAY);
+		}
+		if (inside(mouseX, mouseY, x, y, ICON_SIZE, ICON_SIZE)) {
+			graphics.fill(x, y, x + ICON_SIZE, y + ICON_SIZE, SLOT_HOVER);
 		}
 	}
 
@@ -409,22 +441,55 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 
 	private void drawTabs(GuiGraphicsExtractor graphics, JsonObject widget, int x, int y, int mouseX, int mouseY) {
 		int left = x;
+		int height = tabHeight(widget);
 		for (JsonElement element : widget.getAsJsonArray("tabs")) {
 			JsonObject tab = element.getAsJsonObject();
 			int width = tabWidth(tab);
 			boolean current = string(tab, "id").equals(this.page);
-			boolean hovered = inside(mouseX, mouseY, left, y, width, TAB_HEIGHT);
-			drawTab(graphics, left, y, width, current, hovered);
+			boolean hovered = inside(mouseX, mouseY, left, y, width, height);
+			drawTab(graphics, left, y, width, height, current, hovered);
+			String icon = string(tab, "icon");
+			String text = string(tab, "text");
+			int textLeft = left + (width - this.font.width(text)) / 2;
+			if (!icon.isEmpty()) {
+				graphics.item(this.icons.getOrDefault(icon, ItemStack.EMPTY), left + TAB_ICON_INSET, y + (height - ICON_SIZE) / 2);
+				textLeft = left + TAB_ICON_INSET + ICON_SIZE + TAB_ICON_GAP;
+			}
 			// Dark text on the light tab that's open would look smudged with a shadow.
-			graphics.text(this.font, string(tab, "text"), left + (width - this.font.width(string(tab, "text"))) / 2, y + (TAB_HEIGHT - TEXT_HEIGHT) / 2 + 1, current ? TEXT_ON_PANEL : TEXT_ON_BUTTON, !current);
+			graphics.text(this.font, text, textLeft, y + (height - TEXT_HEIGHT) / 2 + 1, current ? TEXT_ON_PANEL : TEXT_ON_BUTTON, !current);
 			left += width + 1;
 		}
 	}
 
+	private static int tabHeight(JsonObject widget) {
+		for (JsonElement element : widget.getAsJsonArray("tabs")) {
+			if (!string(element.getAsJsonObject(), "icon").isEmpty()) {
+				return TAB_HEIGHT_WITH_ICONS;
+			}
+		}
+		return TAB_HEIGHT;
+	}
+
+	/** Which tab of a row of them this is, or -1 for none. */
+	private int tabAt(JsonObject widget, int x, int y, double mouseX, double mouseY) {
+		int left = x;
+		int height = tabHeight(widget);
+		int index = 0;
+		for (JsonElement element : widget.getAsJsonArray("tabs")) {
+			int width = tabWidth(element.getAsJsonObject());
+			if (inside(mouseX, mouseY, left, y, width, height)) {
+				return index;
+			}
+			left += width + 1;
+			index++;
+		}
+		return -1;
+	}
+
 	/** Lit from the top left with a black edge, like everything in a container, and the open one is part of the panel. */
-	private static void drawTab(GuiGraphicsExtractor graphics, int x, int y, int width, boolean open, boolean hovered) {
+	private static void drawTab(GuiGraphicsExtractor graphics, int x, int y, int width, int height, boolean open, boolean hovered) {
 		int right = x + width;
-		int bottom = y + TAB_HEIGHT;
+		int bottom = y + height;
 		graphics.fill(x + 1, y + 1, right - 1, bottom, open ? PANEL_COLOUR : hovered ? TAB_HOVER : SLOT_COLOUR);
 		graphics.fill(x + 1, y, right - 1, y + 1, OUTLINE);
 		graphics.fill(x, y + 1, x + 1, bottom, OUTLINE);
@@ -438,7 +503,11 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 	}
 
 	private int tabWidth(JsonObject tab) {
-		return this.font.width(string(tab, "text")) + TAB_PADDING;
+		int text = this.font.width(string(tab, "text"));
+		if (string(tab, "icon").isEmpty()) {
+			return text + TAB_PADDING;
+		}
+		return TAB_ICON_INSET + ICON_SIZE + (text > 0 ? TAB_ICON_GAP + text + TAB_TEXT_INSET : TAB_ICON_INSET);
 	}
 
 	private void drawList(GuiGraphicsExtractor graphics, JsonObject widget, String id, int x, int y, int width, int height, int mouseX, int mouseY) {
@@ -460,11 +529,26 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 			boolean hovered = row.enabled() && inside(mouseX, mouseY, x, y, width, height) && inside(mouseX, mouseY, x, top, rowWidth, rowHeight);
 			graphics.blitSprite(RenderPipelines.GUI_TEXTURED, !row.enabled() ? BUTTON_OFF_SPRITE : hovered ? BUTTON_HOVER_SPRITE : BUTTON_SPRITE, x, top, rowWidth, rowHeight);
 			int textLeft = x + 4;
+			int iconTop = top + (rowHeight - ICON_SIZE) / 2;
 			if (!row.icon().isEmpty()) {
-				graphics.item(row.icon(), x + 2, top + (rowHeight - ICON_SIZE) / 2);
-				textLeft = x + ICON_SIZE + 4;
+				graphics.item(row.icon(), x + 2, iconTop);
+				graphics.itemDecorations(this.font, row.icon(), x + 2, iconTop);
+				textLeft = x + ICON_SIZE + 6;
 			}
-			graphics.text(this.font, row.text(), textLeft, top + (rowHeight - TEXT_HEIGHT) / 2 + 1, row.enabled() ? TEXT_ON_BUTTON : TEXT_OFF, true);
+			int right = x + rowWidth - 1 - row.more().size() * (ICON_SIZE + 1);
+			int place = right;
+			for (ItemStack extra : row.more()) {
+				graphics.item(extra, place, iconTop);
+				graphics.itemDecorations(this.font, extra, place, iconTop);
+				place += ICON_SIZE + 1;
+			}
+			int room = right - textLeft - 2;
+			boolean twoLines = !row.detail().isEmpty() && rowHeight >= TWO_LINE_ROW;
+			int textTop = twoLines ? top + (rowHeight - TEXT_HEIGHT - TEXT_LINE) / 2 + 1 : top + (rowHeight - TEXT_HEIGHT) / 2 + 1;
+			graphics.text(this.font, this.font.plainSubstrByWidth(row.text(), room), textLeft, textTop, row.enabled() ? TEXT_ON_BUTTON : TEXT_OFF, true);
+			if (twoLines) {
+				graphics.text(this.font, this.font.plainSubstrByWidth(row.detail(), room), textLeft, textTop + TEXT_LINE, row.enabled() ? DETAIL_ON_BUTTON : DETAIL_OFF, true);
+			}
 		}
 		graphics.disableScissor();
 		if (scrolls) {
@@ -560,9 +644,25 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 			if (string(widget, "type").equals("list")) {
 				int row = rowAt(widget, id, y, height, mouseY);
 				List<Row> list = this.rows.getOrDefault(id, List.of());
-				return row >= 0 && row < list.size() ? list.get(row).tooltip() : "";
+				if (row < 0 || row >= list.size()) {
+					return "";
+				}
+				int rowWidth = list.size() * number(widget, "row_height", ROW_HEIGHT) > height ? width - SCROLLER_WIDTH : width;
+				String named = extraIconNameAt(list.get(row), x + rowWidth - 1, mouseX);
+				return named.isEmpty() ? list.get(row).tooltip() : named;
 			}
-			if (string(widget, "type").equals("icon") && !this.tooltips.containsKey(id) && !widget.has("tooltip")) {
+			if (string(widget, "type").equals("tabs")) {
+				int tab = tabAt(widget, x, y, mouseX, mouseY);
+				if (tab >= 0) {
+					JsonObject found = widget.getAsJsonArray("tabs").get(tab).getAsJsonObject();
+					// A tab that's only an icon has no words of its own, so what it's a picture of is all there is to say.
+					if (string(found, "text").isEmpty() && !string(found, "icon").isEmpty()) {
+						return this.icons.getOrDefault(string(found, "icon"), ItemStack.EMPTY).getHoverName().getString();
+					}
+				}
+				continue;
+			}
+			if ((string(widget, "type").equals("icon") || string(widget, "type").equals("filter")) && !this.tooltips.containsKey(id) && !widget.has("tooltip")) {
 				ItemStack stack = this.items.containsKey(id) ? this.items.get(id) : this.icons.getOrDefault(string(widget, "icon"), ItemStack.EMPTY);
 				return stack.isEmpty() ? "" : stack.getHoverName().getString();
 			}
@@ -572,6 +672,15 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 			}
 		}
 		return "";
+	}
+
+	/** The extra icons sit along the right of a row, so all that's needed is how far from there the mouse is. */
+	private static String extraIconNameAt(Row row, int rightEdge, int mouseX) {
+		int slot = (rightEdge - mouseX - 1) / (ICON_SIZE + 1);
+		if (mouseX >= rightEdge || slot >= row.more().size()) {
+			return "";
+		}
+		return row.more().get(row.more().size() - 1 - slot).getHoverName().getString();
 	}
 
 	private int rowAt(JsonObject widget, String id, int y, int height, double mouseY) {
@@ -611,16 +720,16 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 					}
 				}
 				case "tabs" -> {
-					int left = x;
-					int index = 0;
-					for (JsonElement element : widget.getAsJsonArray("tabs")) {
-						int tabWidth = tabWidth(element.getAsJsonObject());
-						if (inside(mouseX, mouseY, left, y, tabWidth, TAB_HEIGHT)) {
-							press(first + index, event);
-							return true;
-						}
-						left += tabWidth + 1;
-						index++;
+					int tab = tabAt(widget, x, y, mouseX, mouseY);
+					if (tab >= 0) {
+						press(first + tab, event);
+						return true;
+					}
+				}
+				case "filter" -> {
+					if (inside(mouseX, mouseY, x, y, ICON_SIZE, ICON_SIZE) && isEnabled(widget)) {
+						press(first, event);
+						return true;
 					}
 				}
 				case "list" -> {
@@ -628,7 +737,11 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 						int row = rowAt(widget, id, y, height, mouseY);
 						List<Row> list = this.rows.getOrDefault(id, List.of());
 						if (row >= 0 && row < list.size() && list.get(row).enabled()) {
-							press(first + row, event);
+							if (widget.has("paged")) {
+								pressLongListRow(id, row, event);
+							} else {
+								press(first + row, event);
+							}
 						}
 						return true;
 					}
@@ -643,6 +756,12 @@ final class PanelScreen extends AbstractContainerScreen<ChestMenu> {
 	private void press(int chestSlot, MouseButtonEvent event) {
 		boolean shift = (event.modifiers() & InputConstants.MOD_SHIFT) != 0;
 		this.minecraft.gameMode.handleContainerInput(this.menu.containerId, chestSlot, event.button() == RIGHT_BUTTON ? 1 : 0, shift ? ContainerInput.QUICK_MOVE : ContainerInput.PICKUP, this.minecraft.player);
+		this.minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0F));
+	}
+
+	/** A list too long for the chest hasn't a place in it for every row, so this says which it was instead. */
+	private void pressLongListRow(String id, int row, MouseButtonEvent event) {
+		PanelClient.rowClicked(this.menu.containerId, id, row, event.button() == RIGHT_BUTTON, (event.modifiers() & InputConstants.MOD_SHIFT) != 0);
 		this.minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0F));
 	}
 

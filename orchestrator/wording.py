@@ -141,6 +141,8 @@ def wanted(manifest, extra=()):
         add(TEXTS, entry.get("text"), "a page in the player's book, written the way the world would say it")
     for text in (manifest.get("texts") or {}).values():
         add(TEXTS, text, "something shown to a player, as a whole sentence or label")
+    for text in (manifest.get("keys") or {}).values():
+        add(TEXTS, text, "what a key does, in the game's controls menu, as a short label")
     for panel in (manifest.get("panels") or {}).values():
         add(TEXTS, panel.get("title"), "the title of a screen")
         for widget in panel.get("widgets") or []:

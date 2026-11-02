@@ -19,6 +19,7 @@ import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.BookViewScreen;
+import net.minecraft.client.gui.screens.options.controls.KeyBindsScreen;
 import net.minecraft.client.gui.screens.recipebook.RecipeCollection;
 import net.minecraft.client.multiplayer.ClientAdvancements;
 import net.minecraft.client.multiplayer.ServerData;
@@ -54,6 +55,7 @@ import org.slf4j.LoggerFactory;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -116,6 +118,8 @@ public final class KnowledgeTest implements FabricClientGameTest {
 
 		context.runOnClient(client -> client.disconnect(new TitleScreen(), false));
 		context.waitFor(client -> client.level == null && client.gui.screen() instanceof TitleScreen, TICKS_PER_MINUTE);
+		// The next thing the test runner does is reset the game's options, which it can't do for a module's key it never knew.
+		context.waitFor(client -> Arrays.stream(client.options.keyMappings).noneMatch(key -> key.getName().startsWith("key.gm.")), TICKS_PER_MINUTE);
 	}
 
 	/** What a client has really been told about each part of a model, for a test to compare with what a module asked for. */
@@ -387,6 +391,10 @@ public final class KnowledgeTest implements FabricClientGameTest {
 			case "oldcompanion" -> rejoinWithout(context, "inventory_hooks");
 			case "nopanels" -> rejoinWithout(context, "panel");
 			case "noworld" -> rejoinWithout(context, "world_show");
+			case "noburst" -> rejoinWithout(context, "world_burst");
+			// Leaves and comes back, looking the same as ever, because nothing is listening on a channel of this name.
+			case "rejoin" -> rejoinWithout(context, "nothing");
+			case "nonewerpanels" -> rejoinWithout(context, "panel_newer");
 			case "novalues" -> rejoinWithout(context, "client_value");
 			case "facing" -> {
 				String facing = context.computeOnClient(client -> client.player.getYRot() + " " + client.player.getXRot());
@@ -394,6 +402,40 @@ public final class KnowledgeTest implements FabricClientGameTest {
 			}
 			case "type" -> context.getInput().typeChars(words[1]);
 			case "panelmouse" -> panelMouse(context, Integer.parseInt(words[1]), Integer.parseInt(words[2]));
+			case "panelhover" -> {
+				panelCursor(context, Integer.parseInt(words[1]), Integer.parseInt(words[2]));
+				context.waitTicks(2);
+			}
+			case "panelscroll" -> {
+				panelCursor(context, Integer.parseInt(words[1]), Integer.parseInt(words[2]));
+				context.waitTicks(2);
+				context.getInput().scroll(Double.parseDouble(words[3]));
+				context.waitTicks(2);
+			}
+			case "controls" -> {
+				context.runOnClient(client -> client.gui.setScreen(new KeyBindsScreen(null, client.options)));
+				context.waitTicks(10);
+				// With no other mods, the keys of this world's modules come last, because their heading was the last made.
+				double[] middle = context.computeOnClient(client -> new double[] {client.getWindow().getScreenWidth() / 2.0, client.getWindow().getScreenHeight() / 2.0});
+				context.getInput().setCursorPos(middle[0], middle[1]);
+				context.waitTicks(2);
+				context.getInput().scroll(-1000);
+				context.waitTicks(4);
+			}
+			case "closescreen" -> context.runOnClient(client -> client.gui.setScreen(null));
+			// The very calls the controls menu makes when someone picks a new key.
+			case "rebind" -> context.runOnClient(client -> {
+				for (KeyMapping key : client.options.keyMappings) {
+					if (key.getName().startsWith("key.gm.")) {
+						key.setKey(InputConstants.Type.KEYBOARD.getOrCreate(Integer.parseInt(words[1])));
+						KeyMapping.resetMapping();
+					}
+				}
+			});
+			case "nokeys" -> {
+				String keys = context.computeOnClient(client -> Arrays.stream(client.options.keyMappings).filter(key -> key.getName().startsWith("key.gm.")).map(key -> key.getName() + "=" + key.saveString()).toList().toString());
+				LOGGER.info("[M8] module keys {}", keys);
+			}
 			case "guisize" -> {
 				String size = context.computeOnClient(client -> {
 					AbstractContainerScreenAccessor at = (AbstractContainerScreenAccessor) client.gui.screen();
@@ -589,15 +631,18 @@ public final class KnowledgeTest implements FabricClientGameTest {
 
 	/** The real mouse, at a place on the panel that's open, measured from its top left corner. */
 	private void panelMouse(ClientGameTestContext context, int x, int y) {
-		TestInput input = context.getInput();
+		panelCursor(context, x, y);
+		context.waitTicks(2);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+	}
+
+	private void panelCursor(ClientGameTestContext context, int x, int y) {
 		double[] pixel = context.computeOnClient(client -> {
 			AbstractContainerScreenAccessor at = (AbstractContainerScreenAccessor) client.gui.screen();
 			double scale = client.getWindow().getGuiScale();
 			return new double[] {(at.companion$leftPos() + x) * scale, (at.companion$topPos() + y) * scale};
 		});
-		input.setCursorPos(pixel[0], pixel[1]);
-		context.waitTicks(2);
-		input.pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.getInput().setCursorPos(pixel[0], pixel[1]);
 	}
 
 	/** Which channels it listens on is all a server can see of a companion, so this looks just like one from before that channel. */

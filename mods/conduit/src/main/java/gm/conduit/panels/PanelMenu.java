@@ -48,6 +48,7 @@ public final class PanelMenu extends AbstractContainerMenu implements PanelView 
 	private static final int MOST_TYPED_PER_SECOND = 20;
 	private static final int TICKS_PER_SECOND = 20;
 	private static final int PERCENT = 100;
+	private static final int PAGE_BUTTONS = 2;
 
 	private final ServerPlayer player;
 	private final PanelDefinition definition;
@@ -66,6 +67,8 @@ public final class PanelMenu extends AbstractContainerMenu implements PanelView 
 	private final Map<String, Boolean> visible = new HashMap<>();
 	private final Map<String, ItemStack> items = new HashMap<>();
 	private final Map<String, List<PanelRow>> rows = new HashMap<>();
+	// Which page of a long list a plain chest is showing.
+	private final Map<String, Integer> listPages = new HashMap<>();
 	private String page = "";
 	private JsonObject pending = new JsonObject();
 	private List<ItemStack> pendingStacks = new ArrayList<>();
@@ -105,6 +108,11 @@ public final class PanelMenu extends AbstractContainerMenu implements PanelView 
 			}
 		}
 		pending.addProperty("page", this.page);
+		for (PanelDefinition.Widget widget : definition.widgets()) {
+			if (widget.startsHidden()) {
+				setVisible(widget.id(), false);
+			}
+		}
 		guard.accept(() -> behavior.opened(this));
 		drawPictures();
 		sendOpening();
@@ -202,15 +210,59 @@ public final class PanelMenu extends AbstractContainerMenu implements PanelView 
 				this.guard.accept(() -> this.behavior.clicked(this, tab, 0, rightClick, shift));
 			}
 			case "list" -> {
-				List<PanelRow> list = this.rows.getOrDefault(widget.id(), List.of());
-				if (offset < list.size() && list.get(offset).enabled()) {
-					this.guard.accept(() -> this.behavior.clicked(this, widget.id(), offset, rightClick, shift));
+				if (isPageButton(widget, offset)) {
+					this.listPages.put(widget.id(), pageOf(widget) + (offset == rowsAPage(widget) ? -1 : 1));
+				} else {
+					pressRow(widget, firstRowShown(widget) + offset, rightClick, shift);
+				}
+			}
+			case "filter" -> {
+				if (isEnabled(widget)) {
+					// One of whatever they're holding, or nothing with an empty hand, and either way they keep it.
+					ItemStack chosen = getCarried().copyWithCount(getCarried().isEmpty() ? 0 : 1);
+					setFilter(widget.id(), chosen);
+					this.guard.accept(() -> this.behavior.filtered(this, widget.id(), chosen));
 				}
 			}
 			default -> {}
 		}
 		drawPictures();
 		flush();
+	}
+
+	private void pressRow(PanelDefinition.Widget widget, int row, boolean rightClick, boolean shift) {
+		List<PanelRow> list = this.rows.getOrDefault(widget.id(), List.of());
+		if (row >= 0 && row < list.size() && list.get(row).enabled()) {
+			this.guard.accept(() -> this.behavior.clicked(this, widget.id(), row, rightClick, shift));
+		}
+	}
+
+	/** Only for a list too long to have a place in the chest for each row, and only what could have been clicked anyway. */
+	void rowClickedByClient(String id, int row, boolean rightClick, boolean shift) {
+		PanelDefinition.Widget widget = this.definition.byId().get(id);
+		if (widget == null || !widget.paged() || !isShown(widget) || !stillValid(this.player)) {
+			return;
+		}
+		pressRow(widget, row, rightClick, shift);
+		drawPictures();
+		flush();
+	}
+
+	private static int rowsAPage(PanelDefinition.Widget widget) {
+		return widget.paged() ? widget.size() - PAGE_BUTTONS : widget.size();
+	}
+
+	private static boolean isPageButton(PanelDefinition.Widget widget, int offset) {
+		return widget.paged() && offset >= rowsAPage(widget);
+	}
+
+	private int pageOf(PanelDefinition.Widget widget) {
+		int last = Math.max(0, (this.rows.getOrDefault(widget.id(), List.of()).size() - 1) / rowsAPage(widget));
+		return Math.clamp(this.listPages.getOrDefault(widget.id(), 0), 0, last);
+	}
+
+	private int firstRowShown(PanelDefinition.Widget widget) {
+		return pageOf(widget) * rowsAPage(widget);
 	}
 
 	/** What came from a client is only an id and some text, and it's only used if this panel has that field, and it can be typed in right now. */
@@ -302,27 +354,32 @@ public final class PanelMenu extends AbstractContainerMenu implements PanelView 
 	}
 
 	private void sendOpening() {
-		if (!PanelNetwork.canDraw(this.player)) {
+		if (!PanelNetwork.canDraw(this.player, this.definition)) {
 			clearPending();
 			return;
 		}
 		JsonObject icons = new JsonObject();
 		for (PanelDefinition.Widget widget : this.definition.widgets()) {
-			if (!widget.icon().isEmpty() && !icons.has(widget.icon())) {
-				icons.addProperty(widget.icon(), this.pendingStacks.size());
-				this.pendingStacks.add(stackOf(widget.icon()));
-			}
+			addIcon(icons, widget.icon());
+			widget.tabs().forEach(tab -> addIcon(icons, tab.icon()));
 		}
 		this.pending.add("icons", icons);
 		PanelNetwork.send(this.player, new PanelNetwork.Shown(this.containerId, this.definition.text(), this.pending.toString(), this.pendingStacks));
 		clearPending();
 	}
 
+	private void addIcon(JsonObject icons, String item) {
+		if (!item.isEmpty() && !icons.has(item)) {
+			icons.addProperty(item, this.pendingStacks.size());
+			this.pendingStacks.add(stackOf(item));
+		}
+	}
+
 	private void flush() {
 		if (this.pending.isEmpty()) {
 			return;
 		}
-		if (PanelNetwork.canDraw(this.player)) {
+		if (PanelNetwork.canDraw(this.player, this.definition)) {
 			PanelNetwork.send(this.player, new PanelNetwork.Shown(this.containerId, "", this.pending.toString(), this.pendingStacks));
 		}
 		clearPending();
@@ -374,15 +431,29 @@ public final class PanelMenu extends AbstractContainerMenu implements PanelView 
 		return switch (widget.type()) {
 			case "tabs" -> {
 				PanelDefinition.Tab tab = widget.tabs().get(offset);
-				yield named(new ItemStack(tab.id().equals(this.page) ? Items.EMERALD : Items.PAPER), tab.text(), "");
+				if (tab.icon().isEmpty()) {
+					yield named(new ItemStack(tab.id().equals(this.page) ? Items.EMERALD : Items.PAPER), tab.text(), "");
+				}
+				ItemStack shown = named(stackOf(tab.icon()), tab.text(), "");
+				if (tab.id().equals(this.page)) {
+					shown.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true);
+				}
+				yield shown;
 			}
 			case "list" -> {
 				List<PanelRow> list = this.rows.getOrDefault(widget.id(), List.of());
-				if (offset >= list.size()) {
+				if (isPageButton(widget, offset)) {
+					yield pageButton(widget, offset == rowsAPage(widget));
+				}
+				int index = firstRowShown(widget) + offset;
+				if (index >= list.size()) {
 					yield ItemStack.EMPTY;
 				}
-				PanelRow row = list.get(offset);
-				yield named(row.icon().isEmpty() ? new ItemStack(Items.PAPER) : row.icon().copyWithCount(1), row.enabled() ? row.text() : notAvailable(row.text()), row.tooltip());
+				yield rowPicture(list.get(index));
+			}
+			case "filter" -> {
+				ItemStack chosen = this.items.getOrDefault(widget.id(), ItemStack.EMPTY);
+				yield named(chosen.isEmpty() ? new ItemStack(Items.ITEM_FRAME) : chosen.copyWithCount(1), text, chosen.isEmpty() ? Words.shown(this.player, "conduit.panel.filter_empty", "Click with an item to choose it.") : tooltip);
 			}
 			case "bar" -> named(new ItemStack(Items.CLOCK), text + " " + Math.round(this.values.getOrDefault(widget.id(), widget.value()) * PERCENT) + "%", tooltip);
 			case "text_field" -> named(new ItemStack(Items.NAME_TAG), text, Words.shown(this.player, "conduit.panel.needs_companion", "Typing here needs the companion mod."));
@@ -392,6 +463,32 @@ public final class PanelMenu extends AbstractContainerMenu implements PanelView 
 				yield named(base, isEnabled(widget) ? text : notAvailable(text), tooltip);
 			}
 		};
+	}
+
+	private ItemStack rowPicture(PanelRow row) {
+		ItemStack stack = row.icon().isEmpty() ? new ItemStack(Items.PAPER) : row.icon().copyWithCount(1);
+		named(stack, row.enabled() ? row.text() : notAvailable(row.text()), "");
+		// What the companion draws beside the row has to go somewhere in a plain chest, and this is where a tooltip goes.
+		List<Component> lines = new ArrayList<>();
+		if (!row.detail().isEmpty()) {
+			lines.add(Component.literal(row.detail()));
+		}
+		for (ItemStack extra : row.icons()) {
+			lines.add(Component.literal(extra.getCount() + " ").append(extra.getHoverName()));
+		}
+		if (!row.tooltip().isEmpty()) {
+			lines.add(Component.literal(row.tooltip()));
+		}
+		if (!lines.isEmpty()) {
+			stack.set(DataComponents.LORE, new ItemLore(lines));
+		}
+		return stack;
+	}
+
+	private ItemStack pageButton(PanelDefinition.Widget widget, boolean back) {
+		int pages = (this.rows.getOrDefault(widget.id(), List.of()).size() - 1) / rowsAPage(widget) + 1;
+		String name = back ? Words.shown(this.player, "conduit.panel.page_back", "Previous page") : Words.shown(this.player, "conduit.panel.page_on", "Next page");
+		return named(new ItemStack(back ? Items.ARROW : Items.SPECTRAL_ARROW), name, (pageOf(widget) + 1) + " / " + Math.max(1, pages));
 	}
 
 	private String notAvailable(String text) {
@@ -475,7 +572,7 @@ public final class PanelMenu extends AbstractContainerMenu implements PanelView 
 	@Override
 	public void setRows(String id, List<PanelRow> rows) {
 		PanelDefinition.Widget widget = widget(id);
-		List<PanelRow> kept = List.copyOf(rows.subList(0, Math.min(rows.size(), widget.size())));
+		List<PanelRow> kept = List.copyOf(rows.subList(0, Math.min(rows.size(), widget.mostRows())));
 		List<PanelRow> before = this.rows.put(id, kept);
 		if (before != null && sameRows(before, kept)) {
 			return;
@@ -486,9 +583,20 @@ public final class PanelMenu extends AbstractContainerMenu implements PanelView 
 			raw.addProperty("text", row.text());
 			raw.addProperty("enabled", row.enabled());
 			raw.addProperty("tooltip", row.tooltip());
+			if (!row.detail().isEmpty()) {
+				raw.addProperty("detail", row.detail());
+			}
 			if (!row.icon().isEmpty()) {
 				raw.addProperty("icon", this.pendingStacks.size());
 				this.pendingStacks.add(row.icon().copy());
+			}
+			if (!row.icons().isEmpty()) {
+				JsonArray more = new JsonArray();
+				for (ItemStack extra : row.icons()) {
+					more.add(this.pendingStacks.size());
+					this.pendingStacks.add(extra.copy());
+				}
+				raw.add("icons", more);
 			}
 			list.add(raw);
 		}
@@ -505,11 +613,23 @@ public final class PanelMenu extends AbstractContainerMenu implements PanelView 
 		for (int index = 0; index < first.size(); index++) {
 			PanelRow a = first.get(index);
 			PanelRow b = second.get(index);
-			if (!a.text().equals(b.text()) || a.enabled() != b.enabled() || !a.tooltip().equals(b.tooltip()) || !ItemStack.matches(a.icon(), b.icon())) {
+			if (!a.text().equals(b.text()) || a.enabled() != b.enabled() || !a.tooltip().equals(b.tooltip()) || !a.detail().equals(b.detail())
+					|| !ItemStack.matches(a.icon(), b.icon()) || !ItemStack.listMatches(a.icons(), b.icons())) {
 				return false;
 			}
 		}
 		return true;
+	}
+
+	@Override
+	public void setFilter(String id, ItemStack stack) {
+		setItem(id, stack);
+	}
+
+	@Override
+	public ItemStack filter(String id) {
+		widget(id);
+		return this.items.getOrDefault(id, ItemStack.EMPTY).copy();
 	}
 
 	@Override

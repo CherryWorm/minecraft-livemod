@@ -126,7 +126,8 @@ def gui(client):
 def play_panel(client, results, shots, kiln):
     x, y, z = SPOT
     # Nothing can be placed until the chunks there are loaded.
-    rcon("gamemode", "survival", PLAYER)
+    # Creative for now, because there is nothing under them yet, and a long enough fall would kill them.
+    rcon("gamemode", "creative", PLAYER)
     rcon("tp", PLAYER, x, y + 5, z, 0, 0)
     time.sleep(3)
     for command in (("difficulty", "peaceful"), ("time", "set", "noon"),
@@ -135,6 +136,7 @@ def play_panel(client, results, shots, kiln):
         rcon(*command)
     rcon("setblock", x, y, z + 2, kiln)
     rcon("tp", PLAYER, x, y, z, 0, 0)
+    rcon("gamemode", "survival", PLAYER)
     rcon("clear", PLAYER)
     rcon("item", "replace", "entity", PLAYER, "hotbar.0", "with", "minecraft:iron_ingot", 3)
     time.sleep(1)

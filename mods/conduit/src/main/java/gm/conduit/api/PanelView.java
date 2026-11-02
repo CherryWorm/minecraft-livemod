@@ -34,6 +34,12 @@ public interface PanelView {
 	/** Changes the rows of a list. It can't have more than the max_rows it says in feature.json, and any more are left off. */
 	void setRows(String id, List<PanelRow> rows);
 
+	/** Changes what a filter slot is set to, with an empty stack for nothing. It's only a picture, so nothing is taken from anyone. */
+	void setFilter(String id, ItemStack stack);
+
+	/** What a filter slot is set to, or an empty stack for nothing. */
+	ItemStack filter(String id);
+
 	/** Changes what a text field holds. */
 	void setTyped(String id, String value);
 

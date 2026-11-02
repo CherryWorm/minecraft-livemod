@@ -38,7 +38,7 @@ public final class WorldEffects {
 	private static final int MOST_TEXT = 512;
 	private static final int FLAG_GLOWING = 1;
 	private static final int FLAG_THROUGH_WALLS = 2;
-	private static final int[] PLACES_USED = {6, 9, 6, 3, 3};
+	private static final int[] PLACES_USED = {6, 9, 6, 3, 3, 6};
 	private static final int CHECK_EVERY_TICKS = 20;
 	private static final float TICKS_A_SECOND = 20;
 	// Starting values. The companion has its own limit on what it will draw, and this keeps a module with a mistake in it from flooding anyone's connection.
@@ -154,6 +154,7 @@ public final class WorldEffects {
 		final double range;
 		final int started;
 		final Set<UUID> told = new HashSet<>();
+		final boolean bursts;
 
 		Active(Show show, ResourceKey<Level> dimension, UUID only, double[] place, double range, int started) {
 			this.show = show;
@@ -164,6 +165,7 @@ public final class WorldEffects {
 			this.z = place[2];
 			this.range = range;
 			this.started = started;
+			this.bursts = show.parts.stream().anyMatch(part -> part.kind == WorldEffect.BURST);
 		}
 
 		boolean reaches(ServerPlayer player) {
@@ -176,7 +178,19 @@ public final class WorldEffects {
 		}
 	}
 
+	/** Never sent. A companion listening for it can read a burst, and one that isn't would be thrown off the server by a kind of part it has never heard of. */
+	private record BurstsUnderstood() implements CustomPacketPayload {
+		static final Type<BurstsUnderstood> TYPE = new Type<>(Identifier.fromNamespaceAndPath("gm", "world_burst"));
+		static final StreamCodec<FriendlyByteBuf, BurstsUnderstood> CODEC = StreamCodec.unit(new BurstsUnderstood());
+
+		@Override
+		public Type<BurstsUnderstood> type() {
+			return TYPE;
+		}
+	}
+
 	public static void register() {
+		PayloadTypeRegistry.clientboundPlay().register(BurstsUnderstood.TYPE, BurstsUnderstood.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(Show.TYPE, Show.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(TakeAway.TYPE, TakeAway.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(Shake.TYPE, Shake.CODEC);
@@ -215,6 +229,7 @@ public final class WorldEffects {
 
 	private static void tell(ServerPlayer player, Active active, int tick) {
 		if (active.reaches(player) && !active.told.contains(player.getUUID()) && ServerPlayNetworking.canSend(player, Show.TYPE)
+				&& (!active.bursts || ServerPlayNetworking.canSend(player, BurstsUnderstood.TYPE))
 				&& SHOWN_THIS_TICK.merge(player.getUUID(), 1, Integer::sum) <= MOST_SHOWN_A_TICK) {
 			active.told.add(player.getUUID());
 			Show base = active.show;

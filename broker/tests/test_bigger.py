@@ -15,7 +15,7 @@ from PIL import Image
 from broker import bundles
 from broker.gates import GateFailed, balance, shadow, static
 from broker.tests.test_balance import feature, from_iron, shapeless
-from orchestrator import tuning, world_index
+from orchestrator import tuning, wording, world_index
 
 POOL = {"families": {"stone": {"first": 0, "count": 4}, "machine": {"first": 10, "count": 4}, "crop": {"first": 20, "count": 2}, "connected": {"first": 30, "count": 2},
                      "soil": {"first": 40, "count": 4}, "ore": {"first": 50, "count": 2}, "glow_ore": {"first": 60, "count": 2}},
@@ -324,6 +324,27 @@ class ScreenEffects(unittest.TestCase):
     def test_the_name_is_worked_out_as_the_companion_does(self):
         # The same text and the same sum as ModuleHost.effectId, so a change on one side has to be made on the other.
         self.assertEqual(bundles._effect_id("hooks", "hook_warp"), "p" + hashlib.sha256(b"hooks/hook_warp").hexdigest()[:16])
+
+
+class ModuleKeys(unittest.TestCase):
+    def feature(self, source, keys=None):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        root = pathlib.Path(folder.name)
+        (root / "client/src/main/java/gm/feature/f").mkdir(parents=True)
+        (root / "client/src/main/java/gm/feature/f/Client.java").write_text(source, encoding="utf-8")
+        return {"f": {"manifest": {"keys": keys} if keys is not None else {}, "dir": root}}
+
+    def test_a_key_has_to_have_a_name_for_the_controls_menu(self):
+        refused(static.check_keys, "Client.java", "open_map", features=self.feature('context.key("open_map", 16);'))
+        static.check_keys(self.feature('context.key("open_map", 16);', {"open_map": "Open Map"}))
+
+    def test_keys_have_to_be_names_and_what_they_do(self):
+        refused(static.check_keys, "Open Map", features=self.feature("", {"open_map": ""}))
+        refused(static.check_keys, "Open Map", features=self.feature("", ["open_map"]))
+
+    def test_it_comes_out_named_as_the_companion_looks_for_it(self):
+        self.assertEqual(wording.text_id("f", "open_map"), "t" + hashlib.sha256(b"f/open_map").hexdigest()[:16])
 
 
 class ClientValues(unittest.TestCase):

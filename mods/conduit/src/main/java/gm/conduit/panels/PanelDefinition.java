@@ -26,8 +26,9 @@ import java.util.stream.Stream;
  *
  * @param text what the client is sent
  * @param chestRows how many rows the real chest underneath has
+ * @param needsNewerCompanion whether it has something an older companion would draw wrongly, so that one gets the plain chest instead
  */
-public record PanelDefinition(String name, String text, String title, int chestRows, List<Widget> widgets, Map<String, Widget> byId, Map<Integer, Widget> byChestSlot) {
+public record PanelDefinition(String name, String text, String title, int chestRows, List<Widget> widgets, Map<String, Widget> byId, Map<Integer, Widget> byChestSlot, boolean needsNewerCompanion) {
 	private static final Logger LOGGER = LoggerFactory.getLogger("Conduit");
 	private static final Path FOLDER = Path.of("config", "conduit");
 	private static final Path FILE = FOLDER.resolve("panels.json");
@@ -43,11 +44,14 @@ public record PanelDefinition(String name, String text, String title, int chestR
 	 * @param containerSlot for an item slot, which slot of the inventory it shows
 	 * @param page the tab it's on, or an empty string for all of them
 	 * @param tabs for a row of tabs, their ids and what they say, in order
+	 * @param startsHidden whether it isn't there until a module shows it
+	 * @param mostRows for a list, how many rows it can ever have
+	 * @param paged for a list with too many rows to fit in a chest, which shows them a page at a time there, with its last two places for turning the page
 	 */
 	public record Widget(String type, String id, int chestSlot, int size, int containerSlot, String page, String text, String tooltip,
-			String icon, int maxLength, float value, boolean enabled, List<Tab> tabs) {}
+			String icon, int maxLength, float value, boolean enabled, List<Tab> tabs, boolean startsHidden, int mostRows, boolean paged) {}
 
-	public record Tab(String id, String text) {}
+	public record Tab(String id, String text, String icon) {}
 
 	public static void register() {
 		ServerLifecycleEvents.SERVER_STARTED.register(server -> reload());
@@ -98,15 +102,18 @@ public record PanelDefinition(String name, String text, String title, int chestR
 		List<Widget> widgets = new ArrayList<>();
 		Map<String, Widget> byId = new HashMap<>();
 		Map<Integer, Widget> byChestSlot = new HashMap<>();
+		boolean needsNewer = false;
 		for (JsonElement element : json.getAsJsonArray("widgets")) {
 			JsonObject raw = element.getAsJsonObject();
 			List<Tab> tabs = new ArrayList<>();
 			if (raw.has("tabs")) {
-				raw.getAsJsonArray("tabs").forEach(tab -> tabs.add(new Tab(tab.getAsJsonObject().get("id").getAsString(), tab.getAsJsonObject().get("text").getAsString())));
+				raw.getAsJsonArray("tabs").forEach(tab -> tabs.add(new Tab(string(tab.getAsJsonObject(), "id"), string(tab.getAsJsonObject(), "text"), string(tab.getAsJsonObject(), "icon"))));
 			}
 			Widget widget = new Widget(raw.get("type").getAsString(), string(raw, "id"), number(raw, "chest_slot", -1), number(raw, "chest_size", 0), number(raw, "slot", 0), string(raw, "page"),
 					string(raw, "text"), string(raw, "tooltip"), string(raw, "icon"), number(raw, "max_length", 0), raw.has("value") ? raw.get("value").getAsFloat() : 0,
-					!raw.has("enabled") || raw.get("enabled").getAsBoolean(), tabs);
+					!raw.has("enabled") || raw.get("enabled").getAsBoolean(), tabs, raw.has("visible") && !raw.get("visible").getAsBoolean(),
+					number(raw, "max_rows", number(raw, "chest_size", 0)), raw.has("paged") && raw.get("paged").getAsBoolean());
+			needsNewer |= widget.type().equals("filter") || widget.paged() || tabs.stream().anyMatch(tab -> !tab.icon().isEmpty());
 			widgets.add(widget);
 			if (!widget.id().isEmpty()) {
 				byId.put(widget.id(), widget);
@@ -115,7 +122,7 @@ public record PanelDefinition(String name, String text, String title, int chestR
 				byChestSlot.put(widget.chestSlot() + offset, widget);
 			}
 		}
-		return new PanelDefinition(name, json.toString(), string(json, "title"), json.get("chest_rows").getAsInt(), widgets, byId, byChestSlot);
+		return new PanelDefinition(name, json.toString(), string(json, "title"), json.get("chest_rows").getAsInt(), widgets, byId, byChestSlot, needsNewer);
 	}
 
 	private static String string(JsonObject json, String field) {

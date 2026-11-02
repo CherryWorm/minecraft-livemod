@@ -31,6 +31,12 @@ public interface ModuleContext {
 	 */
 	void onKeyPressed(Consumer<KeyInput> hook);
 
+	/**
+	 * A key this feature names in "keys" in feature.json, which the player can change in the game's controls menu like any other, starting as this one.
+	 * Use this for anything a player presses in the world. The game still gets the key as well, so pick one it isn't using, and the menu shows them in red if they clash.
+	 */
+	ModuleKey key(String name, int defaultKey);
+
 	/** Whether a key is held right now. It's always false while the player could be typing, so it can't be used to read what they type. */
 	boolean keyDown(int key);
 
@@ -58,6 +64,12 @@ public interface ModuleContext {
 
 	/** A new picture for this module to paint and draw, up to 512 across, and up to 4 of them. */
 	ModuleImage newImage(int width, int height);
+
+	/**
+	 * Particles of your own for this player only: this many specks, up to 512, flying out from a point at up to this many blocks a second, this big in blocks and facing
+	 * the camera, falling at this many blocks a second every second, and fading away over the second half of this many seconds. It goes by itself.
+	 */
+	void showBurst(WorldLook look, double x, double y, double z, int count, float speed, float size, float gravity, float seconds);
 
 	/**
 	 * Draws in the world, once for every frame. Keep it quick, because a module that slows the game down is switched off, and don't

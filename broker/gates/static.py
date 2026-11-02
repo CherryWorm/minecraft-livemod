@@ -114,8 +114,9 @@ PLAYER_INVENTORY_WIDTH = 162
 PLAYER_INVENTORY_HEIGHT = 76
 MOST_PANEL_IMAGE = 1024
 # Each kind of widget, and how big it is if it doesn't say.
-PANEL_WIDGETS = {"slot": 18, "label": 0, "icon": 16, "image": 16, "bar": 16, "button": 20, "tabs": 20, "list": 60, "mob": 40, "text_field": 16}
-PANEL_NEEDS_ID = {"button", "list", "text_field", "bar"}
+PANEL_WIDGETS = {"slot": 18, "filter": 18, "label": 0, "icon": 16, "image": 16, "bar": 16, "button": 20, "tabs": 20, "list": 60, "mob": 40, "text_field": 16}
+PANEL_NEEDS_ID = {"button", "list", "text_field", "bar", "filter"}
+MOST_LIST_ROWS = 1000
 PANEL_BAR_DIRECTIONS = {"right", "left", "up", "down"}
 MIN_COMPASS_FRAMES = 2
 MAX_COMPASS_FRAMES = 64
@@ -127,6 +128,7 @@ MOST_RUIN_ACROSS = 128
 MOST_RUIN_BLOCKS = 40000
 BLOCK_WITH_STATE = re.compile(r"[^\[\]\s]+(\[[a-z0-9_]+=[a-z0-9_]+(,[a-z0-9_]+=[a-z0-9_]+)*\])?")
 CLIENT_VALUE_SENT = re.compile(r"\.sendClientValue\(")
+KEY_USED = re.compile(r"\.key\(\s*\"([a-z0-9_]+)\"")
 # The vanilla blocks whose block entity takes a loot table. An ender chest looks like one, but it's the player's own.
 LOOT_CONTAINERS = re.compile(r"minecraft:(chest|trapped_chest|barrel|dispenser|dropper|hopper|crafter|([a-z]+_)?shulker_box|([a-z]+_)*copper_chest)")
 # Words that would give content away if they appeared in a path players can see.
@@ -689,7 +691,7 @@ def _missing_frames(feature, panel):
         problems.append(f"its background shows no frames for the player's inventory at {place[0]}, {place[1]}, so their items would float on nothing. "
                         "Draw them, or start from panel_back in assetkit's textures, or use \"inventory\": false if it doesn't need them.")
     for widget in panel.get("widgets", []):
-        if widget.get("type") == "slot" and all(isinstance(widget.get(axis), int) for axis in "xy") and plain(widget["x"], widget["y"]):
+        if widget.get("type") in ("slot", "filter") and all(isinstance(widget.get(axis), int) for axis in "xy") and plain(widget["x"], widget["y"]):
             problems.append(f"its background shows no frame for the item slot at {widget['x']}, {widget['y']}, so nobody could tell it was there.")
     return problems
 
@@ -756,8 +758,14 @@ def _panel_problems(feature, panel):
             problems.append(f"{label} needs a max_length, from 1 to {MOST_TYPED}.")
         if kind == "tabs" and not widget.get("tabs"):
             problems.append(f"{label} has no tabs in it.")
-        if kind == "list" and not (isinstance(widget.get("max_rows", 1), int) and 0 < widget.get("max_rows", 1) <= 45):
-            problems.append(f"{label} has max_rows {widget.get('max_rows')!r}. It's how many rows it can ever have, up to 45.")
+        if kind == "tabs" and not all(isinstance(tab, dict) and tab.get("id") and (tab.get("text") or tab.get("icon")) for tab in widget.get("tabs") or []):
+            problems.append(f"{label} needs an id for each tab, and some text or an icon to show on it.")
+        if kind == "list" and not (isinstance(widget.get("max_rows", 1), int) and 0 < widget.get("max_rows", 1) <= MOST_LIST_ROWS):
+            problems.append(f"{label} has max_rows {widget.get('max_rows')!r}. It's how many rows it can ever have, up to {MOST_LIST_ROWS}.")
+        if "visible" in widget and not isinstance(widget["visible"], bool):
+            problems.append(f"{label} has visible {widget['visible']!r}. It's true, or false for one that isn't there until a module shows it.")
+        if widget.get("visible") is False and not identifier:
+            problems.append(f"{label} starts hidden and has no id, so nothing could ever show it.")
     if not problems:
         problems += _text_overlaps(panel) + _missing_frames(feature, panel)
     copied = json.loads(json.dumps(panel))
@@ -825,6 +833,18 @@ def check_client_values(features):
             if any(_argument_count(text, found.end()) == 3 for found in CLIENT_VALUE_SENT.finditer(text)):
                 _fail(f"{path.name} sends a client value to {feature_id}'s client module, and it hasn't got one. Add one in client/, or name the feature whose it is, "
                       "with context.sendClientValue(player, \"other_feature\", key, value).")
+
+
+def check_keys(features):
+    """A key a player can change is named in their controls menu, and one with no name there would show a meaningless code."""
+    for feature_id, feature in features.items():
+        keys = feature["manifest"].get("keys", {})
+        if not isinstance(keys, dict) or not all(isinstance(name, str) and isinstance(text, str) and text.strip() for name, text in keys.items()):
+            _fail(f"{feature_id} has keys {keys!r}. It's names and what each is called in the controls menu, like {{\"open_map\": \"Open Map\"}}.")
+        for path in sorted(feature["dir"].glob("client/src/main/java/**/*.java")):
+            for name in KEY_USED.findall(path.read_text(encoding="utf-8", errors="replace")):
+                if name not in keys:
+                    _fail(f"{path.name} asks for the key {name!r}, which isn't in \"keys\" in {feature_id}'s feature.json, so it would have no name in the controls menu.")
 
 
 def check_screen_effects(features):
@@ -1268,6 +1288,7 @@ def run(features, old_ledger, new_ledger, pool, content):
     check_items(features)
     check_texts(features)
     check_client_values(features)
+    check_keys(features)
     check_screen_effects(features)
     check_panels(features)
     check_machines(features)

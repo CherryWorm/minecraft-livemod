@@ -7,11 +7,14 @@ import gm.companion.api.InventoryView;
 import gm.companion.api.KeyInput;
 import gm.companion.api.ModuleContext;
 import gm.companion.api.ModuleImage;
+import gm.companion.api.ModuleKey;
 import gm.companion.api.WorldCanvas;
+import gm.companion.api.WorldLook;
 import gm.companion.api.WorldView;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext;
 import net.minecraft.client.DeltaTracker;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.input.KeyEvent;
@@ -64,6 +67,7 @@ public final class ModuleHost {
 	private final boolean safeMode = Files.exists(RUNNING_MARKER);
 	private final WorldDrawing world = new WorldDrawing();
 	private final WorldView worldView = new ClientWorldView();
+	private final ModuleKeys keys = new ModuleKeys();
 	// The last of each value the server sent, by module, so that a module starting later still hears how things are. They last as long as the connection.
 	private final Map<String, Map<String, String>> serverValues = new HashMap<>();
 	private boolean turnedOff = Files.exists(TURNED_OFF);
@@ -215,6 +219,7 @@ public final class ModuleHost {
 	void tick(Minecraft client) {
 		ContainerView.newTick();
 		dispatch(module -> module.tick(client));
+		this.keys.keepWhatWasChosen();
 	}
 
 	/** Asks each module's hooks in turn. The first to say it's dealt with this is the last to hear of it. */
@@ -327,6 +332,7 @@ public final class ModuleHost {
 		private static final int EFFECT_ID_LENGTH = 16;
 		private static final int MOST_IMAGE_SIZE = 512;
 		private static final int MOST_IMAGES = 4;
+		private static final float MOST_BURST_SECONDS = 10;
 
 		private final String moduleId;
 		private final int generation;
@@ -337,6 +343,7 @@ public final class ModuleHost {
 		private final List<Consumer<WorldCanvas>> worldHooks = new ArrayList<>();
 		private final Map<String, List<Consumer<String>>> valueListeners = new HashMap<>();
 		private final List<PaintedImage> images = new ArrayList<>();
+		private final List<Key> keys = new ArrayList<>();
 		private ClientModule module;
 		private Identifier screenEffect;
 		private int failures;
@@ -433,6 +440,37 @@ public final class ModuleHost {
 		}
 
 		@Override
+		public ModuleKey key(String name, int defaultKey) {
+			Key key = new Key(Companion.host().keys.add("key.gm.t" + hashed(this.moduleId + "/" + name), defaultKey));
+			this.keys.add(key);
+			return key;
+		}
+
+		private static final class Key implements ModuleKey {
+			private final KeyMapping mapping;
+			private final List<Runnable> pressed = new ArrayList<>();
+
+			Key(KeyMapping mapping) {
+				this.mapping = mapping;
+			}
+
+			@Override
+			public void onPressed(Runnable hook) {
+				this.pressed.add(hook);
+			}
+
+			@Override
+			public boolean isDown() {
+				return this.mapping.isDown();
+			}
+		}
+
+		@Override
+		public void showBurst(WorldLook look, double x, double y, double z, int count, float speed, float size, float gravity, float seconds) {
+			Companion.host().world().keepBurst(this.moduleId, look, x, y, z, count, speed, size, gravity, Math.clamp(seconds, 0, MOST_BURST_SECONDS));
+		}
+
+		@Override
 		public void onWorld(Consumer<WorldCanvas> draw) {
 			this.worldHooks.add(draw);
 		}
@@ -489,6 +527,11 @@ public final class ModuleHost {
 			for (Consumer<Minecraft> tick : this.ticks) {
 				guarded(() -> tick.accept(client));
 			}
+			for (Key key : this.keys) {
+				while (key.mapping.consumeClick()) {
+					key.pressed.forEach(hook -> guarded(hook::run));
+				}
+			}
 		}
 
 		boolean handleInventory(Predicate<InventoryHooks> call) {
@@ -531,6 +574,8 @@ public final class ModuleHost {
 			this.valueListeners.clear();
 			this.images.forEach(PaintedImage::close);
 			this.images.clear();
+			this.keys.forEach(key -> Companion.host().keys.remove(key.mapping));
+			this.keys.clear();
 			this.screenEffect = null;
 			this.module = null;
 		}

@@ -5,9 +5,10 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Something drawn at a place in the world for a while, with no client module. Make one with box, sheet, beam, billboard or blocks, add
+ * Something drawn at a place in the world for a while, with no client module. Make one with box, sheet, beam, billboard, burst or blocks, add
  * to it with {@link #and}, say how it looks, and show it with context.showEffect. For example
  * {@code WorldEffect.beam(x, 64, z, x, 200, z, 0.5F).color(0xC0FF8800).glowing().seconds(10).fade(2)}.
  */
@@ -20,8 +21,14 @@ public final class WorldEffect {
 	public static final int BEAM = 2;
 	public static final int BILLBOARD = 3;
 	public static final int BLOCK = 4;
+	public static final int BURST = 5;
+	/** The most specks one burst can have. */
+	public static final int MOST_SPECKS = 512;
 	private static final float DEFAULT_SECONDS = 5;
 	private static final double DEFAULT_RANGE = 64;
+	private static final double DEFAULT_GRAVITY = 6;
+	private static final int GRAVITY_PLACE = 4;
+	private static final int MOST_SEED = 1 << 24;
 
 	private final List<Part> parts = new ArrayList<>();
 	private int color = 0xFFFFFFFF;
@@ -60,6 +67,25 @@ public final class WorldEffect {
 	/** A picture centred on a point that always faces the camera, this big in blocks. */
 	public static WorldEffect billboard(double x, double y, double z, float width, float height) {
 		return new WorldEffect().add(BILLBOARD, new double[] {x, y, z, 0, 0, 0, 0, 0, 0}, width, height, null);
+	}
+
+	/**
+	 * Particles of your own: this many specks flying out from a point at up to this many blocks a second, each this big in blocks and facing the camera,
+	 * then falling. Give it a color or an image, and {@link #seconds} and {@link #fade}, which is how particles of the game's own behave, so a second or two
+	 * is usual. Everyone sees the same burst, each worked out on their own computer, so even a lot of them cost the server nothing.
+	 */
+	public static WorldEffect burst(double x, double y, double z, int count, float speed, float size) {
+		return new WorldEffect().add(BURST, new double[] {x, y, z, speed, DEFAULT_GRAVITY, ThreadLocalRandom.current().nextInt(MOST_SEED), 0, 0, 0}, size, Math.clamp(count, 1, MOST_SPECKS), null);
+	}
+
+	/** How fast a burst's specks fall, in blocks a second every second, which is 6 unless you say. 0 is for something that floats, and below 0 rises. */
+	public WorldEffect gravity(double blocks) {
+		for (Part part : this.parts) {
+			if (part.kind() == BURST) {
+				part.places()[GRAVITY_PLACE] = blocks;
+			}
+		}
+		return this;
 	}
 
 	/** Nothing yet, for see-through copies of blocks to be added with {@link #block}, which is how to show the layout of something to be built. */
